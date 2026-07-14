@@ -295,9 +295,12 @@ its own machine with its own disk. Move data like this:
 
 ---
 
-## 10. Local iteration loop
+## 10. Local iteration loop (authoring preview only — not a way to run the pipeline)
 
-No cluster needed:
+This is a **render preview**, not a run. It lets you check your DAG and see the
+resolved `params.yaml` on a laptop before you push. **Pipelines only ever run in
+the cluster, submitted from Argo Workflows** (§12) — there is no local execution
+and no local submit. No cluster needed for the preview:
 
 ```bash
 ./run.sh                                  # or the commands below
@@ -306,7 +309,7 @@ python -m kubecore.compose --output out/params.yaml         # composed defaults
 python -m kubecore.compose train.epochs=5 train/optimizer=adamw   # try overrides
 ```
 
-`out/params.yaml` is exactly what your steps will receive. Errors you
+`out/params.yaml` is exactly what your steps will receive at run time. Errors you
 can hit, verbatim:
 
 **A step reads a section that doesn't exist** (typo, or you renamed a
@@ -396,7 +399,7 @@ local fallback file, so `python steps/model_training/entry.py --params
 
 ---
 
-## 12. Running the pipeline
+## 12. Running the pipeline (from Argo Workflows only)
 
 Open the workflow template in the Argo UI, press **Submit**:
 
@@ -429,7 +432,44 @@ training run.
 
 ---
 
-## 13. Pitfalls FAQ
+## 13. What CI does for you (PR checks + per-step builds)
+
+You never run the render or the image builds by hand — the repo's GitHub
+Actions do it, and report back on the commit.
+
+**On a PR to `main`** (`.github/workflows/pr-render.yml`):
+
+- The platform renders your pipeline exactly the way it will in the cluster
+  (`pipeline.py` → enhance → the release-hygiene gate) — structure only, no
+  cluster needed.
+- A **`wft-render` status check** gates the PR: green = your DAG builds, every
+  `reads=` section exists, every step is declared, no duplicate params.
+- A **PR comment** summarizes the render (steps, form-parameter count) and links
+  the **Argo Workflows UI** where the pipeline runs once merged. If the render
+  fails, the comment shows the exact error and what usually causes it — so you
+  fix it before merge, never after.
+
+**On merge to `main`** (`.github/workflows/build-images.yml`):
+
+- Every `steps/*/` with a `Dockerfile` is built, and each gets its own
+  **`build/<step>` status check** — so you see per step which images are
+  healthy. The matrix is discovered from the folders, so a step you add gets
+  its build + check automatically, with no workflow edits.
+- This is the GitHub-side validation build. The authoritative image (kaniko →
+  the in-cluster Zot registry, wired into the WorkflowTemplate as
+  `image-<step>`) is built by the platform's in-cluster CI after merge.
+
+So the whole loop for adding a step (§5) is: add `steps/<name>/` + a config
+section + one `pipeline.py` line → **commit** → the PR check renders your WFT
+and comments the result → merge → your step image builds (its own check) → the
+WorkflowTemplate is ready to run in the Argo UI.
+
+> To make the PR comment link your cluster's Argo UI, set the repo variable
+> `ARGO_UI_URL` (Settings → Secrets and variables → Actions → Variables).
+
+---
+
+## 14. Pitfalls FAQ
 
 **"My new parameter didn't show up on the form."**
 Is it inside a *list* or other complex structure? Only scalar leaves
