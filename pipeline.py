@@ -27,6 +27,7 @@ with pipeline("ml-pipeline") as p:
     hello    = step("hello-world", reads=["experiment"], needs=[validate])
     load = step("dataset-loading", reads=["data"], needs=[validate],
                 outputs=["data-yaml", "manifest-summary"])
+    summary = step("data-summary", reads=["data", "summary"], needs=[load])
     train = step("model-training", gpu=True, needs=[load],
                  reads=["experiment", "data", "model", "train", "image_processing", "logging"],
                  outputs=["training-result"])

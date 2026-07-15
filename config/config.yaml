@@ -2,6 +2,7 @@
 # Group choices here are the DEFAULTS; each group renders as one
 # dropdown on the submit form (options = the files in the group dir).
 defaults:
+  - summary
   - _self_
   # platform-registered schemas (types + enums) — the yaml sections
   # below merge onto these and are validated at compose time
