@@ -100,17 +100,24 @@ jobs:
             // 2) PR comment (create or update the single marker comment)
             const marker = '<!-- hera-wft-render -->';
             const argo = process.env.ARGO_UI_URL || '';
+            // The app's WorkflowTemplate name is "{app}-pipeline". Derive {app}
+            // from the repo name ("{project}-{app}" for seeded repos, e.g.
+            // "yolo-hera-yolo" -> app "hera-yolo"); fall back to the repo name.
+            const repoName = context.repo.repo;
+            const app = repoName.includes('-') ? repoName.split('-').slice(1).join('-') : repoName;
+            const wftName = `${app}-pipeline`;
+            // Link to the app's WorkflowTemplate in the Argo UI when the URL is set.
+            const argoLink = argo
+              ? `[Argo Workflows UI](${argo.replace(/\/+$/, '')}/workflow-templates?template=${wftName}) → \`${wftName}\``
+              : `the Argo Workflows UI → \`${wftName}\` _(set the \`ARGO_UI_URL\` repo variable to link it here)_`;
             let body;
             if (ok) {
               const steps = '${{ steps.summary.outputs.stepnames }}'.split(',').filter(Boolean);
               const dag = steps.map(s => '`' + s + '`').join(' → ');
-              const argoLine = argo
-                ? `\n**Runs here after merge:** [Argo Workflows UI](${argo}) → \`{app}-pipeline\``
-                : `\n_Set the \`ARGO_UI_URL\` repo variable to link the Argo UI here._`;
               body = `${marker}\n### ✅ WorkflowTemplate render OK\n` +
                      `**Steps (${'${{ steps.summary.outputs.steps }}'}):** ${dag}\n` +
                      `**Form parameters:** ${'${{ steps.summary.outputs.params }}'}\n` +
-                     argoLine +
+                     `\n**Runs here after merge:** ${argoLink}` +
                      `\n\n_Structural render only — the pipeline runs in Argo Workflows after merge + image build._`;
             } else {
               const err = (read('render.err') || read('render.out') || 'no output captured').slice(-3000);
@@ -118,7 +125,8 @@ jobs:
                      `The platform could not render your pipeline. Fix this before merge:\n\n` +
                      '```\n' + err + '\n```\n' +
                      `\n_Common causes: a \`reads=\` section that no longer exists, a bad group default, ` +
-                     `a duplicate parameter, or a step folder without a Dockerfile. See DEVELOPER.md §10._`;
+                     `a duplicate parameter, or a step folder without a Dockerfile. See DEVELOPER.md §10._` +
+                     `\n\n_Once fixed, this pipeline runs at:_ ${argoLink}`;
             }
 
             const {data: comments} = await github.rest.issues.listComments({
