@@ -47,8 +47,38 @@ class ComposeError(Exception):
     pass
 
 
+def _quote_override_value(token: str) -> str:
+    """Quote a scalar override's value so Hydra's override grammar accepts it.
+
+    Form values reach us as `key=value` tokens. Hydra's override parser rejects
+    a bare value containing a space or various special characters (a
+    `LexerNoViableAltException`) — so a perfectly ordinary config string like
+    `label=📊 Data summary` or `name=my run` would fail compose. Wrap the value
+    in double quotes (escaping any it contains) unless it is already quoted or
+    is a simple bare token Hydra parses fine. Group tokens (key contains '/')
+    and the key itself are left untouched.
+    """
+    key, sep, value = token.partition("=")
+    if not sep or "/" in key:
+        return token  # not a scalar leaf assignment (or a group swap)
+    if value == "" or (value[0] in "\"'" and value[-1] == value[0]):
+        return token  # empty, or already quoted
+    # Bare tokens Hydra accepts as-is: alphanumerics, dot, underscore, hyphen,
+    # plus/at/colon/slash for paths — anything else (space, emoji, punctuation)
+    # needs quoting.
+    import re
+    if re.fullmatch(r"[A-Za-z0-9._+@:/\-]*", value):
+        return token
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'{key}="{escaped}"'
+
+
 def order_overrides(overrides: list, render_defaults: dict) -> list:
-    """Groups first; untouched scalar leaves elided (see module docstring)."""
+    """Groups first; untouched scalar leaves elided (see module docstring).
+
+    Scalar override values are quoted so Hydra accepts strings with spaces /
+    special characters (a config value like `📊 Data summary` would otherwise
+    fail the override lexer)."""
     groups, changed = [], []
     for token in overrides:
         key, _, value = token.partition("=")
@@ -57,7 +87,7 @@ def order_overrides(overrides: list, render_defaults: dict) -> list:
         elif render_defaults and key in render_defaults and value == render_defaults[key]:
             continue  # untouched -> follows the selected group
         else:
-            changed.append(token)
+            changed.append(_quote_override_value(token))
     return groups + changed
 
 
