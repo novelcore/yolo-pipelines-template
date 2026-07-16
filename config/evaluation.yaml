@@ -1,3 +1,4 @@
+# Evaluation settings for the hydra-demo step (reads=['evaluation']).
 evaluation:
   split: "val"
   iou_threshold: 0.5
