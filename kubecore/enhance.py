@@ -318,6 +318,21 @@ def enhance_env(step: dict, ctx: dict, annots: dict) -> None:
         add({"name": "CHECKPOINT_PREFIX", "value": str(checkpoints.get("prefix", ""))})
 
 
+# How long a step may sit Pending before the platform calls it unschedulable.
+# A step whose node cannot be created (cloud capacity stockout, exhausted quota,
+# a class whose pool is at max) otherwise waits FOREVER with no signal: Argo does
+# not time out a Pending pod, and the developer sees a run that is neither
+# succeeding nor failing. Alexandra's run sat Pending 17 HOURS this way
+# (2026-07-15), and a GPU stockout reproduced it exactly (2026-07-16: 105
+# FailedScaleUp over 2d5h, still Pending).
+#
+# GPU steps get longer: accelerator pools legitimately take minutes to scale from
+# zero, and a transient stockout often clears. The point is not to fail fast —
+# it is to fail *visibly* instead of hanging silently until someone notices.
+PENDING_DEADLINE_SECONDS = 1800  # CPU steps: 30 min
+GPU_PENDING_DEADLINE_SECONDS = 5400  # GPU steps: 90 min (scale-from-zero + retries)
+
+
 def enhance_scheduling(step: dict, ctx: dict, annots: dict) -> None:
     compute_class = resolve_compute_class(step, ctx, annots)
     gpu = is_gpu_step(step)
@@ -329,6 +344,13 @@ def enhance_scheduling(step: dict, ctx: dict, annots: dict) -> None:
         selector_value = f"{{{{workflow.parameters.{step['name']}-class}}}}"
     step.setdefault("nodeSelector", {}).setdefault(
         "platform.kubecore.io/nodegroup-type", selector_value
+    )
+
+    # Bound how long this step may sit unschedulable (see the constants above).
+    # fill-absent: a developer who set their own deadline keeps it.
+    step.setdefault(
+        "activeDeadlineSeconds",
+        GPU_PENDING_DEADLINE_SECONDS if gpu else PENDING_DEADLINE_SECONDS,
     )
 
     tolerations = step.setdefault("tolerations", [])
