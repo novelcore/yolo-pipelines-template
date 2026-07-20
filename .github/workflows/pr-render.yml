@@ -1,6 +1,6 @@
-# PR → main: render the WorkflowTemplate and report back.
+# PR → dev: render the WorkflowTemplate and report back.
 #
-# On every PR to main this renders your pipeline exactly the way the platform
+# On every PR to dev this renders your pipeline exactly the way the platform
 # does (pipeline.py -> enhance -> release-hygiene gate), using a placeholder
 # platform context (the real endpoints/secrets are injected in-cluster, never
 # in a repo — so a PR check needs no cluster). It then:
@@ -16,11 +16,12 @@ name: PR — render WorkflowTemplate
 
 on:
   pull_request:
-    # Fire on PRs into whichever branch your app develops on. The template repo
-    # uses `main`; a seeded ML app's CI branch is typically `dev` — so a PR into
-    # either gets the WFT render-validation check. (Argo CI renders on the push
-    # after merge; this is the pre-merge safety net.)
-    branches: [main, dev]
+    # dev is THE branch an ML app develops on: the platform seeds `main` with the
+    # template content and immediately defaults the repo to `dev`, and the
+    # in-cluster CI only listens for pushes to dev (the WorkflowEventBinding
+    # selector is refs/heads/{devBranch}). Firing on `main` too would gate PRs
+    # that the platform will never build — a check that can only mislead.
+    branches: [dev]
 
 permissions:
   contents: read
