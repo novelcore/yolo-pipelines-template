@@ -72,3 +72,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# ci: rebuild to publish the real step image (supersede the stub). Port PRs #12/#13.
