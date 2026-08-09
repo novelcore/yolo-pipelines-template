@@ -82,3 +82,4 @@ complete copy-paste walkthrough for newcomers (every command, every gotcha).
 See **[DEVELOPER.md](DEVELOPER.md)** for the complete operating manual, and
 **[MECHANISMS.md](MECHANISMS.md)** for how the platform works internally
 (add/remove steps, enhancement, runtime config flow, multi-tenant safety).
+re-render: pick up MLflow auth injection + override-lexing fix (kubecore-operator#867 #868)
