@@ -1,15 +1,19 @@
-# model-registration step image.
-# The platform builds this on push (kaniko -> Zot) and wires the resulting
-# image into the WorkflowTemplate as image-model-registration. The in-image command is
-# `python -m app.entry` — the same module you run locally.
-FROM python:3.11-slim
+# model-registration step image — REAL registration (kubeline registrar vendored
+# into app/). Deps via POETRY from the vendored pyproject.toml + poetry.lock, so
+# versions are pinned identical to kubeline. Lighter than model-training (no torch).
+# The platform builds this on push (kaniko -> Zot) and wires it as
+# image-model-registration. In-image command: python -m app.entry --params <params>.
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# Step runtime dependencies. Add what this step needs here.
-RUN pip install --no-cache-dir PyYAML
+RUN pip install --no-cache-dir poetry
+
+COPY pyproject.toml poetry.lock* README.md ./
+RUN poetry config virtualenvs.create false \
+ && poetry install --only=main --no-root --no-interaction --no-ansi
 
 COPY app/ ./app/
 
-# Argo runs: python -m app.entry --params <resolved params.yaml content> ...
+# Argo runs: python -m app.entry --params <params> --training-result <json> ...
 ENTRYPOINT ["python", "-m", "app.entry"]
