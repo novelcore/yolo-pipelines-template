@@ -1,15 +1,40 @@
-# model-training step image.
-# The platform builds this on push (kaniko -> Zot) and wires the resulting
-# image into the WorkflowTemplate as image-model-training. The in-image command
-# is `python -m app.entry` — the same module you run locally.
-FROM python:3.11-slim
+# model-training step image — REAL training (kubeline trainer vendored into app/).
+# Deps are installed via POETRY from the vendored pyproject.toml + poetry.lock, so
+# every dependency version is PINNED IDENTICAL to the kubeline pipeline (parity).
+# The platform builds this on push (kaniko -> Zot) and wires it as
+# image-model-training. In-image command: python -m app.entry --params <params>.
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# Step runtime dependencies. Add torch/ultralytics/etc here for the real step.
-RUN pip install --no-cache-dir PyYAML
+# System libs required by OpenCV / PyTorch / pynvml.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir poetry
+
+# Deps first (cached on the lock) — torch + the full CUDA stack (~3GB) via
+# ultralytics, plus MLflow, boto3/GCS, psutil/pynvml, and the Zitadel MLflow-auth
+# deps. --no-root: install only third-party deps; the step runs `python -m app.entry`
+# directly (app/ is on WORKDIR), so the root package need not be installed.
+COPY pyproject.toml poetry.lock* README.md ./
+RUN poetry config virtualenvs.create false \
+ && poetry install --only=main --no-root --no-interaction --no-ansi
 
 COPY app/ ./app/
+
+# GPU runtime: this slim base has no CUDA libs. GKE mounts the host NVIDIA driver
+# into the container at /usr/local/nvidia/lib64; without it on LD_LIBRARY_PATH,
+# torch cannot find libcuda.so and silently trains on CPU even on a T4 node
+# (kubeline RCA yolo-green3, 2026-06-26). Put the driver libs on the path.
+ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/nvidia/lib:${LD_LIBRARY_PATH}
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV PATH=/usr/local/nvidia/bin:${PATH}
 
 # Argo runs: python -m app.entry --params <resolved params.yaml content> ...
 ENTRYPOINT ["python", "-m", "app.entry"]
