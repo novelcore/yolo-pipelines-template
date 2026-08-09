@@ -1,0 +1,14 @@
+# CON-01: QAT extension stack lockfile — pinned exact versions.
+# Install via: pip install --no-cache-dir -r requirements-qat.txt
+# (Must be installed after requirements-cuda.txt.)
+#
+# DO NOT EDIT without re-running the validation spike suite on Linux.
+# See docs/qat-finetune-version-policy.md for the full procedure.
+torchao==0.17.0
+litert-torch==0.9.1
+ultralytics==8.4.19
+# Observability only (not part of the CON-01 numerical stack): CPU/RAM sampling
+# into MLflow. Installed here to guarantee it lands in the CUDA runtime env — a
+# missing psutil silently disables the (best-effort) sampler. GPU metrics come
+# from nvidia-ml-py, which torch already bundles.
+psutil>=5.9
