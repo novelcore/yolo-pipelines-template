@@ -25,6 +25,12 @@ RUN poetry config virtualenvs.create false \
 
 COPY app/ ./app/
 
+# Root install (fast — deps already present) so the package's entry_points
+# register, incl. the mlflow.request_auth_provider "zitadel" plugin used for
+# MLflow auth (kubecore-operator#868). Without this the zitadel provider is
+# undiscoverable and the (fatal) Ultralytics MLflow callback kills the run.
+RUN poetry install --only=main --no-interaction --no-ansi
+
 # Ultralytics TFLite INT8 export toolchain (PTQ path). Baked at build time so the
 # offline pod does not pip-install at runtime. Versions per the ultralytics 8.4.x
 # check_requirements window + onnx2tf's tested stack. onnx_graphsurgeon is on
