@@ -32,12 +32,6 @@ RUN pip install --no-cache-dir -r requirements-qat.txt
 
 COPY app/ ./app/
 
-# Root install (fast — deps already present) so the package's entry_points
-# register, incl. the mlflow.request_auth_provider "zitadel" plugin used for
-# MLflow auth (kubecore-operator#868). Without this the zitadel provider is
-# undiscoverable and the (fatal) Ultralytics MLflow callback kills the run.
-RUN poetry install --only=main --no-interaction --no-ansi
-
 # Build-time import verification (CPU — no GPU required): imports the actual
 # symbols qat_service.py uses, so a broken import path fails the build fast.
 RUN python -c "\
