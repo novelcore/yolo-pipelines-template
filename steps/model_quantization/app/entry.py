@@ -15,6 +15,7 @@ upload to lakeFS regardless, and the vendored service guards its MLflow calls.
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import yaml
@@ -28,6 +29,32 @@ RUNS_DIR = "/work/runs"
 
 def _load(arg: str) -> dict:
     return json.loads(arg) if arg and arg.strip() not in ("", "{}", "null") else {}
+
+
+
+def _download_prefix(bucket, prefix, dest):
+    """Materialise the dataset locally under {dest}: qat/quant read images + data.yaml
+    from dataset_dir directly (no S3-streaming path), and this cluster has no shared FS.
+    Downloads every object under s3://{bucket}/{prefix} via the lakeFS S3 gateway."""
+    import boto3
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=os.environ.get("LAKEFS_ENDPOINT"),
+        aws_access_key_id=os.environ.get("LAKEFS_ACCESS_KEY"),
+        aws_secret_access_key=os.environ.get("LAKEFS_SECRET_KEY"),
+    )
+    n = 0
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            rel = key[len(prefix):]
+            if not rel or key.endswith("/"):
+                continue
+            local = os.path.join(dest, rel)
+            os.makedirs(os.path.dirname(local) or dest, exist_ok=True)
+            s3.download_file(bucket, key, local)
+            n += 1
+    print(f"[dataset] downloaded {n} objects from s3://{bucket}/{prefix} -> {dest}", flush=True)
 
 
 def main() -> None:
@@ -51,6 +78,13 @@ def main() -> None:
     # qat mode passes through the qat-produced tflite; ptq exports from the FP32 .pt.
     tflite_s3_uri = qr.get("tflite_s3_uri") if mode == "qat" else None
     qat_run_id = qr.get("mlflow_run_id") if mode == "qat" else None
+
+    # Materialise the calibration dataset locally (dirs + download) before the service.
+    data = cfg.get("data", {})
+    _ref = data.get("ref", "main"); _ver = data.get("version", "") or ""
+    os.makedirs(DATASET_DIR, exist_ok=True)
+    os.makedirs(RUNS_DIR, exist_ok=True)
+    _download_prefix(repo, f"{_ref}/dataset/{_ver}/", DATASET_DIR)
 
     from app.manager import Manager
 
