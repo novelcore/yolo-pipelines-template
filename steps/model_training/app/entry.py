@@ -181,6 +181,20 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
-
-# ci: rebuild to publish the real step image (supersede the stub). Port PRs #12/#13.
+    # Durable error capture: this cluster does not retain completed-pod logs, so
+    # write any failure traceback to the step's output param (survives the pod).
+    import traceback
+    try:
+        main()
+    except Exception:
+        tb = traceback.format_exc()
+        try:
+            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            (OUTPUT_DIR / "training-result.json").write_text(
+                json.dumps({"error": "model-training failed",
+                            "traceback": tb[-4000:]}, indent=2)
+            )
+        except Exception:
+            pass
+        print("[model-training] FAILED:\n" + tb, flush=True)
+        raise
