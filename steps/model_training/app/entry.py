@@ -88,6 +88,14 @@ def main() -> None:
     freeze = train.get("freeze")
     freeze = int(freeze) if freeze not in (None, "", "None") else None
 
+    # The kubeline service validates that dataset_dir exists and streams S3 images
+    # into it (labels under dataset_dir/labels). On this manifest-only cluster
+    # nothing pre-creates it, so make the working dirs the streaming trainer needs.
+    # (No data.yaml needed: the service generates the correct pose default when
+    # dataset_dir has none — kpt_shape [11,3], names {0: spacecraft}.)
+    os.makedirs(os.path.join(DATASET_DIR, "labels"), exist_ok=True)
+    os.makedirs(RUNS_DIR, exist_ok=True)
+
     mlflow_on = _guard_mlflow()
 
     # Import AFTER the mlflow guard so the ultralytics setting is honoured.
