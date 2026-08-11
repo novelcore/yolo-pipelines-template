@@ -57,6 +57,26 @@ def _download_prefix(bucket, prefix, dest):
     print(f"[dataset] downloaded {n} objects from s3://{bucket}/{prefix} -> {dest}", flush=True)
 
 
+def _fix_data_yaml(dataset_dir):
+    """The uploaded data.yaml carries an absolute ``path:`` baked in at dataset-
+    creation time (the uploader's machine, e.g. /home/.../speedplus_yolo_101), so
+    Ultralytics' calibration/parity loaders resolve images to a path that does not
+    exist in-pod. Repoint it at the locally-downloaded tree."""
+    p = os.path.join(dataset_dir, "data.yaml")
+    if not os.path.exists(p):
+        return
+    with open(p) as f:
+        dy = yaml.safe_load(f) or {}
+    dy["path"] = dataset_dir
+    for split in ("train", "val", "test"):
+        if os.path.isdir(os.path.join(dataset_dir, "images", split)):
+            dy[split] = f"images/{split}"
+    with open(p, "w") as f:
+        yaml.safe_dump(dy, f, sort_keys=False)
+    print(f"[dataset] repointed {p} -> path={dataset_dir} "
+          f"splits={[s for s in ('train','val','test') if s in dy]}", flush=True)
+
+
 def _setup_mlflow_auth() -> bool:
     """Mint a Zitadel bearer token for MLflow directly — no entry-point plugin, no
     root install. #868 mounts the machine key at ZITADEL_MACHINE_KEY_FILE; we reuse the
@@ -104,6 +124,7 @@ def main() -> None:
     os.makedirs(DATASET_DIR, exist_ok=True)
     os.makedirs(RUNS_DIR, exist_ok=True)
     _download_prefix(repo, f"{_ref}/dataset/{_ver}/", DATASET_DIR)
+    _fix_data_yaml(DATASET_DIR)
 
     _setup_mlflow_auth()
 
@@ -140,6 +161,24 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # Durable error capture: this cluster drops completed-pod logs, so write any
+    # failure traceback to the step's output param (survives the pod). The PTQ
+    # export (onnx2tf) / QAT litert convert can't be validated without running, so
+    # a failure here must be diagnosable from the output, not a lost log.
+    import traceback
+    try:
+        main()
+    except Exception:
+        tb = traceback.format_exc()
+        try:
+            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            (OUTPUT_DIR / "quantization-result.json").write_text(
+                json.dumps({"error": "model-quantization failed",
+                            "traceback": tb[-4000:]}, indent=2)
+            )
+        except Exception:
+            pass
+        print("[model-quantization] FAILED:\n" + tb, flush=True)
+        raise
 
 # ci: rebuild to publish the real step image (supersede the stub). Port PRs #12/#13.
