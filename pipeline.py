@@ -42,7 +42,8 @@ with pipeline("ml-pipeline") as p:
                  when="{{workflow.parameters.quantization-mode}} != none",
                  outputs=["quantization-result"])
     register = step("model-registration", needs=[train, quant],
-                    reads=["data", "model", "registration"])
+                    reads=["data", "model", "registration"],
+                    outputs=["registration-result"])
 
 if __name__ == "__main__":
     p.write(HERE / "out" / "raw-workflow-template.yaml")

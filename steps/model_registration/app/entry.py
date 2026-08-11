@@ -19,10 +19,26 @@ automatically once MLflow auth is wired.
 import argparse
 import json
 import os
+from pathlib import Path
 
 import yaml
 
 READS = ["data", "model", "registration"]
+
+OUTPUT_DIR = Path("/work/output")   # durable step output (survives the pod)
+
+
+def _write_result(payload: dict) -> None:
+    """Write a durable registration-result.json so the step's TRUE outcome
+    (registered vs skipped, and why) survives — completed-pod logs are dropped by
+    this cluster, so a green 'Succeeded' must carry its own evidence."""
+    try:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        (OUTPUT_DIR / "registration-result.json").write_text(
+            json.dumps(payload, default=str, indent=2)
+        )
+    except Exception as exc:  # noqa: BLE001 - never fatal
+        print(f"[model-registration] WARN: could not write result: {exc}")
 
 
 def _mlflow_auth_present() -> bool:
@@ -39,6 +55,25 @@ def _load_json_arg(value: str) -> dict:
         return json.loads(value)
     except json.JSONDecodeError:
         return {}
+
+
+def _setup_mlflow_auth() -> bool:
+    """Mint a Zitadel bearer token for MLflow directly — no entry-point plugin, no
+    root install. #868 mounts the machine key at ZITADEL_MACHINE_KEY_FILE; we reuse the
+    vendored token source and set MLFLOW_TRACKING_TOKEN, bypassing the request_auth
+    plugin (which would need a build-breaking root install). Returns True on success."""
+    key = os.environ.get("ZITADEL_MACHINE_KEY_FILE")
+    if not key or not os.path.exists(key):
+        return False
+    try:
+        from app.mlflow_zitadel_auth import _ZitadelTokenSource
+        os.environ["MLFLOW_TRACKING_TOKEN"] = _ZitadelTokenSource().token()
+        os.environ.pop("MLFLOW_TRACKING_AUTH", None)  # use bearer token, not the plugin
+        print("[mlflow] Zitadel bearer token minted -> MLflow ENABLED.", flush=True)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"[mlflow] token mint failed: {exc} -> MLflow disabled (non-fatal).", flush=True)
+        return False
 
 
 def main() -> None:
@@ -60,16 +95,23 @@ def main() -> None:
 
     # Registration needs MLflow. Without auth wired (or a run id to register
     # against), skip non-fatally so the pipeline still completes end-to-end.
-    if not _mlflow_auth_present() or not mlflow_run_id:
+    if not _setup_mlflow_auth() or not mlflow_run_id:
         reason = (
             "MLflow auth not wired (no ZITADEL_MACHINE_KEY_FILE / "
             "MLFLOW_TRACKING_USERNAME)"
-            if not _mlflow_auth_present()
+            if not os.environ.get("ZITADEL_MACHINE_KEY_FILE")
             else "training emitted no mlflow_run_id (MLflow was disabled upstream)"
         )
         print(f"[model-registration] SKIPPED — {reason}. "
               f"Model checkpoint is in lakeFS; registration will run once MLflow "
               f"auth is injected into Hera steps.")
+        _write_result({
+            "status": "skipped",
+            "registered": False,
+            "reason": reason,
+            "best_checkpoint_s3": tr.get("best_checkpoint_s3"),
+            "mlflow_run_id": mlflow_run_id or None,
+        })
         return
 
     # Prefer a quantized artifact bundle if a quantization step ran.
@@ -96,6 +138,14 @@ def main() -> None:
         best_map50=tr.get("final_map50"),
         exported_models=(exported or None),
     )
+    _write_result({
+        "status": "registered",
+        "registered": True,
+        "mlflow_run_id": mlflow_run_id,
+        "registered_model_name": reg.get("registered_model_name"),
+        "best_checkpoint_s3": tr.get("best_checkpoint_s3"),
+        "best_map50": tr.get("final_map50"),
+    })
     print(f"[model-registration] registered run={mlflow_run_id} "
           f"model={reg.get('registered_model_name')}")
 

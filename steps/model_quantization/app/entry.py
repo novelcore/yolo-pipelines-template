@@ -57,6 +57,25 @@ def _download_prefix(bucket, prefix, dest):
     print(f"[dataset] downloaded {n} objects from s3://{bucket}/{prefix} -> {dest}", flush=True)
 
 
+def _setup_mlflow_auth() -> bool:
+    """Mint a Zitadel bearer token for MLflow directly — no entry-point plugin, no
+    root install. #868 mounts the machine key at ZITADEL_MACHINE_KEY_FILE; we reuse the
+    vendored token source and set MLFLOW_TRACKING_TOKEN, bypassing the request_auth
+    plugin (which would need a build-breaking root install). Returns True on success."""
+    key = os.environ.get("ZITADEL_MACHINE_KEY_FILE")
+    if not key or not os.path.exists(key):
+        return False
+    try:
+        from app.mlflow_zitadel_auth import _ZitadelTokenSource
+        os.environ["MLFLOW_TRACKING_TOKEN"] = _ZitadelTokenSource().token()
+        os.environ.pop("MLFLOW_TRACKING_AUTH", None)  # use bearer token, not the plugin
+        print("[mlflow] Zitadel bearer token minted -> MLflow ENABLED.", flush=True)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"[mlflow] token mint failed: {exc} -> MLflow disabled (non-fatal).", flush=True)
+        return False
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--params", required=True)
@@ -85,6 +104,8 @@ def main() -> None:
     os.makedirs(DATASET_DIR, exist_ok=True)
     os.makedirs(RUNS_DIR, exist_ok=True)
     _download_prefix(repo, f"{_ref}/dataset/{_ver}/", DATASET_DIR)
+
+    _setup_mlflow_auth()
 
     from app.manager import Manager
 

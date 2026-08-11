@@ -50,6 +50,8 @@ def _guard_mlflow() -> bool:
     follow-up), disable it: training + lakeFS checkpoint upload still work; MLflow
     logging + registration are a deliberate follow-up.
     """
+    if _setup_mlflow_auth():
+        return True
     try:
         from ultralytics import settings
         settings.update({"mlflow": False})
@@ -62,6 +64,25 @@ def _guard_mlflow() -> bool:
 
 def _as_csv(value):
     return ",".join(value) if isinstance(value, list) else value
+
+
+def _setup_mlflow_auth() -> bool:
+    """Mint a Zitadel bearer token for MLflow directly — no entry-point plugin, no
+    root install. #868 mounts the machine key at ZITADEL_MACHINE_KEY_FILE; we reuse the
+    vendored token source and set MLFLOW_TRACKING_TOKEN, bypassing the request_auth
+    plugin (which would need a build-breaking root install). Returns True on success."""
+    key = os.environ.get("ZITADEL_MACHINE_KEY_FILE")
+    if not key or not os.path.exists(key):
+        return False
+    try:
+        from app.mlflow_zitadel_auth import _ZitadelTokenSource
+        os.environ["MLFLOW_TRACKING_TOKEN"] = _ZitadelTokenSource().token()
+        os.environ.pop("MLFLOW_TRACKING_AUTH", None)  # use bearer token, not the plugin
+        print("[mlflow] Zitadel bearer token minted -> MLflow ENABLED.", flush=True)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"[mlflow] token mint failed: {exc} -> MLflow disabled (non-fatal).", flush=True)
+        return False
 
 
 def main() -> None:
