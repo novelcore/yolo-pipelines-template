@@ -95,6 +95,12 @@ def main() -> None:
     # dataset_dir has none — kpt_shape [11,3], names {0: spacecraft}.)
     os.makedirs(os.path.join(DATASET_DIR, "labels"), exist_ok=True)
     os.makedirs(RUNS_DIR, exist_ok=True)
+    # Enable manifest-only S3 streaming so BOTH images and labels stream from lakeFS
+    # (no shared FS holds local labels). The service reads this manifest and sets
+    # s3_stream_labels=True (kubecore-operator: manifest-only cluster).
+    with open(os.path.join(DATASET_DIR, "dataset_manifest.json"), "w") as _mf:
+        json.dump({"bucket": repo, "prefix": f"{ref}/dataset/{version}/",
+                   "label_keys": {"_present": True}}, _mf)
 
     mlflow_on = _guard_mlflow()
 
