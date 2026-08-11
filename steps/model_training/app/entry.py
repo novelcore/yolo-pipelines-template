@@ -40,18 +40,21 @@ def _mlflow_auth_present() -> bool:
 
 
 def _guard_mlflow() -> bool:
-    """Disable Ultralytics' fatal MLflow callback when no auth is wired.
+    """Force-disable Ultralytics' MLflow callback (it is fatal on error).
 
-    Returns True if MLflow logging stays enabled. Observability must never crash
-    the run, so any failure here is swallowed.
+    #868 injects MLflow Zitadel auth, BUT the `mlflow.request_auth_provider`
+    'zitadel' plugin only registers via a root package install — which broke the
+    image build (reverted in #17). Enabling the callback would therefore 401 and
+    KILL training (Ultralytics' MLflow callback opens the run and is fatal). Until
+    MLflow auth is wired without the entry-point plugin (bearer-token approach —
+    follow-up), disable it: training + lakeFS checkpoint upload still work; MLflow
+    logging + registration are a deliberate follow-up.
     """
-    if _mlflow_auth_present():
-        return True
     try:
         from ultralytics import settings
         settings.update({"mlflow": False})
-        print("[model-training] MLflow auth absent -> Ultralytics MLflow logging "
-              "DISABLED (non-fatal). Training + lakeFS checkpoint upload proceed.")
+        print("[model-training] MLflow logging DISABLED (zitadel auth-plugin not "
+              "wired without root-install; follow-up). Training + lakeFS proceed.")
     except Exception as exc:  # noqa: BLE001 - best-effort, never fatal
         print(f"[model-training] WARN: could not disable ultralytics mlflow: {exc}")
     return False
