@@ -26,6 +26,7 @@ with pipeline("ml-pipeline") as p:
     validate = step("config-validation", reads=["data", "model"])
     preflight = step("preflight", reads=["experiment", "train"], needs=[validate])
     demo = step("hydra-demo", reads=["experiment", "train", "evaluation"], needs=[validate])
+    hello    = step("hello-world", reads=["experiment"], needs=[validate])
     load = step("dataset-loading", reads=["data"], needs=[validate],
                 outputs=["data-yaml", "manifest-summary"])
     summary = step("data-summary", reads=["data", "summary"], needs=[load])
