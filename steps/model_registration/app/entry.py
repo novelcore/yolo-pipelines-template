@@ -91,6 +91,31 @@ def main() -> None:
     tr = _load_json_arg(args.training_result)
     qr = _load_json_arg(args.quantization_result)
 
+    mode = str((cfg.get("quantization") or {}).get("mode", "none")).lower()
+
+    # C-06 guard (novelcore/yolo-hera-yolo#30): if a quantization mode was requested,
+    # the quant/qat step MUST have produced a successful INT8 artifact. A failed or
+    # omitted quant/qat step leaves an empty/error quantization-result; registering the
+    # FP32 checkpoint then silently hands back the WRONG (un-quantized) model behind a
+    # green check. Fail LOUDLY instead — registration is the terminal step, so failing
+    # here also makes the overall workflow report failure (not a false Succeeded).
+    if mode != "none":
+        quant_ok = bool(qr.get("tflite_s3_uri")) and not qr.get("error")
+        if not quant_ok:
+            detail = qr.get("error") or "quant/qat step produced no INT8 artifact (no tflite_s3_uri)"
+            _write_result({
+                "status": "failed",
+                "registered": False,
+                "reason": f"quantization-mode={mode} requested but not satisfied: {detail}",
+                "quantization_mode": mode,
+                "best_checkpoint_s3": tr.get("best_checkpoint_s3"),
+            })
+            raise SystemExit(
+                f"[model-registration] FAILED (C-06) — quantization-mode={mode} but the "
+                f"quant/qat step did not produce a successful INT8 artifact; refusing to "
+                f"register the FP32 model. detail: {str(detail)[:300]}"
+            )
+
     mlflow_run_id = tr.get("mlflow_run_id")
 
     # Registration needs MLflow. Without auth wired (or a run id to register
@@ -114,10 +139,15 @@ def main() -> None:
         })
         return
 
-    # Prefer a quantized artifact bundle if a quantization step ran.
+    # Prefer a quantized artifact bundle if a quantization step ran. Include the
+    # INT8 TFLite the quant/qat step produced (quantization-result carries it as
+    # tflite_s3_uri) so a successful quantized run registers the INT8 artifact, not
+    # only the FP32 checkpoint (C-06).
     exported = dict(tr.get("exported_models") or {})
     if qr.get("exported_models"):
         exported.update(qr["exported_models"])
+    if qr.get("tflite_s3_uri"):
+        exported["int8_tflite"] = qr["tflite_s3_uri"]
 
     sample_size = data.get("sample_size")
     try:
@@ -145,6 +175,8 @@ def main() -> None:
         "registered_model_name": reg.get("registered_model_name"),
         "best_checkpoint_s3": tr.get("best_checkpoint_s3"),
         "best_map50": tr.get("final_map50"),
+        "quantization_mode": mode,
+        "int8_tflite_s3": qr.get("tflite_s3_uri"),
     })
     print(f"[model-registration] registered run={mlflow_run_id} "
           f"model={reg.get('registered_model_name')}")
