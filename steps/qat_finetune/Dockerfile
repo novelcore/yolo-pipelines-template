@@ -23,7 +23,14 @@ RUN pip install --no-cache-dir poetry
 # runs `python -m app.entry` directly, so the root package need not be installed.
 COPY pyproject.toml poetry.lock* README.md ./
 RUN poetry config virtualenvs.create false \
- && poetry install --only=main --no-root --no-interaction --no-ansi
+ && poetry install --only=main --no-root --no-interaction --no-ansi \
+ # charset-normalizer repair: poetry itself lives in system site-packages
+ # (virtualenvs.create false) and drags in a NEWER charset-normalizer whose
+ # compiled md extension survives the locked downgrade and shadows the pure-
+ # python module -> "module 'charset_normalizer.md' has no attribute
+ # 'CharInfo'" at runtime (every fresh build since charset-normalizer 3.5.0
+ # released). Force-reinstall the locked version so site-packages is coherent.
+ && pip install --no-cache-dir --force-reinstall --no-deps "charset-normalizer==$(pip show charset-normalizer | sed -n 's/^Version: //p')"
 
 # Pinned CUDA + QAT stack via pip (CON-01 — exact versions, custom torch index).
 COPY requirements-cuda.txt requirements-qat.txt ./
