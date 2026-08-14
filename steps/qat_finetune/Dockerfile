@@ -24,13 +24,20 @@ RUN pip install --no-cache-dir poetry
 COPY pyproject.toml poetry.lock* README.md ./
 RUN poetry config virtualenvs.create false \
  && poetry install --only=main --no-root --no-interaction --no-ansi \
- # charset-normalizer repair: poetry itself lives in system site-packages
- # (virtualenvs.create false) and drags in a NEWER charset-normalizer whose
- # compiled md extension survives the locked downgrade and shadows the pure-
- # python module -> "module 'charset_normalizer.md' has no attribute
- # 'CharInfo'" at runtime (every fresh build since charset-normalizer 3.5.0
- # released). Force-reinstall the locked version so site-packages is coherent.
- && pip install --no-cache-dir --force-reinstall --no-deps "charset-normalizer==$(pip show charset-normalizer | sed -n 's/^Version: //p')"
+ # charset-normalizer repair: poetry lives in system site-packages
+ # (virtualenvs.create false) and drags in a newer charset-normalizer whose
+ # Cython-compiled extensions (cd/md .so, 3.5.0+) survive the locked
+ # downgrade as ORPHANS no RECORD owns — compiled modules then shadow the
+ # locked version's .py files -> "module 'charset_normalizer.md' has no
+ # attribute 'CharInfo'" at runtime. --force-reinstall cannot remove
+ # orphans, so: scorched-earth remove ALL remnants, clean-install the
+ # exact locked version, and ASSERT the import at build time so this
+ # class fails the build, never a training run.
+ && CN_VER=$(grep -A1 'name = "charset-normalizer"' poetry.lock | sed -n 's/^version = "\(.*\)"/\1/p' | head -1) \
+ && pip uninstall -y charset-normalizer \
+ && rm -rf /usr/local/lib/python3.12/site-packages/charset_normalizer* \
+ && pip install --no-cache-dir --no-deps "charset-normalizer==${CN_VER}" \
+ && python -c "from charset_normalizer import md; import requests"
 
 # Pinned CUDA + QAT stack via pip (CON-01 — exact versions, custom torch index).
 COPY requirements-cuda.txt requirements-qat.txt ./
