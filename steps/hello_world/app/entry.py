@@ -18,4 +18,3 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
-# ci: rebuild — deployed image tag was GC'd by #878 retention (see kubecore-operator#880).

@@ -1,3 +1,26 @@
+# yolo-pipelines-template
+
+**The official YOLO pipelines KubeApp template.** Scaffolding a KubeApp with
+`kubeAppTemplateRef: yolo-pipelines` gives you a complete, working YOLO pose
+pipeline: dataset loading (lakeFS S3 streaming), real YOLOv8 training with
+authenticated MLflow tracking, optional QAT fine-tune (GPU or CPU-routed),
+INT8 TFLite export (PTQ or QAT) committed to the environment's lakeFS, and
+model registration.
+
+Lineage: `hera-mlops-template` (generic Hera+Hydra scaffold, Petros) →
+`yolo-hera-yolo` (real YOLO implementation, Alexandra) → promoted to the
+official template 2026-08-18 with full history preserved. Battle-tested
+fixes baked in: isolated-poetry Dockerfiles (charset-normalizer class),
+per-step disk requests (#892), lakeFS branch-prefixed artifact paths
+(#896), retag-all-safe image pinning (#1008).
+
+Targets PRD-858 `ml`-type environments: each app binds to one environment
+via `environmentSelector`; the platform injects that environment's MLflow,
+lakeFS and compute context at render time — nothing environment-specific
+lives in this repo.
+
+---
+
 # hera-mlops-template
 
 A KubeCore ML pipeline you author in **Python** ([Hera](https://github.com/argoproj-labs/hera))
