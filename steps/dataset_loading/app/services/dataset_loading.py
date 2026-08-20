@@ -56,6 +56,8 @@ _VALID_VISIBILITY = {0, 1, 2}
 
 # Default S3 bucket and key prefix for the canonical dataset location
 _DEFAULT_BUCKET = "io-audio-text-data"
+# Non-lakeFS fallback only (plain-S3 sources keep the legacy folder layout;
+# the lakeFS path is ref-native — see resolve_source, template#1).
 _DEFAULT_PREFIX_TEMPLATE = "upload-initial/dataset/{version}/"
 
 # ---------------------------------------------------------------------------
@@ -1307,8 +1309,23 @@ class DatasetLoadingService:
             return bucket, prefix
 
         if params.lakefs_repo and params.lakefs_branch:
+            # REF-NATIVE convention (template#1): the dataset version IS a
+            # lakeFS ref (branch/tag/commit), and the dataset lives at
+            # `dataset/` under that ref's root — never in a per-version
+            # SUBFOLDER. This is what the io demo showed and what the
+            # kubecore-dataset CLI uploads: versions get lakeFS semantics
+            # (immutable commits, diffs, zero-copy branching, isolation).
+            # The subfolder form ({branch}/dataset/{version}/) was drift that
+            # crept in with the hera port and silently demoted every "version"
+            # to a folder inside main.
+            #
+            # `lakefs_branch` is the resolved ref for this run: when the
+            # submitter picks a data-version, that value IS the ref (the
+            # enhancer wires the dropdown to it); `version` remains the
+            # provenance tag recorded in MLflow (config/data.yaml).
             bucket = params.lakefs_repo
-            prefix = f"{params.lakefs_branch}/dataset/{params.version}/"
+            ref = params.lakefs_branch
+            prefix = f"{ref}/dataset/"
             return bucket, prefix
 
         bucket = _DEFAULT_BUCKET
