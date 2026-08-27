@@ -1034,8 +1034,15 @@ class TrainingService:
                 params.pretrained_weights, tmp_path, "pretrained"
             )
 
-        # Bare variant name: Ultralytics handles CDN download
-        return Path(params.model_variant)
+        # Bare variant name: Ultralytics downloads the COCO-pretrained asset on
+        # first use — INTO THE PATH WE HAND IT. A bare name means the current
+        # directory, which is read-only off-cluster (Apptainer SIF; live job
+        # 5149025: "[Errno 30] Read-only file system: 'yolov8n-pose.pt'"), so
+        # anchor it under the run's writable output dir. The asset is cached
+        # there for later runs on the same scratch.
+        weights_dir = Path(params.output_dir) / "weights"
+        weights_dir.mkdir(parents=True, exist_ok=True)
+        return weights_dir / params.model_variant
 
     def _maybe_download_pt(
         self, uri_or_path: str, tmp_path: Path, label: str
