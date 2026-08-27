@@ -30,6 +30,7 @@ from typing import Any, Callable
 import yaml
 
 from app.models.training import TrainingParams, TrainingResult
+from app.services import lakefs_objects
 from app.services.resource_monitor import ResourceMonitor
 
 _logger = logging.getLogger(__name__)
@@ -1054,7 +1055,10 @@ class TrainingService:
                 key,
                 local_pt,
             )
-            self._s3.download_file(bucket, key, str(local_pt))
+            if lakefs_objects.bearer_available():
+                lakefs_objects.download(bucket, key, local_pt)
+            else:
+                self._s3.download_file(bucket, key, str(local_pt))
             return local_pt
 
         # Local path
@@ -1310,8 +1314,12 @@ class TrainingService:
             self._logger.warning("lakeFS commit failed (non-fatal): %s", exc)
 
     def _upload_to_s3(self, local_path: Path, bucket: str, key: str) -> None:
-        """Upload a single file to S3."""
+        """Upload a single file to S3 (or, off-cluster, via the lakeFS objects
+        API with the run's bearer token — see services/lakefs_objects.py)."""
         try:
+            if lakefs_objects.bearer_available():
+                lakefs_objects.upload(local_path, bucket, key)
+                return
             self._s3.upload_file(str(local_path), bucket, key)
         except Exception as exc:
             raise TrainingError(

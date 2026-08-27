@@ -30,7 +30,9 @@ with pipeline("ml-pipeline") as p:
     load = step("dataset-loading", reads=["data"], needs=[validate],
                 outputs=["data-yaml", "manifest-summary"])
     summary = step("data-summary", reads=["data", "summary"], needs=[load])
-    train = step("model-training", gpu=True, needs=[load],
+    # hpc_time_limit: Slurm wall-clock when this step runs with target=meluxina
+    # (DEVELOPER.md §8.1). Size it to the longest expected epoch budget.
+    train = step("model-training", gpu=True, needs=[load], hpc_time_limit="12h",
                  reads=["experiment", "data", "model", "train", "image_processing", "logging"],
                  outputs=["training-result"])
     qat = step("qat-finetune", gpu=True, needs=[train], disk="20Gi",
