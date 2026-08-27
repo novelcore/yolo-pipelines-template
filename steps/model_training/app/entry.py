@@ -50,12 +50,10 @@ def _staged_dataset_dir() -> str | None:
     if not root or not os.path.isdir(root):
         return None
     version = os.environ.get("KUBECORE_DATASET_VERSION", "")
-    # Ref-native layout first (dataset/ under the ref root — what this
-    # template's config-validation and dataset-loading read), then the
-    # per-version layout other templates use, then a ref whose root IS the
-    # dataset.
-    for candidate in (os.path.join(root, "dataset"),
-                      os.path.join(root, "dataset", version) if version else None,
+    # Platform standard first ({ref}/dataset/{version}/ — what config-validation
+    # and dataset-loading read; version defaults to the ref), then a ref whose
+    # root IS the dataset (legacy CLI uploads).
+    for candidate in (os.path.join(root, "dataset", version) if version else None,
                       root):
         if candidate and os.path.exists(os.path.join(candidate, "data.yaml")):
             return candidate
@@ -63,8 +61,8 @@ def _staged_dataset_dir() -> str | None:
     # a silent fallback ended in boto3 "Unable to locate credentials").
     raise SystemExit(
         f"[model-training] KUBECORE_DATASET_DIR={root} is mounted but holds no "
-        "data.yaml under dataset/, dataset/{version}/ or its root — the staged "
-        "ref does not carry a dataset in a supported layout.")
+        "data.yaml under dataset/{version}/ or its root — the staged ref does "
+        "not carry a dataset in the platform layout.")
 
 
 def _guard_mlflow() -> bool:
