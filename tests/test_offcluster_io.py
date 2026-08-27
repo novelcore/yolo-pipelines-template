@@ -63,9 +63,13 @@ def test_staged_dataset_dir_resolution(tmp_path, monkeypatch):
     root = tmp_path / "ref"; (root / "dataset" / "v3").mkdir(parents=True)
     monkeypatch.setenv("KUBECORE_DATASET_DIR", str(root))
     monkeypatch.setenv("KUBECORE_DATASET_VERSION", "v3")
-    assert entry._staged_dataset_dir() is None  # no data.yaml anywhere -> stream
+    with pytest.raises(SystemExit):  # mounted but no dataset -> loud, never S3
+        entry._staged_dataset_dir()
     (root / "dataset" / "v3" / "data.yaml").write_text("path: .\n")
     assert entry._staged_dataset_dir() == str(root / "dataset" / "v3")
+    # ref-native layout wins when present (what config-validation/dataset-loading read)
+    (root / "dataset" / "data.yaml").write_text("path: .\n")
+    assert entry._staged_dataset_dir() == str(root / "dataset")
     # a ref whose root IS the dataset still works
     flat = tmp_path / "flat"; flat.mkdir(); (flat / "data.yaml").write_text("path: .\n")
     monkeypatch.setenv("KUBECORE_DATASET_DIR", str(flat))

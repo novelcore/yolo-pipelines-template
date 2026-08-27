@@ -50,14 +50,21 @@ def _staged_dataset_dir() -> str | None:
     if not root or not os.path.isdir(root):
         return None
     version = os.environ.get("KUBECORE_DATASET_VERSION", "")
-    for candidate in (os.path.join(root, "dataset", version) if version else None,
-                      os.path.join(root, "dataset", "main"), root):
+    # Ref-native layout first (dataset/ under the ref root — what this
+    # template's config-validation and dataset-loading read), then the
+    # per-version layout other templates use, then a ref whose root IS the
+    # dataset.
+    for candidate in (os.path.join(root, "dataset"),
+                      os.path.join(root, "dataset", version) if version else None,
+                      root):
         if candidate and os.path.exists(os.path.join(candidate, "data.yaml")):
             return candidate
-    print(f"[model-training] KUBECORE_DATASET_DIR={root} holds no data.yaml "
-          "(looked in dataset/{version}/, dataset/main/, root) — falling back to "
-          "S3 streaming.", flush=True)
-    return None
+    # Off-cluster there is no S3 gateway to fall back to (live job 5149139:
+    # a silent fallback ended in boto3 "Unable to locate credentials").
+    raise SystemExit(
+        f"[model-training] KUBECORE_DATASET_DIR={root} is mounted but holds no "
+        "data.yaml under dataset/, dataset/{version}/ or its root — the staged "
+        "ref does not carry a dataset in a supported layout.")
 
 
 def _guard_mlflow() -> bool:
