@@ -141,7 +141,10 @@ def main() -> None:
 
     repo = platform["lakefs"]["repository"]
     ref = data.get("ref", "main")
-    version = data.get("version", "") or ""
+    # Platform standard {ref}/dataset/{version}/ — version defaults to the ref,
+    # exactly as config-validation, dataset-loading, qat and quant resolve it;
+    # an empty version streamed from "{ref}/dataset//" and found no images.
+    version = str(data.get("version") or "") or ref
 
     freeze = train.get("freeze")
     freeze = int(freeze) if freeze not in (None, "", "None") else None
