@@ -110,7 +110,9 @@ def main() -> None:
 
     # Materialise the calibration dataset locally (dirs + download) before the service.
     data = cfg.get("data", {})
-    _ref = data.get("ref", "main"); _ver = data.get("version", "") or ""
+    # Platform standard {ref}/dataset/{version}/ — version defaults to the ref
+    # (same as dataset-loading / config-validation), never an empty segment.
+    _ref = data.get("ref", "main"); _ver = data.get("version", "") or _ref
     os.makedirs(DATASET_DIR, exist_ok=True)
     os.makedirs(RUNS_DIR, exist_ok=True)
     _download_prefix(repo, f"{_ref}/dataset/{_ver}/", DATASET_DIR)
