@@ -36,7 +36,28 @@ def _mlflow_auth_present() -> bool:
     return bool(
         os.environ.get("ZITADEL_MACHINE_KEY_FILE")
         or os.environ.get("MLFLOW_TRACKING_USERNAME")
+        or os.environ.get("MLFLOW_TRACKING_TOKEN")
     )
+
+
+def _staged_dataset_dir() -> str | None:
+    """Off-cluster (MeluXina) the platform stages the dataset ref onto the
+    node and bind-mounts it read-only at KUBECORE_DATASET_DIR (PRD-1016 F-04).
+    Return the directory holding data.yaml for this run — the ref root mirrors
+    the whole ref, so the dataset lives under dataset/{version}/ — or None when
+    nothing is staged (in-cluster: stream from the lakeFS S3 gateway)."""
+    root = os.environ.get("KUBECORE_DATASET_DIR")
+    if not root or not os.path.isdir(root):
+        return None
+    version = os.environ.get("KUBECORE_DATASET_VERSION", "")
+    for candidate in (os.path.join(root, "dataset", version) if version else None,
+                      os.path.join(root, "dataset", "main"), root):
+        if candidate and os.path.exists(os.path.join(candidate, "data.yaml")):
+            return candidate
+    print(f"[model-training] KUBECORE_DATASET_DIR={root} holds no data.yaml "
+          "(looked in dataset/{version}/, dataset/main/, root) — falling back to "
+          "S3 streaming.", flush=True)
+    return None
 
 
 def _guard_mlflow() -> bool:
@@ -71,6 +92,11 @@ def _setup_mlflow_auth() -> bool:
     root install. #868 mounts the machine key at ZITADEL_MACHINE_KEY_FILE; we reuse the
     vendored token source and set MLFLOW_TRACKING_TOKEN, bypassing the request_auth
     plugin (which would need a build-breaking root install). Returns True on success."""
+    if os.environ.get("MLFLOW_TRACKING_TOKEN"):
+        # Off-cluster (MeluXina) the submit pod minted the wallet already.
+        os.environ.pop("MLFLOW_TRACKING_AUTH", None)
+        print("[mlflow] bearer token supplied by the platform -> MLflow ENABLED.", flush=True)
+        return True
     key = os.environ.get("ZITADEL_MACHINE_KEY_FILE")
     if not key or not os.path.exists(key):
         return False
@@ -117,14 +143,22 @@ def main() -> None:
     # nothing pre-creates it, so make the working dirs the streaming trainer needs.
     # (No data.yaml needed: the service generates the correct pose default when
     # dataset_dir has none — kpt_shape [11,3], names {0: spacecraft}.)
-    os.makedirs(os.path.join(DATASET_DIR, "labels"), exist_ok=True)
     os.makedirs(RUNS_DIR, exist_ok=True)
-    # Enable manifest-only S3 streaming so BOTH images and labels stream from lakeFS
-    # (no shared FS holds local labels). The service reads this manifest and sets
-    # s3_stream_labels=True (kubecore-operator: manifest-only cluster).
-    with open(os.path.join(DATASET_DIR, "dataset_manifest.json"), "w") as _mf:
-        json.dump({"bucket": repo, "prefix": f"{ref}/dataset/{version}/",
-                   "label_keys": {"_present": True}}, _mf)
+    os.environ.setdefault("KUBECORE_DATASET_VERSION", version or ref)
+    staged = _staged_dataset_dir()
+    if staged:
+        # Local mode: the staged ref is on the node (read-only bind mount).
+        dataset_dir, source = staged, "local"
+        print(f"[model-training] dataset staged at {staged} -> local mode", flush=True)
+    else:
+        dataset_dir, source = DATASET_DIR, "s3"
+        os.makedirs(os.path.join(DATASET_DIR, "labels"), exist_ok=True)
+        # Enable manifest-only S3 streaming so BOTH images and labels stream from lakeFS
+        # (no shared FS holds local labels). The service reads this manifest and sets
+        # s3_stream_labels=True (kubecore-operator: manifest-only cluster).
+        with open(os.path.join(DATASET_DIR, "dataset_manifest.json"), "w") as _mf:
+            json.dump({"bucket": repo, "prefix": f"{ref}/dataset/{version}/",
+                       "label_keys": {"_present": True}}, _mf)
 
     mlflow_on = _guard_mlflow()
 
@@ -135,10 +169,10 @@ def main() -> None:
         # ---- identity ----
         model_variant=model["variant"],
         experiment_name=experiment["name"],
-        dataset_dir=DATASET_DIR,
+        dataset_dir=dataset_dir,
         output_dir=RUNS_DIR,
-        # ---- dataset: stream from the lakeFS S3 gateway (manifest-only cluster) ----
-        source="s3",
+        # ---- dataset: staged local dir (HPC) or lakeFS S3 gateway streaming ----
+        source=source,
         s3_bucket=repo,
         s3_prefix=f"{ref}/dataset/{version}/",
         pretrained_weights=(model.get("pretrained_weights") or None),

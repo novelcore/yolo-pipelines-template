@@ -39,6 +39,15 @@ def _enhanced():
     return enhance.enhance(_render(), CONTEXT, CATALOG)
 
 
+def _step_templates(wft):
+    """Developer step templates only — the platform's MeluXina runner
+    (`meluxina-run`, labelled compute-type=hpc, PRD-1016) is a container
+    template too but has no class param, no Dockerfile and no step env."""
+    return [t for t in wft["spec"]["templates"] if "container" in t and
+            (t.get("metadata", {}).get("labels", {})
+             .get("platform.kubecore.io/compute-type") != "hpc")]
+
+
 # ------------------------------------------------------------- derivation
 
 
@@ -208,22 +217,34 @@ def test_per_step_class_params():
 
 def test_nodeselector_uses_step_class():
     wft = _enhanced()
-    for t in wft["spec"]["templates"]:
-        if "container" not in t:
-            continue
+    for t in _step_templates(wft):
         sel = t.get("nodeSelector", {}).get("platform.kubecore.io/nodegroup-type", "")
         assert sel == f"{{{{workflow.parameters.{t['name']}-class}}}}", \
             f"{t['name']} nodeSelector should reference its {{step}}-class param"
 
 
 def test_gpu_routing():
+    """#865 contract: gpu-capable steps are CLASS-ROUTABLE at submit time.
+
+    The typed nvidia.com/gpu request is gone; the GPU quantity lives in the
+    podSpecPatch keyed to a `gpus` input, and every DAG task invoking the
+    step derives gpus from the {step}-class param via an {{=}} expression.
+    """
     wft = _enhanced()
-    gpu_steps = set()
-    for t in wft["spec"]["templates"]:
-        if "container" in t:
-            req = t["container"].get("resources", {}).get("requests", {})
-            if "nvidia.com/gpu" in req:
-                gpu_steps.add(t["name"])
+    gpu_steps, typed_gpu = set(), set()
+    for t in _step_templates(wft):
+        req = t["container"].get("resources", {}).get("requests", {})
+        if "nvidia.com/gpu" in req:
+            typed_gpu.add(t["name"])
+        patch = t.get("podSpecPatch", "")
+        if "nvidia.com/gpu" in patch:
+            assert "{{inputs.parameters.gpus}}" in patch, (
+                f"{t['name']}: GPU quantity in patch must be the gpus input"
+            )
+            names = [p["name"] for p in t.get("inputs", {}).get("parameters", [])]
+            assert "gpus" in names, f"{t['name']}: missing gpus input parameter"
+            gpu_steps.add(t["name"])
+    assert typed_gpu == set(), f"typed GPU requests must be routed, not static: {typed_gpu}"
     assert gpu_steps == {"model-training", "qat-finetune"}, f"unexpected GPU steps: {gpu_steps}"
 
 
@@ -243,10 +264,9 @@ def test_sizing_knobs_and_checkpoint_env():
     names = {p["name"] for p in wft["spec"]["arguments"]["parameters"]}
     assert "model-training-cpu" in names and "model-training-mem" in names
     # checkpoint env on every step
-    for t in wft["spec"]["templates"]:
-        if "container" in t:
-            env = {e["name"] for e in t["container"].get("env", [])}
-            assert "CHECKPOINT_BUCKET" in env and "MLFLOW_TRACKING_URI" in env
+    for t in _step_templates(wft):
+        env = {e["name"] for e in t["container"].get("env", [])}
+        assert "CHECKPOINT_BUCKET" in env and "MLFLOW_TRACKING_URI" in env
 
 
 def test_unknown_annotation_fails():
@@ -328,7 +348,7 @@ def test_every_declared_step_has_a_buildable_dockerfile():
     steps/<dir>/Dockerfile (or the image escape-hatch), so a forgotten
     Dockerfile is caught at render time — not as a run-time ImagePullBackOff."""
     wft = _enhanced()
-    steps = [t for t in wft["spec"]["templates"] if "container" in t]
+    steps = _step_templates(wft)
     missing = []
     for t in steps:
         annotations = t.get("metadata", {}).get("annotations", {})
