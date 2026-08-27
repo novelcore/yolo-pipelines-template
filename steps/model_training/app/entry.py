@@ -120,6 +120,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--params", required=True,
                         help="Resolved params.yaml content (from compose-and-validate).")
+    parser.add_argument("--data-yaml", default="",
+                        help="The dataset's data.yaml (verbatim) emitted by dataset-loading: "
+                             "kpt_shape / names / flip_idx, so training matches THIS dataset.")
     args, _ = parser.parse_known_args()
     cfg = yaml.safe_load(args.params)
 
@@ -158,6 +161,26 @@ def main() -> None:
     else:
         dataset_dir, source = DATASET_DIR, "s3"
         os.makedirs(os.path.join(DATASET_DIR, "labels"), exist_ok=True)
+        # Honour the dataset's OWN data.yaml (kpt_shape / names / flip_idx), handed
+        # over by dataset-loading as --data-yaml. Without it the service falls back
+        # to the spacecraft default (kpt_shape [11,3], names {0: spacecraft}), so a
+        # dataset with any other keypoint count has EVERY label rejected and
+        # ultralytics dies with "No valid labels found in labels/train.cache"
+        # (live gke-dev/prd1124yolo, 4-keypoint toy dataset, 2026-08-27). The
+        # service copies this file into its temp dir and fixes `path` itself.
+        data_yaml_text = (args.data_yaml or "").strip()
+        if data_yaml_text:
+            try:
+                ds_yaml = yaml.safe_load(data_yaml_text) or {}
+            except yaml.YAMLError as exc:  # keep the run alive; the default may still fit
+                print(f"[model-training] WARN --data-yaml is not valid YAML ({exc}); using the service default")
+                ds_yaml = {}
+            if isinstance(ds_yaml, dict) and ds_yaml:
+                ds_yaml["path"] = DATASET_DIR
+                with open(os.path.join(DATASET_DIR, "data.yaml"), "w") as fh:
+                    yaml.safe_dump(ds_yaml, fh, sort_keys=False)
+                print(f"[model-training] data.yaml from dataset-loading written to {DATASET_DIR} "
+                      f"(kpt_shape={ds_yaml.get('kpt_shape')}, names={ds_yaml.get('names')})")
         # Enable manifest-only S3 streaming so BOTH images and labels stream from lakeFS
         # (no shared FS holds local labels). The service reads this manifest and sets
         # s3_stream_labels=True (kubecore-operator: manifest-only cluster).
