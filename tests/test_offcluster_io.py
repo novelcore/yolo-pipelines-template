@@ -67,9 +67,9 @@ def test_staged_dataset_dir_resolution(tmp_path, monkeypatch):
         entry._staged_dataset_dir()
     (root / "dataset" / "v3" / "data.yaml").write_text("path: .\n")
     assert entry._staged_dataset_dir() == str(root / "dataset" / "v3")
-    # ref-native layout wins when present (what config-validation/dataset-loading read)
+    # a flat dataset/ (no version folder) is NOT the platform layout
     (root / "dataset" / "data.yaml").write_text("path: .\n")
-    assert entry._staged_dataset_dir() == str(root / "dataset")
+    assert entry._staged_dataset_dir() == str(root / "dataset" / "v3")
     # a ref whose root IS the dataset still works
     flat = tmp_path / "flat"; flat.mkdir(); (flat / "data.yaml").write_text("path: .\n")
     monkeypatch.setenv("KUBECORE_DATASET_DIR", str(flat))
