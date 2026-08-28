@@ -32,6 +32,12 @@ def _download_prefix(bucket, prefix, dest):
     """Materialise the dataset locally under {dest}: qat/quant read images + data.yaml
     from dataset_dir directly (no S3-streaming path), and this cluster has no shared FS.
     Downloads every object under s3://{bucket}/{prefix} via the lakeFS S3 gateway."""
+    if not (os.environ.get("LAKEFS_ACCESS_KEY") and os.environ.get("LAKEFS_SECRET_KEY")):
+        # Off-cluster there is no S3 gateway to fall back to (live job 5154708:
+        # a silent fallback ended in boto3 "Unable to locate credentials").
+        raise SystemExit(
+            f"[qat-finetune] no lakeFS S3 keys and no staged dataset (KUBECORE_DATASET_DIR) — "
+            "off-cluster runs need the platform stage-in; in-cluster runs need LAKEFS_ACCESS_KEY/SECRET_KEY")
     import boto3
     s3 = boto3.client(
         "s3",
@@ -51,6 +57,39 @@ def _download_prefix(bucket, prefix, dest):
             s3.download_file(bucket, key, local)
             n += 1
     print(f"[dataset] downloaded {n} objects from s3://{bucket}/{prefix} -> {dest}", flush=True)
+
+
+def _staged_dataset_dir():
+    """Off-cluster (MeluXina) the platform stages the dataset ref onto the
+    node and bind-mounts it read-only at KUBECORE_DATASET_DIR (PRD-1016 F-04).
+    Return the directory holding data.yaml — platform standard
+    {ref}/dataset/{version}/ first, then a ref whose root IS the dataset — or
+    None when nothing is staged (in-cluster: download from the S3 gateway)."""
+    root = os.environ.get("KUBECORE_DATASET_DIR")
+    if not root or not os.path.isdir(root):
+        return None
+    version = os.environ.get("KUBECORE_DATASET_VERSION", "")
+    for candidate in (os.path.join(root, "dataset", version) if version else None, root):
+        if candidate and os.path.exists(os.path.join(candidate, "data.yaml")):
+            return candidate
+    raise SystemExit(
+        f"[qat-finetune] KUBECORE_DATASET_DIR={root} is mounted but holds no data.yaml under "
+        "dataset/{version}/ or its root — the staged ref does not carry a dataset in the platform layout.")
+
+
+def _link_staged(staged, dest):
+    """Expose the read-only staged dataset under {dest}: symlink every entry,
+    copy data.yaml so _fix_data_yaml can repoint it."""
+    import shutil
+    for name in os.listdir(staged):
+        target = os.path.join(dest, name)
+        if os.path.lexists(target):
+            continue
+        if name == "data.yaml":
+            shutil.copyfile(os.path.join(staged, name), target)
+        else:
+            os.symlink(os.path.join(staged, name), target)
+    print(f"[dataset] staged at {staged} -> linked under {dest} (local mode)", flush=True)
 
 
 def _fix_data_yaml(dataset_dir):
@@ -115,7 +154,12 @@ def main() -> None:
     _ref = data.get("ref", "main"); _ver = data.get("version", "") or _ref
     os.makedirs(DATASET_DIR, exist_ok=True)
     os.makedirs(RUNS_DIR, exist_ok=True)
-    _download_prefix(repo, f"{_ref}/dataset/{_ver}/", DATASET_DIR)
+    os.environ.setdefault("KUBECORE_DATASET_VERSION", _ver)
+    staged = _staged_dataset_dir()
+    if staged:
+        _link_staged(staged, DATASET_DIR)
+    else:
+        _download_prefix(repo, f"{_ref}/dataset/{_ver}/", DATASET_DIR)
     _fix_data_yaml(DATASET_DIR)
 
     _setup_mlflow_auth()
