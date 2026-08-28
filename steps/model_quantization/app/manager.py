@@ -8,6 +8,7 @@ import boto3
 from botocore.config import Config as BotoConfig
 
 from app.logger import setup_logging
+from app.services import lakefs_objects
 from app.models.config import Config
 from app.models.quantization import QuantizationParams, QuantizationResult
 from app.services.quantization_service import QuantizationService
@@ -42,6 +43,11 @@ class Manager:
                 region_name=None,
                 config=boto_cfg,
             )
+        if lakefs_objects.bearer_available():
+            # Off-cluster (MeluXina): no S3 gateway keys, only the run's bearer
+            # token — the objects API stands in for boto3 (PRD-1016 F-05).
+            self._logger.info("S3 client: lakeFS objects API (bearer) at %s", os.environ["LAKEFS_ENDPOINT"])
+            return lakefs_objects.BearerClient()
         return boto3.client(
             "s3",
             endpoint_url=cfg.s3_endpoint_url,
