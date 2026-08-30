@@ -14,7 +14,6 @@ defaults:
   # below merge onto these and are validated at compose time
   - data_schema
   - quantization_schema
-  - evaluation
   - experiment
   - data
   - model: yolov8n
