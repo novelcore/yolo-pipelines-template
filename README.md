@@ -132,3 +132,7 @@ through the public endpoints with a short-lived token minted per job.
 - Dataset layout is unchanged: `s3://{repo}/{ref}/dataset/{version}/`.
 - Steps pinned with a `compute-class` annotation stay in-cluster.
 
+## License
+
+This project is licensed under the Apache License, Version 2.0. See the
+[LICENSE](LICENSE) file for the full terms.
