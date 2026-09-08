@@ -94,7 +94,10 @@ def test_when_expr_translation_and_refusal():
 def test_submit_code_places_the_job_by_class():
     from kubecore.meluxina import MELUXINA_SUBMIT_CODE as code
     assert "def hpc_class():" in code and "HPC = hpc_class()" in code.split("def submit():", 1)[1]
-    assert "'partition': HPC['partition']" in code and "os.environ.get('HPC_ACCOUNT') or 'p201342'" in code
+    # PRD-HPC-1231: the account (and user/paths) come from the pipeline context
+    # via hpc_identity(); no literal account or user survives in the submit code.
+    assert "'partition': HPC['partition']" in code and "'account': ident['account']" in code
+    assert "p201342" not in code and "u104378" not in code
     assert "'HPC_GPUS=' + str(HPC.get('gpus') or 0)" in code
     assert 'NV=""; [ "${HPC_GPUS:-0}" -gt 0 ] && NV="--nv"' in code
     assert "apptainer exec --nv" not in code
