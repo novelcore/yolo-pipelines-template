@@ -22,7 +22,7 @@ import pathlib
 import sys
 
 from dataset_cli.lakefs_client import LakeFSClient
-from dataset_cli.login import login as do_login, save_session
+from dataset_cli.login import Credential, login as do_login, save_session
 from dataset_cli.sync import sync as do_sync
 
 
@@ -42,10 +42,12 @@ def main() -> None:
         if not LakeFSClient(url, cookie).check_auth():
             sys.exit("ERROR: LAKEFS_COOKIE is invalid or expired.")
         save_session(url, cookie)
+        cred = Credential(cookie=cookie)
     else:
-        cookie = do_login(url)
+        # browser login -> per-user bearer token (cookie paste only as fallback)
+        cred = do_login(url)
 
-    client = LakeFSClient(url, cookie, concurrency=concurrency)
+    client = LakeFSClient(url, cookie=cred.cookie, token=cred.token, concurrency=concurrency)
     if not client.branch_exists(repo, branch):
         client.ensure_branch(repo, branch, client.default_branch(repo))
 
