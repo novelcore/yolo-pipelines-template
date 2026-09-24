@@ -13,7 +13,8 @@ keep working. It reuses the cached browser session if present; if a
 
 Old env vars: LAKEFS_URL, LAKEFS_REPO, LAKEFS_BRANCH, LOCAL_DIR,
               LAKEFS_COOKIE (optional), CONCURRENCY (optional),
-              UPLOAD_PREFIX (optional; discouraged — ref-native uses root).
+              LAKEFS_DATA_VERSION (optional; default = LAKEFS_BRANCH),
+              UPLOAD_PREFIX (optional; overrides the standard dataset/<version>).
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ import sys
 
 from dataset_cli.lakefs_client import LakeFSClient
 from dataset_cli.login import Credential, login as do_login, save_session
-from dataset_cli.sync import sync as do_sync
+from dataset_cli.sync import dataset_prefix, sync as do_sync
 
 
 def main() -> None:
@@ -34,7 +35,10 @@ def main() -> None:
     if not (url and repo and local):
         sys.exit("ERROR: LAKEFS_URL, LAKEFS_REPO and LOCAL_DIR are required.")
     concurrency = int(os.environ.get("CONCURRENCY", "16"))
-    prefix = os.environ.get("UPLOAD_PREFIX", "").strip("/")
+    # Platform standard: <branch>/dataset/<data-version>/, the path the pipeline
+    # reads. UPLOAD_PREFIX still overrides it for the rare custom layout.
+    version = os.environ.get("LAKEFS_DATA_VERSION") or branch
+    prefix = os.environ.get("UPLOAD_PREFIX", "").strip("/") or dataset_prefix(version)
 
     cookie = os.environ.get("LAKEFS_COOKIE")
     if cookie:
