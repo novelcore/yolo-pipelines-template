@@ -39,7 +39,18 @@ Run the tool and point it at your dataset folder.
 python3 scripts/upload-dataset.py /path/to/your-dataset
 ```
 
-Replace `/path/to/your-dataset` with the real folder on your computer. If you skipped the config file in Step 2, add your links like this instead.
+Replace `/path/to/your-dataset` with the real folder on your computer. That uploads it as the dataset called `main`.
+
+To keep more than one dataset, give each one a name after the folder. The name is what you will type as `data-ref` when you run.
+
+```bash
+python3 scripts/upload-dataset.py /path/to/your-dataset my-cats-v1
+```
+
+!!! warning "Same name replaces"
+    Uploading again with a name you already used makes that dataset match your folder. Files you do not have on your computer are removed from it. The tool shows you which files and asks before it removes anything. To keep the old one, pick a new name.
+
+If you skipped the config file in Step 2, add your links like this instead.
 
 ```bash
 python3 scripts/upload-dataset.py /path/to/your-dataset \
@@ -72,7 +83,7 @@ Open the lakeFS link in your browser. You should see your dataset there, with th
 
 ## What to remember
 
-The tool told you a **data ref**. This is usually `main`. Write it down. You will type it into the run form in the next step, so the pipeline knows which dataset to train on.
+The tool told you a **data ref**. It is the name you gave the dataset, or `main` if you did not give one. Write it down. You will type it into the run form in the next step, so the pipeline knows which dataset to train on.
 
 Next, run the pipeline. Go to [Run the pipeline](run-it.md).
 

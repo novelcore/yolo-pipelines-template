@@ -10,11 +10,12 @@ applies THREE actions so the branch mirrors the local tree exactly:
 lakeFS stores an MD5-of-content checksum per object (returned by objects/ls),
 which we compare to a local MD5 — cheap and exact, catching same-name content
 edits that a name+size diff would miss. After a clean pass it makes ONE commit
-on the branch; the catalog probe + dropdown then pin that commit.
+on the branch.
 
-Objects are uploaded at the branch ROOT (ref-native: the dataset lives at
-``s3://<repo>/<branch>/``). A nested prefix is refused unless explicitly asked
-for, to avoid re-introducing the retired ``dataset/{version}/`` anti-pattern.
+Callers upload under ``dataset_prefix(version)``, i.e. the platform-standard
+``s3://<repo>/<data-ref>/dataset/<data-version>/`` that config-validation and
+dataset-loading read. Because the sync mirrors, callers that act for a person
+pass ``confirm_deletes=True`` so remote files are never deleted silently.
 """
 from __future__ import annotations
 
@@ -27,6 +28,43 @@ import time
 from dataclasses import dataclass, field
 
 from .lakefs_client import LakeFSClient, LakeFSError
+
+
+def dataset_prefix(version: str) -> str:
+    """Where a dataset lives inside its lakeFS branch: ``dataset/<version>``.
+
+    PLATFORM STANDARD: the pipeline (config-validation and dataset-loading)
+    reads ``s3://<repo>/<data-ref>/dataset/<data-version>/`` and nothing else,
+    with data-version defaulting to data-ref. Every upload path must derive its
+    location from here; a flat ``dataset/`` or the branch root uploads fine and
+    then fails the run with "dataset path not found or empty".
+    """
+    return f"dataset/{version.strip('/')}"
+
+
+def _confirm_deletes(plan: "SyncPlan", repo: str, branch: str) -> None:
+    """Sync MIRRORS the local folder, so files on the target that are not in it
+    get deleted. Say so and ask, instead of doing it silently."""
+    n = len(plan.delete)
+    print(f"\n⚠️  '{branch}' in '{repo}' has {n} file(s) that are NOT in your local "
+          "folder.\n    Uploading makes the dataset match your folder, so they will be "
+          "DELETED:")
+    for rp in plan.delete[:10]:
+        print(f"      - {rp}")
+    if n > 10:
+        print(f"      … and {n - 10} more")
+    print("    To keep them, upload under a different dataset name instead.")
+    if not sys.stdin.isatty():
+        sys.exit("Aborted: this would delete files and there is no terminal to "
+                 "confirm on. Re-run with --yes if the deletions are intended.")
+    sys.stdout.write(f"Delete these {n} file(s)? [y/N] ")
+    sys.stdout.flush()
+    try:
+        answer = sys.stdin.readline().strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        answer = ""
+    if answer not in ("y", "yes"):
+        sys.exit("Aborted — nothing was uploaded or deleted.")
 
 
 @dataclass
@@ -122,7 +160,8 @@ def _run_pool(items, fn, label: str, concurrency: int) -> list[str]:
 
 def sync(root: pathlib.Path, client: LakeFSClient, repo: str, branch: str,
          prefix: str = "", concurrency: int = 16, dry_run: bool = False,
-         commit_message: str | None = None, extra_metadata: dict | None = None) -> str | None:
+         commit_message: str | None = None, extra_metadata: dict | None = None,
+         confirm_deletes: bool = False) -> str | None:
     """Execute the incremental sync and commit. Returns the commit id (or None)."""
     print(f"Diffing local tree against lakefs://{repo}/{branch}"
           f"{('/' + prefix) if prefix else ' (root)'} …")
@@ -143,6 +182,9 @@ def sync(root: pathlib.Path, client: LakeFSClient, repo: str, branch: str,
             print(f"    - {rp}")
         print("(dry run — no changes made)")
         return None
+
+    if confirm_deletes and plan.delete:
+        _confirm_deletes(plan, repo, branch)
 
     # 1) uploads
     up_failures = _run_pool(

@@ -1,8 +1,8 @@
 # `kubecore-dataset` — the dataset tool
 
 The command-line tool that ships in this app repo. It gets a YOLO-pose dataset
-from your laptop into your project's data store, so it shows up in the pipeline's
-`dataset-ref` dropdown. No cluster access, no keys — just your browser.
+from your laptop into your project's data store, at the place the pipeline reads
+it. No cluster access, no keys — just your browser.
 
 > If your app has a `.kubecore/dataset-config.yaml` (copy the example file and fill
 > in the values your contact gives you), the tool discovers your lakeFS URL and repo,
@@ -49,7 +49,13 @@ Everywhere below you can swap `kubecore-dataset <cmd>` for `python -m dataset_cl
 ./scripts/upload-dataset.py  datasets/my_dataset  my-first-dataset
 ```
 
-Logs you in (browser), validates the dataset, uploads it, saves a version. Done.
+Logs you in (browser), validates the dataset, uploads it as the dataset named
+**`my-first-dataset`**, saves a version. When you run the pipeline, type that same
+name as **`data-ref`**. Leave the name out and it is `main`.
+
+> **One name = one dataset.** Uploading to a name that already has a dataset
+> *replaces* it with your folder: files you don't have locally are removed. The tool
+> lists them and asks before deleting anything. Use a new name to keep both.
 
 ---
 
@@ -83,7 +89,8 @@ kubecore-dataset sync datasets/my_dataset --branch my-first-dataset
 ```
 
 Compares your folder to the stored version, uploads new/changed files, removes files
-you deleted, and saves one new version. Re-running is always safe.
+you deleted, and saves one new version. If anything would be removed it lists the
+files and asks first (`--yes` skips the question). Re-running unchanged is a no-op.
 
 ---
 
@@ -110,9 +117,9 @@ names:
 
 ## After uploading
 
-Your dataset name appears in the `data-ref` dropdown on the Argo Workflows submit
-form after a few minutes; the list refreshes on its own. Then run your pipeline from
-the Argo UI. See the **Run the pipeline** page in the project guide.
+Run your pipeline from the Argo UI and type your dataset name in the `data-ref`
+field (it is usable immediately). See the **Run the pipeline** page in the project
+guide.
 
 ---
 
@@ -125,7 +132,9 @@ you're running outside the app clone:
 |---|---|
 | `--url` / `LAKEFS_URL` | your lakeFS URL (auto-discovered otherwise) |
 | `--repo` / `LAKEFS_REPO` | your lakeFS repo (auto-discovered otherwise) |
-| `--branch` | the dataset name (the dropdown value) |
+| `--branch` (sync) / 2nd argument (upload-dataset.py) | the dataset name, which is what you type as `data-ref` |
+| `--data-version` | a version folder inside the dataset (default: same as the name) |
+| `--yes` | don't ask before removing files that aren't in your folder |
 | `--paste` | guided sign-in instead of the automatic browser flow |
 | `--dry-run` | show what would change without uploading |
 
