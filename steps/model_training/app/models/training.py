@@ -174,7 +174,11 @@ class TrainingParams(BaseModel):
     dfl: float = Field(default=1.5, gt=0.0)
 
     # ---- Early stopping ----
-    patience: int = Field(default=50, gt=0)
+    # 0 disables early stopping: Ultralytics treats it as "never stop"
+    # (EarlyStopping: `patience or float("inf")`), and it is exactly what
+    # config/train/callbacks/none.yaml selects. gt=0 made train.callbacks=none
+    # crash every training run before it started.
+    patience: int = Field(default=50, ge=0)
 
     # ---- Training device ----
     device: Optional[str] = Field(
