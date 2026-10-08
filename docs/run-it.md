@@ -26,6 +26,7 @@ Here are the handful worth setting. Everything else can stay as it is.
 |---|---|---|
 | `experiment-name` | Names your run so you can find it later | something like `my-first-run` |
 | `data-ref` | Which dataset to train on | the data ref from the upload step, usually `main` |
+| `data-version` | Which version of that dataset | leave empty, unless you uploaded with `--data-version` |
 | `model` | Which model size to train | `yolov8n` to start. It is the small, fast one |
 | `train-epochs` | How many rounds of training | a small number like `10` for your first test |
 | `quantization-mode` | Whether to also make a smaller INT8 model | `none` for now |

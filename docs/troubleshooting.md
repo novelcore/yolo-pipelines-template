@@ -17,7 +17,17 @@ This is the safety net working. It stopped before spending any training time. Fi
 
 Check the `data-ref` you typed on the form. It must match where you uploaded. If you uploaded to the default, that is `main`. A typo here means the pipeline looks in the wrong place and finds nothing.
 
+Then check `data-version`. Leave it empty, unless you uploaded with `--data-version`; then type that same value here.
+
 Also open lakeFS and confirm your dataset is really there, with `data.yaml`, `images`, and `labels`. If the upload did not finish, run it again. See [Upload your dataset](upload-dataset.md).
+
+## The upload cannot sign in
+
+The tool opens your browser to sign in and waits about three minutes. If the browser did not open, copy the link the tool printed into your browser yourself. If signing in keeps failing, sign in the guided way with `kubecore-dataset login --paste` and follow the steps it shows, then run the upload again. It remembers that you signed in.
+
+## The upload says `externally-managed-environment`
+
+Your computer does not let `pip` change its own Python. Install inside a virtual environment, as shown in [Upload your dataset](upload-dataset.md), step 2.
 
 ## A step is stuck and never starts
 
@@ -48,6 +58,7 @@ That happens. Copy the message, note what you were doing, and send it to your pl
 ## A quick checklist before you submit
 
 - [ ] `data-ref` matches where I uploaded, usually `main`.
+- [ ] `data-version` is empty, unless I uploaded with `--data-version`.
 - [ ] My dataset shows up in lakeFS with data.yaml, images, and labels.
 - [ ] For a first test: small model, low epochs, quantization off.
 - [ ] `experiment-name` is something I will recognize later.

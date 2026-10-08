@@ -16,10 +16,14 @@ the project guide.
 ## Install
 
 ```bash
-pip install ./dataset_tools           # from the app repo root
+python3 -m venv .venv                 # from the app repo root
+. .venv/bin/activate                  # Windows: .venv\Scripts\activate
+pip install ./dataset_tools
 ```
 
-Python 3.9+. Only needs `requests` and `pyyaml`.
+Python 3.9+. Only needs `requests` and `pyyaml`. The virtual environment matters:
+on recent Ubuntu, Debian and Homebrew Python a bare `pip install` is refused with
+`externally-managed-environment`.
 
 ### If `kubecore-dataset` is "not found" / "not recognized"
 

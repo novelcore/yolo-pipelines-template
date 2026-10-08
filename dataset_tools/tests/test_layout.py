@@ -197,3 +197,20 @@ def test_unreachable_lakefs_is_one_readable_line(monkeypatch, tmp_path):
     msg = str(exc.value)
     assert msg.startswith("ERROR: cannot reach lakefs-gone.example")
     assert "\n" not in msg
+
+
+def test_sync_never_sees_a_name_prefixed_sibling(tmp_path):
+    """dataset/main must not list, and so never plan to delete, dataset/main2/."""
+    seen = []
+
+    class _Remote:
+        def list_objects(self, repo, ref, prefix=""):
+            seen.append(prefix)
+            for path in ("dataset/main/old.png", "dataset/main2/keep.png"):
+                if path.startswith(prefix):
+                    yield {"path": path, "checksum": "x"}
+
+    (tmp_path / "data.yaml").write_text("path: .\n")
+    plan = sync_mod.plan_sync(tmp_path, _Remote(), "r", "main", "dataset/main")
+    assert seen == ["dataset/main/"]
+    assert plan.delete == ["dataset/main/old.png"]

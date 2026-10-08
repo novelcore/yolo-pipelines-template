@@ -100,7 +100,9 @@ def _local_index(root: pathlib.Path, prefix: str) -> dict[str, tuple[pathlib.Pat
 def _remote_index(client: LakeFSClient, repo: str, ref: str, prefix: str) -> dict[str, str]:
     """Map repo_path -> checksum for every object on the ref under prefix."""
     out: dict[str, str] = {}
-    for obj in client.list_objects(repo, ref, prefix):
+    # The trailing slash keeps a sibling that merely starts with the same name
+    # (dataset/main2/ next to dataset/main/) out of the index, and so out of the deletes.
+    for obj in client.list_objects(repo, ref, f"{prefix}/" if prefix else ""):
         out[obj["path"]] = obj.get("checksum", "")
     return out
 

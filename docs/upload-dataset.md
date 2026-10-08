@@ -23,22 +23,20 @@ Everything else on this page happens inside that folder.
 
 ## Step 2. Install the tool
 
-The upload tool is already in your app, in a folder called `dataset_tools`. Install it once.
+The upload tool is already in your app, in a folder called `dataset_tools`. Install it once, inside a small private Python space for this project (a "virtual environment").
 
 ```bash
+python3 -m venv .venv
+. .venv/bin/activate
 pip install ./dataset_tools
 ```
 
-You only do this the first time.
+On Windows, the middle line is `.venv\Scripts\activate` instead.
 
-!!! tip "If you see `command not found: pip`"
-    Some computers do not have a bare `pip`. Use one of these instead. They do the same thing.
+You only install once. Next time, just run the middle line again to step back into that space before uploading.
 
-    ```bash
-    python3 -m pip install ./dataset_tools
-    # or
-    pip3 install ./dataset_tools
-    ```
+!!! tip "Why the extra two lines?"
+    Many computers no longer let `pip install` change the system's own Python. They stop with a message that mentions `externally-managed-environment`. The virtual environment avoids that, and keeps the tool out of the way of everything else on your computer.
 
 ## Step 3. Your lakeFS is already set up
 
