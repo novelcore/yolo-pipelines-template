@@ -18,11 +18,13 @@ import os
 import pathlib
 import sys
 
+import requests
+
 from . import __version__
 from .appconfig import config_value
 from .lakefs_client import LakeFSClient
 from .login import login as do_login
-from .sync import sync as do_sync
+from .sync import dataset_prefix, sync as do_sync
 from .validate import validate_dataset
 
 
@@ -75,14 +77,10 @@ def cmd_sync(args, *, do_auth: bool = True) -> int:
     branch = args.branch or _env("LAKEFS_BRANCH", "main")
     root = pathlib.Path(args.dataset_dir)
 
-    # ref-native guard
-    prefix = (args.prefix or "").strip("/")
-    if prefix and not args.allow_prefix:
-        sys.exit(
-            f"ERROR: refusing to upload under nested prefix '{prefix}'. The "
-            "pipeline expects the dataset at the branch ROOT (s3://repo/branch/). "
-            "Pass --allow-prefix only if you really mean it."
-        )
+    version = args.data_version or branch
+    prefix = (args.prefix or "").strip("/") or dataset_prefix(version)
+    print(f"Dataset name (data-ref): {branch}   data-version: {version}")
+    print(f"Target: s3://{repo}/{branch}/{prefix}/\n")
 
     # 1) validate (unless skipped)
     if not args.skip_validation:
@@ -107,19 +105,15 @@ def cmd_sync(args, *, do_auth: bool = True) -> int:
     commit_id = do_sync(
         root, client, repo, branch,
         prefix=prefix, concurrency=args.concurrency, dry_run=args.dry_run,
-        extra_metadata={"branch": branch},
+        extra_metadata={"branch": branch, "data_version": version},
+        confirm_deletes=not args.yes,
     )
     if commit_id and not args.dry_run:
-        # No cluster/kubectl instructions here: the client has only the browser +
-        # the Argo UI. The catalog list refreshes on its own (~30 min), so all they
-        # need to know is the name to pick and that it'll appear shortly.
-        print(
-            f"\n✓ Done. '{branch}' is uploaded and versioned "
-            f"(commit {commit_id[:12]}).\n"
-            f"  Next: open the Argo Workflows UI, Submit your training pipeline, and\n"
-            f"  pick '{branch}' in the dataset-ref dropdown. It appears there within\n"
-            f"  ~30 minutes of uploading (the list refreshes automatically)."
-        )
+        # No cluster/kubectl instructions here: the client has only the browser
+        # and the run form.
+        print(f"\n✓ Done. Dataset '{branch}' is uploaded and versioned (commit {commit_id[:12]}).")
+        print(f"  When you run the pipeline, set data-ref = {branch}"
+              + (f" and data-version = {version}" if version != branch else "") + ".")
     return 0
 
 
@@ -127,7 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="kubecore-dataset",
         description="Log in, validate, and incrementally sync YOLO-pose datasets "
-                    "to lakeFS for the ML pipeline dropdown.",
+                    "to lakeFS for the ML pipeline.",
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
@@ -135,14 +129,19 @@ def build_parser() -> argparse.ArgumentParser:
     def add_common(sp):
         sp.add_argument("--url", help="lakeFS ingress URL (or env LAKEFS_URL)")
         sp.add_argument("--repo", help="lakeFS repository (or env LAKEFS_REPO)")
-        sp.add_argument("--branch", help="target branch (or env LAKEFS_BRANCH, default main)")
+        sp.add_argument("--branch", help="dataset name = the data-ref you pick when running "
+                                         "(or env LAKEFS_BRANCH, default main)")
+        sp.add_argument("--data-version", default=None,
+                        help="data-version folder inside the dataset (default: same as --branch)")
+        sp.add_argument("--yes", action="store_true",
+                        help="don't ask before deleting remote files that are not in your folder")
         sp.add_argument("--concurrency", type=int, default=16)
         sp.add_argument("--paste", action="store_true",
                         help="skip the browser login; use guided cookie paste")
         sp.add_argument("--prefix", default="",
-                        help="(discouraged) upload under a nested prefix")
+                        help="advanced: override the standard dataset/<data-version> location")
         sp.add_argument("--allow-prefix", action="store_true",
-                        help="permit --prefix (bypasses the ref-native guard)")
+                        help=argparse.SUPPRESS)  # kept so old commands still parse; no longer needed
         sp.add_argument("--skip-validation", action="store_true")
         sp.add_argument("--dry-run", action="store_true")
 
@@ -171,7 +170,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except requests.exceptions.ConnectionError as exc:
+        sys.exit(unreachable_message(exc))
+
+
+def unreachable_message(exc: Exception) -> str:
+    """One readable line instead of a urllib3 traceback."""
+    host = getattr(getattr(exc, "request", None), "url", "") or ""
+    host = host.split("/")[2] if host.count("/") >= 2 else "lakeFS"
+    return (f"ERROR: cannot reach {host}. Check the lakeFS link in "
+            ".kubecore/dataset-config.yaml (or --url) and your network, then try again.")
 
 
 if __name__ == "__main__":

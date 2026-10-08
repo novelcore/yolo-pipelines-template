@@ -12,6 +12,8 @@ You will use two web pages and one small tool. Your platform contact gives you t
 
 Ask your contact for the link to each one, plus confirmation that your account can sign in. Without access you cannot upload data or start a run.
 
+You also need access to your app's code on GitHub, because you copy it to your computer to upload a dataset. Ask your contact for the address of your app's GitHub repository.
+
 ## A computer with Python
 
 To upload a dataset you run a small tool on your own computer. It needs Python.
@@ -44,6 +46,7 @@ A `data.yaml` file at the top. An `images` folder and a `labels` folder, each sp
 
 - [ ] I have the links to the run page, the results page, and lakeFS.
 - [ ] My account can sign in to each one.
+- [ ] I can open my app's GitHub repository.
 - [ ] Python is installed (`python3 --version` shows a number).
 - [ ] My dataset has `data.yaml`, `images/`, and `labels/` in the shape above.
 

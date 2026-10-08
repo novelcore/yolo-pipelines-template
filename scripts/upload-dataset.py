@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """Upload a local YOLO-pose dataset to your app's lakeFS.
 
-Thin wrapper around the vendored ``kubecore-dataset`` CLI (``dataset_tools/``).
-Your pipeline's ``dataset_loading`` reads the dataset from the branch root::
+    ./scripts/upload-dataset.py <local-dataset-dir> [dataset-name]
 
-    s3://<repo>/<branch>/dataset/     (images/..., labels/..., data.yaml)
-
-so we log in (browser SSO), validate the dataset, and incrementally sync it
-(uploads AND deletions) into ``dataset/`` on ``<branch>``, then commit.
-
-    ./scripts/upload-dataset.py <local-dataset-dir> [version]
-                                [--branch B] [--url URL] [--repo REPO] [--dry-run]
-
-  <local-dataset-dir>  Directory with data.yaml + images/{train,val,test} +
+  <local-dataset-dir>  Folder with data.yaml + images/{train,val,test} +
                        labels/{train,val,test} at its ROOT (Ultralytics pose).
-  version              Provenance tag recorded in MLflow. Defaults to the branch.
+  dataset-name         What you will type as `data-ref` when you run the
+                       pipeline. Default: `main`. Use a new name for a new
+                       dataset; re-using a name REPLACES that dataset's
+                       contents with your folder (you are asked first if
+                       anything would be deleted).
 
-lakeFS URL + repo + branch are read from .kubecore/dataset-config.yaml when it
-exists, so you can pass only the dataset dir. Otherwise pass --url and --repo.
+The files land at the path the pipeline reads:
+
+    s3://<repo>/<dataset-name>/dataset/<data-version>/
+
+where data-version defaults to the dataset name (--data-version to change it).
+lakeFS URL + repo are read from .kubecore/dataset-config.yaml when it exists;
+otherwise pass --url and --repo.
 """
 from __future__ import annotations
 
@@ -33,30 +33,37 @@ sys.path.insert(0, str(_REPO / "dataset_tools"))
 from dataset_cli.appconfig import config_value  # noqa: E402
 from dataset_cli.lakefs_client import LakeFSClient  # noqa: E402
 from dataset_cli.login import login as do_login  # noqa: E402
-from dataset_cli.sync import sync as do_sync  # noqa: E402
+from dataset_cli.sync import dataset_prefix, sync as do_sync  # noqa: E402
 from dataset_cli.validate import validate_dataset  # noqa: E402
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Upload a YOLO-pose dataset to lakeFS (this app's layout).")
-    ap.add_argument("dataset_dir", help="local dataset directory (Ultralytics pose layout at root)")
-    ap.add_argument("version", nargs="?", default=None,
-                    help="MLflow provenance tag (default: the branch)")
-    ap.add_argument("--branch", default=None, help="lakeFS branch / data-ref (default: config or 'main')")
+    ap = argparse.ArgumentParser(description="Upload a YOLO-pose dataset to lakeFS, where the pipeline reads it.")
+    ap.add_argument("dataset_dir", help="local dataset folder (Ultralytics pose layout at its root)")
+    ap.add_argument("name", nargs="?", default=None,
+                    help="dataset name = the data-ref you type when running (default: main)")
+    ap.add_argument("--branch", default=None, help=argparse.SUPPRESS)  # old spelling of `name`
+    ap.add_argument("--data-version", default=None,
+                    help="data-version folder inside the dataset (default: same as the name)")
     ap.add_argument("--url", default=None, help="lakeFS ingress URL (default: .kubecore/dataset-config.yaml)")
     ap.add_argument("--repo", default=None, help="lakeFS repo (default: .kubecore/dataset-config.yaml)")
     ap.add_argument("--concurrency", type=int, default=16)
     ap.add_argument("--prefix", default=None,
-                    help="object prefix under the branch (default: dataset)")
+                    help="advanced: override the standard dataset/<data-version> location")
+    ap.add_argument("--yes", action="store_true",
+                    help="don't ask before deleting remote files that are not in your folder")
     ap.add_argument("--dry-run", action="store_true", help="show what would sync, upload nothing")
     args = ap.parse_args()
+
+    if args.name and args.branch and args.name != args.branch:
+        sys.exit(f"ERROR: dataset name '{args.name}' and --branch '{args.branch}' disagree; pass one.")
 
     start = args.dataset_dir
     url = args.url or config_value("lakefsUrl", start)
     repo = args.repo or config_value("repo", start)
-    branch = args.branch or config_value("branch", start) or "main"
-    version = args.version or branch
-    prefix = args.prefix.strip("/") if args.prefix else "dataset"
+    branch = args.name or args.branch or config_value("branch", start) or "main"
+    version = args.data_version or branch
+    prefix = args.prefix.strip("/") if args.prefix else dataset_prefix(version)
 
     if not url or not repo:
         sys.exit("ERROR: could not determine lakeFS url/repo. Run inside the app "
@@ -69,7 +76,9 @@ def main() -> int:
         for e in result.errors:
             print(f"    - {e}")
         return 2
-    print(f"✓ Dataset valid. Target: s3://{repo}/{branch}/{prefix}/")
+    print("✓ Dataset valid.")
+    print(f"  Dataset name (data-ref): {branch}   data-version: {version}")
+    print(f"  Target: s3://{repo}/{branch}/{prefix}/")
 
     if args.dry_run:
         print("(--dry-run) skipping login + upload.")
@@ -82,14 +91,23 @@ def main() -> int:
     if not client.branch_exists(repo, branch):
         client.ensure_branch(repo, branch, client.default_branch(repo))
 
-    # 3) incremental sync into dataset/ (uploads + deletions), then commit
+    # 3) incremental sync (uploads + deletions, deletions confirmed), then commit
     commit_id = do_sync(pathlib.Path(args.dataset_dir), client, repo, branch,
-                        prefix=prefix, concurrency=args.concurrency)
+                        prefix=prefix, concurrency=args.concurrency,
+                        extra_metadata={"branch": branch, "data_version": version},
+                        confirm_deletes=not args.yes)
     print(f"\n✓ Uploaded to s3://{repo}/{branch}/{prefix}/  (commit {commit_id})")
-    print(f"  Run the pipeline with data-ref={branch}"
-          + (f" and data-version={version}" if version != branch else "") + ".")
+    print(f"  When you run the pipeline, set data-ref = {branch}"
+          + (f" and data-version = {version}" if version != branch else "") + ".")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import requests
+
+    from dataset_cli.__main__ import unreachable_message  # noqa: E402
+
+    try:
+        sys.exit(main())
+    except requests.exceptions.ConnectionError as exc:
+        sys.exit(unreachable_message(exc))
