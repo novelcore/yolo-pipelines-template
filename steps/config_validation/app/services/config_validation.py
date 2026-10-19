@@ -68,7 +68,7 @@ class ConfigValidationService:
 
         self._check_dataset_path(s3, data, platform)
         self._check_pretrained_weights(s3, model)
-        self._check_checkpoint_resume(s3, resolved.get("train") or {}, platform)
+        self._check_checkpoint_resume(s3, data, platform)
         self._log.info("config-validation: all liveness checks passed")
 
     # ------------------------------------------------------------------ s3/lakefs
@@ -217,14 +217,13 @@ class ConfigValidationService:
             ) from exc
         self._log.info("pretrained weights OK")
 
-    def _check_checkpoint_resume(self, s3, train: dict, platform: dict) -> None:
+    def _check_checkpoint_resume(self, s3, data: dict, platform: dict) -> None:
         """When the config resumes training, prove the checkpoint exists.
 
-        The setting lives at train.checkpointing.resume_from. The checkpoint
-        bucket/prefix are platform facts (platform.checkpoints, injected from
-        the project lakeFS repo).
+        The checkpoint bucket/prefix are platform facts
+        (platform.checkpoints, injected from the project lakeFS repo).
         """
-        resume_from = str((train.get("checkpointing") or {}).get("resume_from") or "").strip()
+        resume_from = str(data.get("resume_from") or "").strip()
         if not resume_from:
             return
 

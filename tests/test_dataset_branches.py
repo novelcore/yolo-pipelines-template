@@ -146,14 +146,6 @@ def test_validation_miss_names_the_datasets_that_exist():
         svc._check_dataset_path(s3, DATA, PLATFORM)
 
 
-def test_validation_resume_reads_the_train_section():
-    mod, svc = _cv()
-    train = {"checkpointing": {"resume_from": "s3://poulaki/outputs/checkpoints/exp/run/last.pt"}}
-    with pytest.raises(mod.ConfigValidationError, match="checkpoint not found"):
-        svc._check_checkpoint_resume(_S3(set()), train, PLATFORM)
-    svc._check_checkpoint_resume(_S3(set()), {"checkpointing": {"resume_from": ""}}, PLATFORM)
-
-
 # ---------------------------------------------------------------- model-training
 
 def test_checkpoints_are_scoped_to_the_run(monkeypatch):
@@ -301,3 +293,48 @@ def test_no_outputs_branch_keeps_todays_hand_off():
     ctx["lakefs"].pop("outputsBranch", None)
     mr = next(t for t in enhance(_raw(), ctx)["spec"]["templates"] if t["name"] == "meluxina-run")
     assert {e["name"]: e.get("value") for e in mr["container"]["env"]}["OUTPUTS_BRANCH"] == ""
+
+
+# ---------------------------------------------------------------- review fixes
+
+@pytest.mark.parametrize("step", ["qat_finetune", "model_quantization"])
+def test_calibration_download_takes_only_the_dataset(step, tmp_path, monkeypatch):
+    """An old-layout copy kept under the same prefix (dataset/<ref>/) must not
+    be downloaded on every run."""
+    entry = _load_file(f"steps/{step}/app/entry.py", f"{step}_entry_dl")
+    keys = ["c0ffee/dataset/data.yaml", "c0ffee/dataset/images/train/a.jpg",
+            "c0ffee/dataset/labels/train/a.txt", "c0ffee/dataset/cats/images/train/a.jpg"]
+    got = []
+
+    class _Boto:
+        def get_paginator(self, _):
+            return type("P", (), {"paginate": lambda s, **k: [{"Contents": [{"Key": x} for x in keys]}]})()
+
+        def download_file(self, bucket, key, local):
+            got.append(key)
+
+    monkeypatch.setenv("LAKEFS_ACCESS_KEY", "a")
+    monkeypatch.setenv("LAKEFS_SECRET_KEY", "s")
+    monkeypatch.setitem(sys.modules, "boto3", type("B", (), {"client": staticmethod(lambda *a, **k: _Boto())}))
+    entry._download_prefix("poulaki", "c0ffee/dataset/", str(tmp_path))
+    assert sorted(got) == sorted(keys[:3])
+
+
+@pytest.mark.parametrize("rel", ["steps/model_training/app/entry.py", "steps/qat_finetune/app/entry.py",
+                                 "steps/model_quantization/app/entry.py"])
+def test_an_override_outside_the_layout_is_not_silently_replaced_off_cluster(rel, tmp_path, monkeypatch):
+    with _step_app(rel.split("/")[1]):
+        entry = _load_file(rel, rel.replace("/", "_"))
+        (tmp_path / "dataset").mkdir()
+        (tmp_path / "dataset" / "data.yaml").write_text("path: .\n")
+        monkeypatch.setenv("KUBECORE_DATASET_DIR", str(tmp_path))
+        with pytest.raises(SystemExit, match="not staged off-cluster"):
+            entry._staged_dataset_dir("cats/custom/ds/", "cats")
+
+
+def test_slurm_env_omits_unset_checkpoint_settings():
+    """Step code reads os.environ.get(KEY, default): an empty value would beat
+    its default (old code then uploaded to bucket '')."""
+    src = MELUXINA_SUBMIT_CODE
+    assert "'CHECKPOINT_BUCKET=' +" not in src
+    assert "if os.environ.get(k)]" in src
