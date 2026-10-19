@@ -10,6 +10,7 @@ lakeFS repository) and ``key`` (``{branch}/{path}``) vocabulary, stdlib only.
 """
 from __future__ import annotations
 
+import json
 import os
 import urllib.parse
 import urllib.request
@@ -53,6 +54,19 @@ def upload(local_path: Path, bucket: str, key: str, opener=urllib.request.urlope
     )
     with opener(req, timeout=600) as resp:
         resp.read()
+
+
+def commit(bucket: str, branch: str, message: str, metadata: dict | None = None,
+           opener=urllib.request.urlopen) -> str:
+    """Commit what is staged on ``branch``; returns the commit id. Off-cluster
+    uploads only stage objects, exactly like the S3 gateway in-cluster."""
+    body = json.dumps({"message": message, "metadata": metadata or {}}).encode()
+    req = urllib.request.Request(
+        f"{_base()}/repositories/{bucket}/branches/{branch}/commits",
+        data=body, method="POST", headers={**_auth(), "Content-Type": "application/json"},
+    )
+    with opener(req, timeout=60) as resp:
+        return str(json.loads(resp.read().decode() or "{}").get("id", ""))
 
 
 def download(bucket: str, key: str, local_path: Path, opener=urllib.request.urlopen) -> None:

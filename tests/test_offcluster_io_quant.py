@@ -65,14 +65,13 @@ def test_manager_builds_bearer_client_without_gateway_keys(step):
 def test_staged_dataset_is_linked_not_downloaded(step, tmp_path, monkeypatch):
     entry = _load(step, "app/entry.py", "entry")
     monkeypatch.delenv("KUBECORE_DATASET_DIR", raising=False)
-    assert entry._staged_dataset_dir() is None
-    root = tmp_path / "ref"; ds = root / "dataset" / "main"; (ds / "images" / "train").mkdir(parents=True)
+    assert entry._staged_dataset_dir("c0ffee/dataset/", "main") is None
+    root = tmp_path / "commit"; ds = root / "dataset"; (ds / "images" / "train").mkdir(parents=True)
     monkeypatch.setenv("KUBECORE_DATASET_DIR", str(root))
-    monkeypatch.setenv("KUBECORE_DATASET_VERSION", "main")
     with pytest.raises(SystemExit):  # mounted but no dataset -> loud, never S3
-        entry._staged_dataset_dir()
+        entry._staged_dataset_dir("c0ffee/dataset/", "main")
     (ds / "data.yaml").write_text("path: /uploader/machine\ntrain: images/train\n")
-    assert entry._staged_dataset_dir() == str(ds)
+    assert entry._staged_dataset_dir("c0ffee/dataset/", "main") == str(ds)
     dest = tmp_path / "work"; dest.mkdir()
     entry._link_staged(str(ds), str(dest))
     assert (dest / "images").is_symlink() and (dest / "images/train").is_dir()
@@ -88,4 +87,27 @@ def test_gateway_download_without_keys_fails_loudly(step, tmp_path, monkeypatch)
     for var in ("LAKEFS_ACCESS_KEY", "LAKEFS_SECRET_KEY"):
         monkeypatch.delenv(var, raising=False)
     with pytest.raises(SystemExit, match="no lakeFS S3 keys"):
-        entry._download_prefix("poulaki", "main/dataset/main/", str(tmp_path))
+        entry._download_prefix("poulaki", "main/dataset/", str(tmp_path))
+
+
+@pytest.mark.parametrize("step", STEPS)
+def test_dataset_follows_training(step):
+    """Calibration/parity read the snapshot training read (training-result)."""
+    entry = _load(step, "app/entry.py", "entry")
+    tr = {"dataset_ref": "cats", "dataset_commit": "c0ffee", "dataset_prefix": "c0ffee/dataset/"}
+    assert entry._dataset_prefix(tr, "cats") == "c0ffee/dataset/"
+    assert entry._dataset_prefix({}, "cats") == "cats/dataset/"
+
+
+@pytest.mark.parametrize("step", STEPS)
+def test_output_prefix_follows_the_outputs_branch(step, monkeypatch):
+    entry = _load(step, "app/entry.py", "entry")
+    monkeypatch.setenv("CHECKPOINT_PREFIX", "outputs/checkpoints")
+    monkeypatch.setenv("KUBECORE_RUN_ID", "yolo-pipeline-x7k2p")
+    assert entry._output_prefix({}, {}, "exp") == "outputs/quantization/exp/yolo-pipeline-x7k2p"
+    # an explicit prefix is used as given
+    assert entry._output_prefix({"output_prefix": "main/q/"}, {}, "exp") == "main/q"
+    # no outputs branch yet (project before it), no run id (local)
+    monkeypatch.setenv("CHECKPOINT_PREFIX", "main/checkpoints")
+    monkeypatch.delenv("KUBECORE_RUN_ID")
+    assert entry._output_prefix({}, {}, "exp") == "main/quantization/exp"
