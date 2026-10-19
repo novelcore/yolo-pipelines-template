@@ -177,7 +177,7 @@ class ConfigValidationService:
         if str(data.get("source") or "lakefs") == "lakefs" and not data.get("path_override"):
             found = self._available_datasets(s3, bucket)
             hint = (f" Datasets in this repository: {', '.join(found)}." if found
-                    else " No dataset has been uploaded to this repository yet.")
+                    else " `kubecore-dataset list` shows the datasets that exist.")
         self._log.info("checking dataset path %s", uri)
         try:
             resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=1)
