@@ -9,7 +9,9 @@ automatically (field names match).
 
 Dataset: the cluster is manifest-only (no shared FS between step pods), so we use
 the kubeline S3-streaming mode — the trainer streams images/labels straight from
-the lakeFS S3 gateway using bucket = repo, prefix = ``{ref}/dataset/{version}/``.
+the lakeFS S3 gateway at the bucket/prefix dataset-loading resolved
+(``--manifest-summary``): ``{commit}/dataset/``, pinned to the commit the ref
+pointed at when the run started.
 
 MLflow auth (Zitadel machine JWT) is NOT injected by the platform yet, so MLflow
 logging is made NON-FATAL: with no auth present we disable Ultralytics' built-in
@@ -40,29 +42,37 @@ def _mlflow_auth_present() -> bool:
     )
 
 
-def _staged_dataset_dir() -> str | None:
-    """Off-cluster (MeluXina) the platform stages the dataset ref onto the
+def _dataset_location(summary: dict, repo: str, ref: str) -> tuple[str, str, str]:
+    """(bucket, prefix, commit) of this run's dataset: what dataset-loading
+    resolved (its manifest-summary), else the standard ``{ref}/dataset/``."""
+    bucket = str(summary.get("bucket") or "") or repo
+    prefix = str(summary.get("prefix") or "") or f"{ref}/dataset/"
+    return bucket, prefix if prefix.endswith("/") else prefix + "/", str(summary.get("commit") or "")
+
+
+def _staged_dataset_dir(prefix: str, ref: str) -> str | None:
+    """Off-cluster (MeluXina) the platform stages the dataset commit onto the
     node and bind-mounts it read-only at KUBECORE_DATASET_DIR (PRD-1016 F-04).
-    Return the directory holding data.yaml for this run — the ref root mirrors
-    the whole ref, so the dataset lives under dataset/{version}/ — or None when
-    nothing is staged (in-cluster: stream from the lakeFS S3 gateway)."""
+    Return the directory holding data.yaml for this run, or None when nothing
+    is staged (in-cluster: stream from the lakeFS S3 gateway). The mount is the
+    commit root, so the dataset sits where dataset-loading found it (the prefix
+    without its leading ref)."""
     root = os.environ.get("KUBECORE_DATASET_DIR")
     if not root or not os.path.isdir(root):
         return None
-    version = os.environ.get("KUBECORE_DATASET_VERSION", "")
-    # Platform standard first ({ref}/dataset/{version}/ — what config-validation
-    # and dataset-loading read; version defaults to the ref), then a ref whose
-    # root IS the dataset (legacy CLI uploads).
-    for candidate in (os.path.join(root, "dataset", version) if version else None,
-                      root):
-        if candidate and os.path.exists(os.path.join(candidate, "data.yaml")):
+    resolved = prefix.split("/", 1)[1].strip("/") if "/" in prefix else ""
+    # What dataset-loading resolved first, then the standard dataset/, the old
+    # dataset/{ref}/ layout, and a ref whose root IS the dataset (legacy CLI).
+    for candidate in (os.path.join(root, resolved), os.path.join(root, "dataset"),
+                      os.path.join(root, "dataset", ref), root):
+        if os.path.exists(os.path.join(candidate, "data.yaml")):
             return candidate
     # Off-cluster there is no S3 gateway to fall back to (live job 5149139:
     # a silent fallback ended in boto3 "Unable to locate credentials").
     raise SystemExit(
         f"[model-training] KUBECORE_DATASET_DIR={root} is mounted but holds no "
-        "data.yaml under dataset/{version}/ or its root — the staged ref does "
-        "not carry a dataset in the platform layout.")
+        "data.yaml under dataset/ or its root — the staged ref does not carry a "
+        "dataset in the platform layout.")
 
 
 def _guard_mlflow() -> bool:
@@ -123,6 +133,9 @@ def main() -> None:
     parser.add_argument("--data-yaml", default="",
                         help="The dataset's data.yaml (verbatim) emitted by dataset-loading: "
                              "kpt_shape / names / flip_idx, so training matches THIS dataset.")
+    parser.add_argument("--manifest-summary", default="",
+                        help="dataset-loading's {bucket, prefix, ref, commit}: the pinned "
+                             "location every step of this run reads.")
     args, _ = parser.parse_known_args()
     cfg = yaml.safe_load(args.params)
 
@@ -141,10 +154,13 @@ def main() -> None:
 
     repo = platform["lakefs"]["repository"]
     ref = data.get("ref", "main")
-    # Platform standard {ref}/dataset/{version}/ — version defaults to the ref,
-    # exactly as config-validation, dataset-loading, qat and quant resolve it;
-    # an empty version streamed from "{ref}/dataset//" and found no images.
-    version = str(data.get("version") or "") or ref
+    try:
+        summary = json.loads(args.manifest_summary or "{}") or {}
+    except ValueError:
+        summary = {}
+    bucket, prefix, commit = _dataset_location(summary, repo, ref)
+    print(f"[model-training] dataset s3://{bucket}/{prefix} (ref={ref} "
+          f"commit={commit or 'unresolved'})", flush=True)
 
     freeze = train.get("freeze")
     freeze = int(freeze) if freeze not in (None, "", "None") else None
@@ -155,8 +171,7 @@ def main() -> None:
     # (No data.yaml needed: the service generates the correct pose default when
     # dataset_dir has none — kpt_shape [11,3], names {0: spacecraft}.)
     os.makedirs(RUNS_DIR, exist_ok=True)
-    os.environ.setdefault("KUBECORE_DATASET_VERSION", version or ref)
-    staged = _staged_dataset_dir()
+    staged = _staged_dataset_dir(prefix, ref)
     if staged:
         # Local mode: the staged ref is on the node (read-only bind mount).
         dataset_dir, source = staged, "local"
@@ -188,7 +203,7 @@ def main() -> None:
         # (no shared FS holds local labels). The service reads this manifest and sets
         # s3_stream_labels=True (kubecore-operator: manifest-only cluster).
         with open(os.path.join(DATASET_DIR, "dataset_manifest.json"), "w") as _mf:
-            json.dump({"bucket": repo, "prefix": f"{ref}/dataset/{version}/",
+            json.dump({"bucket": bucket, "prefix": prefix,
                        "label_keys": {"_present": True}}, _mf)
 
     mlflow_on = _guard_mlflow()
@@ -204,8 +219,8 @@ def main() -> None:
         output_dir=RUNS_DIR,
         # ---- dataset: staged local dir (HPC) or lakeFS S3 gateway streaming ----
         source=source,
-        s3_bucket=repo,
-        s3_prefix=f"{ref}/dataset/{version}/",
+        s3_bucket=bucket,
+        s3_prefix=prefix,
         pretrained_weights=(model.get("pretrained_weights") or None),
         device=None,  # ultralytics auto-selects: GPU on gpu-t4, CPU when nvidia.com/gpu=0
         # ---- schedule ----
@@ -238,8 +253,8 @@ def main() -> None:
         patience=int(cb.get("patience", 50)),
         # ---- checkpointing (platform injects CHECKPOINT_BUCKET/PREFIX; else derive) ----
         checkpoint_interval=int(ckpt.get("interval_epochs", 10)),
-        checkpoint_bucket=os.environ.get("CHECKPOINT_BUCKET", repo),
-        checkpoint_prefix=os.environ.get("CHECKPOINT_PREFIX", f"{ref}/checkpoints/"),
+        checkpoint_bucket=os.environ.get("CHECKPOINT_BUCKET") or repo,
+        checkpoint_prefix=os.environ.get("CHECKPOINT_PREFIX") or f"{ref}/checkpoints",
         # ---- augmentation ----
         hsv_h=float(aug.get("hsv_h", 0.015)),
         hsv_s=float(aug.get("hsv_s", 0.7)),
@@ -261,8 +276,9 @@ def main() -> None:
         export_formats=_as_csv(export.get("formats")),
         export_precisions=_as_csv(export.get("precisions")),
         # ---- provenance ----
-        dataset_version=(version or None),
+        dataset_version=ref,
         lakefs_branch=ref,
+        lakefs_commit=(commit or None),
     )
 
     # Emit the declared step output (Hera convention: /work/output/<name>.json).
@@ -276,6 +292,8 @@ def main() -> None:
         except Exception:  # noqa: BLE001
             payload = getattr(result, "__dict__", {"result": str(result)})
     payload["_mlflow_logging_enabled"] = mlflow_on
+    # The dataset this run trained on, for the steps after it (registration).
+    payload["dataset_ref"], payload["dataset_commit"], payload["dataset_prefix"] = ref, commit, prefix
     (OUTPUT_DIR / "training-result.json").write_text(
         json.dumps(payload, default=str, indent=2)
     )

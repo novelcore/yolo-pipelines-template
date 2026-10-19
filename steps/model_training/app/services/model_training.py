@@ -33,6 +33,16 @@ from app.models.training import TrainingParams, TrainingResult
 from app.services import lakefs_objects
 from app.services.resource_monitor import ResourceMonitor
 
+
+def checkpoint_base(params: "TrainingParams") -> str:
+    """``{checkpoint_prefix}/{experiment}/{run}``: one run's checkpoints and
+    exports never overwrite another run's of the same experiment. The run is
+    the Argo workflow name the platform injects as KUBECORE_RUN_ID; without it
+    (local runs) the key is ``{checkpoint_prefix}/{experiment}``."""
+    base = f"{params.checkpoint_prefix.rstrip('/')}/{params.experiment_name}"
+    run = os.environ.get("KUBECORE_RUN_ID", "").strip()
+    return f"{base}/{run}" if run else base
+
 _logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -497,10 +507,7 @@ class TrainingService:
                     return
 
                 # Upload to S3
-                s3_key = (
-                    f"{params.checkpoint_prefix}/{params.experiment_name}/"
-                    f"epoch_{epoch:04d}.pt"
-                )
+                s3_key = f"{checkpoint_base(params)}/epoch_{epoch:04d}.pt"
                 self._upload_to_s3(
                     local_path=last_pt,
                     bucket=params.checkpoint_bucket,
@@ -622,7 +629,7 @@ class TrainingService:
             Map of ``{format}_{precision}`` labels to S3 URIs.
         """
         exported: dict[str, str] = {}
-        base_key = f"{params.checkpoint_prefix}/{params.experiment_name}"
+        base_key = checkpoint_base(params)
         mlflow_run_id = self._get_mlflow_run_id()
 
         for fmt in params.export.formats:
@@ -1250,7 +1257,7 @@ class TrainingService:
         str
             The s3:// URI of the uploaded best.pt.
         """
-        base_key = f"{params.checkpoint_prefix}/{params.experiment_name}"
+        base_key = checkpoint_base(params)
         best_key = f"{base_key}/best.pt"
         last_key = f"{base_key}/last.pt"
 
@@ -1282,24 +1289,43 @@ class TrainingService:
         # the checkpoints are a versioned artifact (one commit captures the best/
         # last/epoch files staged during this run), not dangling changes.
         branch = params.checkpoint_prefix.split("/", 1)[0] or "main"
+        run = os.environ.get("KUBECORE_RUN_ID", "").strip()
         self._lakefs_commit(
             params.checkpoint_bucket,
             branch,
-            f"model-training: checkpoints {params.experiment_name}",
+            f"model-training: {params.experiment_name} {run}".rstrip(),
+            {
+                "run": run,
+                "step": "model-training",
+                "experiment": params.experiment_name,
+                "dataset_ref": params.lakefs_branch or "",
+                "dataset_commit": params.lakefs_commit or "",
+                "mlflow_run_id": self._get_mlflow_run_id() or "",
+            },
         )
 
         return best_uri
 
-    def _lakefs_commit(self, repo: str, branch: str, message: str) -> None:
+    def _lakefs_commit(self, repo: str, branch: str, message: str,
+                       metadata: dict | None = None) -> None:
         """Commit staged lakeFS changes on ``branch`` (S3-gateway only stages).
 
         Best-effort: a failure (including 'nothing to commit') never fails the
         step — the objects are already uploaded. Uses the lakeFS REST API on the
-        same endpoint as the S3 gateway with the injected lakeFS credentials.
+        same endpoint as the S3 gateway with the injected lakeFS credentials, or
+        off-cluster the objects API with the run's bearer token.
         """
         import base64
         import urllib.request
 
+        metadata = {k: str(v) for k, v in (metadata or {}).items() if v}
+        if lakefs_objects.bearer_available():
+            try:
+                cid = lakefs_objects.commit(repo, branch, message, metadata)
+                self._logger.info("lakeFS commit %s @ %s/%s", cid[:12], repo, branch)
+            except Exception as exc:  # noqa: BLE001
+                self._logger.warning("lakeFS commit failed (non-fatal): %s", exc)
+            return
         endpoint = os.environ.get("LAKEFS_ENDPOINT", "").rstrip("/")
         access = os.environ.get("LAKEFS_ACCESS_KEY", "")
         secret = os.environ.get("LAKEFS_SECRET_KEY", "")
@@ -1309,7 +1335,8 @@ class TrainingService:
         url = f"{endpoint}/api/v1/repositories/{repo}/branches/{branch}/commits"
         auth = base64.b64encode(f"{access}:{secret}".encode()).decode()
         req = urllib.request.Request(
-            url, data=json.dumps({"message": message}).encode(), method="POST"
+            url, data=json.dumps({"message": message, "metadata": metadata}).encode(),
+            method="POST",
         )
         req.add_header("Content-Type", "application/json")
         req.add_header("Authorization", f"Basic {auth}")
