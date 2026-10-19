@@ -31,7 +31,8 @@ RUNS_DIR = "/work/runs"
 def _download_prefix(bucket, prefix, dest):
     """Materialise the dataset locally under {dest}: qat/quant read images + data.yaml
     from dataset_dir directly (no S3-streaming path), and this cluster has no shared FS.
-    Downloads every object under s3://{bucket}/{prefix} via the lakeFS S3 gateway."""
+    Downloads data.yaml, images/ and labels/ under s3://{bucket}/{prefix} via the
+    lakeFS S3 gateway."""
     if not (os.environ.get("LAKEFS_ACCESS_KEY") and os.environ.get("LAKEFS_SECRET_KEY")):
         # Off-cluster there is no S3 gateway to fall back to (live job 5154708:
         # a silent fallback ended in boto3 "Unable to locate credentials").
@@ -51,6 +52,10 @@ def _download_prefix(bucket, prefix, dest):
             key = obj["Key"]
             rel = key[len(prefix):]
             if not rel or key.endswith("/"):
+                continue
+            # Only the dataset itself: the prefix may also hold an old-layout
+            # copy (dataset/<ref>/) kept for older step code.
+            if rel != "data.yaml" and rel.split("/", 1)[0] not in ("images", "labels"):
                 continue
             local = os.path.join(dest, rel)
             os.makedirs(os.path.dirname(local) or dest, exist_ok=True)
@@ -77,6 +82,15 @@ def _staged_dataset_dir(prefix: str, ref: str):
     if not root or not os.path.isdir(root):
         return None
     resolved = prefix.split("/", 1)[1].strip("/") if "/" in prefix else ""
+    if resolved not in ("dataset", f"dataset/{ref}") and not os.path.exists(
+            os.path.join(root, resolved, "data.yaml")):
+        # A path_override outside the platform layout: the stage-in staged the
+        # ref's dataset/, not this folder, so reading anything else here would
+        # train on a different dataset than the in-cluster copy of the run.
+        raise SystemExit(
+            f"[qat-finetune] the dataset at "
+            f"{prefix} (data.path_override) is not staged off-cluster; run this step in-cluster "
+            "or upload the dataset with the dataset CLI.")
     for candidate in (os.path.join(root, resolved), os.path.join(root, "dataset"),
                       os.path.join(root, "dataset", ref), root):
         if os.path.exists(os.path.join(candidate, "data.yaml")):
@@ -186,7 +200,7 @@ def main() -> None:
     if staged:
         _link_staged(staged, DATASET_DIR)
     else:
-        _download_prefix(repo, _prefix, DATASET_DIR)
+        _download_prefix(str(tr.get("dataset_bucket") or repo), _prefix, DATASET_DIR)
     _fix_data_yaml(DATASET_DIR)
 
     _setup_mlflow_auth()
