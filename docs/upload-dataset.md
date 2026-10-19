@@ -63,6 +63,12 @@ python3 scripts/upload-dataset.py /path/to/your-dataset my-cats-v1
 !!! warning "Same name replaces"
     Uploading again with a name you already used makes that dataset match your folder. Files you do not have on your computer are removed from it. The tool shows you which files and asks before it removes anything. To keep the old one, pick a new name.
 
+A new name starts as a copy of `main`, or of the dataset you name with `--from`. So when your folder is a variant of a dataset you already have, only the changed files upload:
+
+```bash
+python3 scripts/upload-dataset.py /path/to/your-dataset my-cats-v2 --from my-cats-v1
+```
+
 ## Step 5. Sign in when the browser opens
 
 The first time, the tool opens your web browser and asks you to sign in. This is the same sign in you use for the other pages. Log in, and the browser shows you a short "Signed in" message. Close that tab and go back to the Terminal. The tool remembers you for next time.
@@ -77,7 +83,7 @@ Back in the Terminal, the tool checks your dataset, uploads the files, and saves
 
 ## Step 7. Check it in lakeFS
 
-Open the lakeFS link in your browser. You should see your dataset there, with the `data.yaml`, `images`, and `labels` folders. That confirms it landed.
+Open the lakeFS link in your browser. Pick your dataset's name as the branch and open the `dataset` folder: you should see `data.yaml`, `images`, and `labels`. That confirms it landed.
 
 ![The lakeFS page showing the uploaded dataset](img/upload-lakefs-tree.png)
 
@@ -88,4 +94,7 @@ The tool told you a **data ref**. It is the name you gave the dataset, or `main`
 Next, run the pipeline. Go to [Run the pipeline](run-it.md).
 
 !!! tip "Uploading a new version later"
-    To update the dataset, run the same command again with your changed folder. The tool uploads only what changed and keeps a history, so you can always go back.
+    To update the dataset, run the same command again with your changed folder. The tool uploads only what changed and keeps a history, so you can always go back. Every run records the exact version it trained on, so a result always points back to its data.
+
+!!! tip "See your datasets"
+    `kubecore-dataset list` shows every dataset name you can type as `data-ref`.
