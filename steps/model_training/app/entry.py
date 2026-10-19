@@ -61,6 +61,15 @@ def _staged_dataset_dir(prefix: str, ref: str) -> str | None:
     if not root or not os.path.isdir(root):
         return None
     resolved = prefix.split("/", 1)[1].strip("/") if "/" in prefix else ""
+    if resolved not in ("dataset", f"dataset/{ref}") and not os.path.exists(
+            os.path.join(root, resolved, "data.yaml")):
+        # A path_override outside the platform layout: the stage-in staged the
+        # ref's dataset/, not this folder, so reading anything else here would
+        # train on a different dataset than the in-cluster copy of the run.
+        raise SystemExit(
+            f"[model-training] the dataset at "
+            f"{prefix} (data.path_override) is not staged off-cluster; run this step in-cluster "
+            "or upload the dataset with the dataset CLI.")
     # What dataset-loading resolved first, then the standard dataset/, the old
     # dataset/{ref}/ layout, and a ref whose root IS the dataset (legacy CLI).
     for candidate in (os.path.join(root, resolved), os.path.join(root, "dataset"),
@@ -293,7 +302,8 @@ def main() -> None:
             payload = getattr(result, "__dict__", {"result": str(result)})
     payload["_mlflow_logging_enabled"] = mlflow_on
     # The dataset this run trained on, for the steps after it (registration).
-    payload["dataset_ref"], payload["dataset_commit"], payload["dataset_prefix"] = ref, commit, prefix
+    payload.update(dataset_ref=ref, dataset_commit=commit, dataset_bucket=bucket,
+                   dataset_prefix=prefix)
     (OUTPUT_DIR / "training-result.json").write_text(
         json.dumps(payload, default=str, indent=2)
     )

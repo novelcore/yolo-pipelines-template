@@ -331,6 +331,7 @@ class TrainingService:
                     save_dir=save_dir,
                     data_yaml_path=str(data_yaml_path),
                 )
+            self._commit_outputs(params)
 
             # 9. Post-training evaluation on the test split (reporting only)
             self._evaluate_on_test_set(
@@ -1285,9 +1286,13 @@ class TrainingService:
                 last_key,
             )
 
-        # S3-gateway writes only STAGE objects on the lakeFS branch — commit so
-        # the checkpoints are a versioned artifact (one commit captures the best/
-        # last/epoch files staged during this run), not dangling changes.
+        return best_uri
+
+    def _commit_outputs(self, params: TrainingParams) -> None:
+        """S3-gateway writes only STAGE objects on the lakeFS branch — commit so
+        the checkpoints are a versioned artifact (one commit captures the
+        best/last/epoch files and exports staged during this run), not dangling
+        changes. Runs after the exports so they are in this run's commit."""
         branch = params.checkpoint_prefix.split("/", 1)[0] or "main"
         run = os.environ.get("KUBECORE_RUN_ID", "").strip()
         self._lakefs_commit(
@@ -1303,8 +1308,6 @@ class TrainingService:
                 "mlflow_run_id": self._get_mlflow_run_id() or "",
             },
         )
-
-        return best_uri
 
     def _lakefs_commit(self, repo: str, branch: str, message: str,
                        metadata: dict | None = None) -> None:
