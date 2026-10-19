@@ -14,9 +14,12 @@ the production YOLO pipeline). It:
   3. emits two step outputs that model-training consumes (declared in
      pipeline.py via outputs=["data-yaml", "manifest-summary"]):
        - data-yaml         : the dataset's data.yaml (kpt_shape, names, splits)
-       - manifest-summary  : {bucket, prefix, label_keys sentinel} — the compact
-                             pointer to the object-store layout (the full key
-                             list is far too large for an Argo parameter).
+       - manifest-summary  : {bucket, prefix, label_keys sentinel, ref, commit} —
+                             the compact pointer to the object-store layout (the
+                             full key list is far too large for an Argo
+                             parameter). prefix is pinned to the commit the ref
+                             resolved to, so every later step reads the same
+                             snapshot.
 
 Credentials + endpoints are NOT read from config or any file: the platform
 injects them as env (LAKEFS_ENDPOINT, LAKEFS_ACCESS_KEY, LAKEFS_SECRET_KEY, or
@@ -59,7 +62,7 @@ def _resolve_dataset_params(cfg: dict) -> dict:
     """Map the experiment `data` config slice + platform lakeFS repo onto the
     dataset-loading service's run parameters.
 
-    The Hydra `data` slice is the developer-facing shape (ref/source/version/…);
+    The Hydra `data` slice is the developer-facing shape (ref/source/sample_size/…);
     the lakeFS repository is a platform fact, so it comes from cfg["platform"],
     never from the developer's config.
     """
@@ -69,11 +72,10 @@ def _resolve_dataset_params(cfg: dict) -> dict:
 
     source = str(data.get("source") or "lakefs")
 
-    # The lakeFS ref (branch/tag/commit) the developer picked is the branch the
-    # service lists under; the repository is platform-owned. `version` is a
-    # provenance tag — default it to the ref so the S3 prefix is well-formed.
+    # The lakeFS ref (branch/tag/commit) the developer picked is the dataset;
+    # the repository is platform-owned. The service records it as the dataset
+    # version in its stats.
     ref = str(data.get("ref") or "main")
-    version = str(data.get("version") or "") or ref
 
     # sample_size is a string in the form ("" = full dataset); coerce to a
     # positive int, or None when empty. A bad value is a form mistake, so fail
@@ -95,7 +97,7 @@ def _resolve_dataset_params(cfg: dict) -> dict:
         sample_size = None
 
     params = {
-        "version": version,
+        "version": ref,
         "source": source,
         "output_dir": DATASET_DIR,
         # MANIFEST-ONLY is mandatory on the cluster (no shared FS between step
@@ -121,9 +123,11 @@ def _write_outputs(cfg: dict) -> None:
 
     model-training reconstructs /work/dataset from these:
       - data-yaml        : the full data.yaml content (verbatim)
-      - manifest-summary : a compact {bucket, prefix, label_keys} pointer; the
-                           label_keys sentinel tells training to stream labels
-                           from object storage too (manifest-only mode).
+      - manifest-summary : a compact {bucket, prefix, label_keys, ref, commit}
+                           pointer; the label_keys sentinel tells training to
+                           stream labels from object storage too (manifest-only
+                           mode). prefix starts with the commit when the ref
+                           resolved to one; commit is "" when it did not.
     """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     dataset_dir = Path(DATASET_DIR)
@@ -141,12 +145,14 @@ def _write_outputs(cfg: dict) -> None:
     # Non-empty sentinel = labels are also streamed from object storage (we never
     # embed the actual key lists — too large for an Argo parameter).
     label_keys_sentinel = {"_present": True} if manifest.get("label_keys") else {}
-    summary = {"bucket": bucket, "prefix": prefix, "label_keys": label_keys_sentinel}
+    ref = str((cfg.get("data") or {}).get("ref") or "main")
+    summary = {"bucket": bucket, "prefix": prefix, "label_keys": label_keys_sentinel,
+               "ref": ref, "commit": manifest.get("lakefs_commit") or ""}
     (OUTPUT_DIR / "manifest-summary.json").write_text(
         json.dumps(summary, separators=(",", ":"))
     )
     print(f"[dataset-loading] outputs written: data-yaml + manifest-summary "
-          f"(bucket={bucket} prefix={prefix})")
+          f"(bucket={bucket} prefix={prefix} ref={ref} commit={summary['commit'] or 'unresolved'})")
 
 
 def main() -> None:
@@ -157,7 +163,7 @@ def main() -> None:
     cfg = yaml.safe_load(args.params)
 
     params = _resolve_dataset_params(cfg)
-    print(f"[dataset-loading] source={params['source']} version={params['version']} "
+    print(f"[dataset-loading] source={params['source']} ref={params['version']} "
           f"manifest-only -> {DATASET_DIR}")
 
     # Manager reads endpoints + credentials from the platform-injected env

@@ -56,7 +56,7 @@ _VALID_VISIBILITY = {0, 1, 2}
 
 # Default S3 bucket and key prefix for the canonical dataset location
 _DEFAULT_BUCKET = "io-audio-text-data"
-# Non-lakeFS fallback only; the lakeFS path is {ref}/dataset/{version}/
+# Non-lakeFS fallback only; the lakeFS path is {ref}/dataset/
 # (platform standard — see _resolve_source).
 _DEFAULT_PREFIX_TEMPLATE = "upload-initial/dataset/{version}/"
 
@@ -161,14 +161,18 @@ class DatasetLoadingService:
         output_path = Path(params.output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        bucket, prefix = self._resolve_source(params)
-
-        # Fetch lakeFS branch-tip commit hash (non-blocking; falls back to None)
+        # Resolve the ref to its commit FIRST and read that commit: every later
+        # step reads the same prefix (manifest-summary), so a run sees one
+        # immutable snapshot even if the branch moves mid-run. Non-blocking: on
+        # failure the run reads the ref by name, as before.
         lakefs_commit: Optional[str] = None
-        if params.source == "lakefs" and params.lakefs_repo and params.lakefs_branch:
+        if (params.source == "lakefs" and params.lakefs_repo and params.lakefs_branch
+                and not params.path_override):
             lakefs_commit = self._fetch_lakefs_commit(
                 params.lakefs_repo, params.lakefs_branch
             )
+
+        bucket, prefix = self._resolve_source(params, lakefs_commit)
 
         if params.manifest_only:
             return self._run_manifest_only(
@@ -1230,7 +1234,7 @@ class DatasetLoadingService:
         try:
             resp = requests.get(
                 url,
-                params={"limit": 1},
+                params={"amount": 1},
                 auth=(self._lakefs_access_key or "", self._lakefs_secret_key or ""),
                 timeout=5,
             )
@@ -1287,12 +1291,15 @@ class DatasetLoadingService:
     # Source resolution
     # ------------------------------------------------------------------
 
-    def _resolve_source(self, params: YoloDatasetParams) -> tuple[str, str]:
+    def _resolve_source(
+        self, params: YoloDatasetParams, lakefs_commit: Optional[str] = None
+    ) -> tuple[str, str]:
         """Return (bucket, key_prefix) based on the user's params.
 
         When ``path_override`` is provided it must be a valid ``s3://`` URI.
         When ``lakefs_repo`` and ``lakefs_branch`` are set (source=lakefs),
-        the bucket is the repo and the prefix starts with the branch name.
+        the bucket is the repo and the prefix starts with the resolved commit
+        (the branch name when it could not be resolved).
         Otherwise the canonical convention is used.
         """
         if params.path_override:
@@ -1309,19 +1316,39 @@ class DatasetLoadingService:
             return bucket, prefix
 
         if params.lakefs_repo and params.lakefs_branch:
-            # PLATFORM STANDARD (same as the original templates and
-            # hera-mlops-template): the dataset lives at
-            # {ref}/dataset/{version}/ — `version` is the data version folder
-            # and defaults to the ref (entry.py), so the default run reads
-            # {ref}/dataset/{ref}/. config-validation probes exactly this
-            # path, the toy seeder and the dataset CLI write it.
+            # PLATFORM STANDARD (same as hera-mlops-template, config-validation
+            # and the dataset CLI): the dataset lives at {ref}/dataset/ — the
+            # same path on every branch, so lakeFS can branch and merge it.
+            # A dataset uploaded before the version folder was dropped sits at
+            # {ref}/dataset/{ref}/; read it there when the standard path has no
+            # data.yaml.
             bucket = params.lakefs_repo
-            prefix = f"{params.lakefs_branch}/dataset/{params.version}/"
+            read_ref = lakefs_commit or params.lakefs_branch
+            prefix = f"{read_ref}/dataset/"
+            legacy = f"{read_ref}/dataset/{params.lakefs_branch}/"
+            if not self._key_exists(bucket, prefix + "data.yaml") and self._key_exists(
+                bucket, legacy + "data.yaml"
+            ):
+                self._logger.warning(
+                    "Dataset %s is in the old layout (%s) — re-upload it with the "
+                    "dataset CLI to move it to %s",
+                    params.lakefs_branch,
+                    legacy,
+                    prefix,
+                )
+                prefix = legacy
             return bucket, prefix
 
         bucket = _DEFAULT_BUCKET
         prefix = _DEFAULT_PREFIX_TEMPLATE.format(version=params.version)
         return bucket, prefix
+
+    def _key_exists(self, bucket: str, key: str) -> bool:
+        try:
+            self._s3.head_object(Bucket=bucket, Key=key)
+            return True
+        except Exception:  # noqa: BLE001 — absent, or unreadable: same answer
+            return False
 
     # ------------------------------------------------------------------
     # data.yaml generation

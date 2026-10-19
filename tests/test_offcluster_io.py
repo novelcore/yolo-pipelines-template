@@ -59,21 +59,30 @@ def test_download_streams_ref_object(tmp_path, monkeypatch):
 
 def test_staged_dataset_dir_resolution(tmp_path, monkeypatch):
     monkeypatch.delenv("KUBECORE_DATASET_DIR", raising=False)
-    assert entry._staged_dataset_dir() is None
-    root = tmp_path / "ref"; (root / "dataset" / "v3").mkdir(parents=True)
+    assert entry._staged_dataset_dir("c0ffee/dataset/", "cats") is None
+    root = tmp_path / "commit"; (root / "dataset" / "cats").mkdir(parents=True)
     monkeypatch.setenv("KUBECORE_DATASET_DIR", str(root))
-    monkeypatch.setenv("KUBECORE_DATASET_VERSION", "v3")
     with pytest.raises(SystemExit):  # mounted but no dataset -> loud, never S3
-        entry._staged_dataset_dir()
-    (root / "dataset" / "v3" / "data.yaml").write_text("path: .\n")
-    assert entry._staged_dataset_dir() == str(root / "dataset" / "v3")
-    # a flat dataset/ (no version folder) is NOT the platform layout
+        entry._staged_dataset_dir("c0ffee/dataset/", "cats")
+    # the old dataset/{ref}/ layout is still found
+    (root / "dataset" / "cats" / "data.yaml").write_text("path: .\n")
+    assert entry._staged_dataset_dir("c0ffee/dataset/", "cats") == str(root / "dataset" / "cats")
+    # ... and so is where dataset-loading resolved it, first
+    assert entry._staged_dataset_dir("c0ffee/dataset/cats/", "cats") == str(root / "dataset" / "cats")
+    # the platform layout dataset/ wins over the old one
     (root / "dataset" / "data.yaml").write_text("path: .\n")
-    assert entry._staged_dataset_dir() == str(root / "dataset" / "v3")
+    assert entry._staged_dataset_dir("c0ffee/dataset/", "cats") == str(root / "dataset")
     # a ref whose root IS the dataset still works
     flat = tmp_path / "flat"; flat.mkdir(); (flat / "data.yaml").write_text("path: .\n")
     monkeypatch.setenv("KUBECORE_DATASET_DIR", str(flat))
-    assert entry._staged_dataset_dir() == str(flat)
+    assert entry._staged_dataset_dir("c0ffee/dataset/", "cats") == str(flat)
+
+
+def test_dataset_location_prefers_the_pinned_manifest_summary():
+    summary = {"bucket": "poulaki", "prefix": "c0ffee/dataset/", "commit": "c0ffee", "ref": "cats"}
+    assert entry._dataset_location(summary, "poulaki", "cats") == ("poulaki", "c0ffee/dataset/", "c0ffee")
+    # no dataset-loading output (local run): the standard layout on the ref
+    assert entry._dataset_location({}, "poulaki", "cats") == ("poulaki", "cats/dataset/", "")
 
 
 def test_platform_token_enables_mlflow_without_machine_key(monkeypatch):

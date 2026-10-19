@@ -129,7 +129,8 @@ through the public endpoints with a short-lived token minted per job.
   `pipeline-info` field on the form lists the classes and the account.
 - Give long steps a wall-clock limit in `pipeline.py`: `step(..., hpc_time_limit="12h")`
   (default 4 h). See [DEVELOPER.md §8.1](DEVELOPER.md).
-- Dataset layout is unchanged: `s3://{repo}/{ref}/dataset/{version}/`.
+- The node stages the same dataset commit the in-cluster steps read: only
+  `{ref}/dataset/` of that commit, cached on Lustre by commit.
 - Steps pinned with a `compute-class` annotation stay in-cluster.
 
 ## License
