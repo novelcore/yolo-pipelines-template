@@ -22,7 +22,6 @@ sys.path.insert(0, str(ROOT))
 from kubecore import compose, derive_tree, enhance  # noqa: E402
 
 CONTEXT = yaml.safe_load((ROOT / "kubecore" / "local-dev" / "pipeline-context.yaml").read_text())
-CATALOG = yaml.safe_load((ROOT / "kubecore" / "local-dev" / "dataset-catalog.yaml").read_text())
 
 
 def _render():
@@ -36,7 +35,7 @@ def _render():
 
 
 def _enhanced():
-    return enhance.enhance(_render(), CONTEXT, CATALOG)
+    return enhance.enhance(_render(), CONTEXT)
 
 
 def _step_templates(wft):
@@ -196,7 +195,7 @@ def test_wft_name_forced_app_scoped_no_cross_app_collision():
     # enhance with a DIFFERENT app identity than the hardcoded name implies
     ctx = dict(CONTEXT)
     ctx["app"] = "some-other-app"
-    out = enhance.enhance(_render(), ctx, CATALOG)
+    out = enhance.enhance(_render(), ctx)
     assert out["metadata"]["name"] == "some-other-app-pipeline", \
         f"expected forced name some-other-app-pipeline, got {out['metadata']['name']}"
     assert out["metadata"]["name"] != hardcoded or hardcoded == "some-other-app-pipeline", \
@@ -278,17 +277,19 @@ def test_unknown_annotation_fails():
                 "platform.kubecore.io/bogus"] = "x"
             break
     try:
-        enhance.enhance(raw, CONTEXT, CATALOG)
+        enhance.enhance(raw, CONTEXT)
         assert False, "unknown platform annotation should fail the enhance"
     except enhance.EnhanceError as e:
         assert "bogus" in str(e)
 
 
-def test_dataset_catalog_enum():
+def test_data_ref_is_free_text():
+    """Datasets are lakeFS branches/tags (listed by `kubecore-dataset list`);
+    there is no version folder, so no data-version parameter either."""
     wft = _enhanced()
     by_name = {p["name"]: p for p in wft["spec"]["arguments"]["parameters"]}
-    assert "data-ref" in by_name
-    assert set(CATALOG["refs"]).issubset(set(by_name["data-ref"].get("enum", [])))
+    assert "data-ref" in by_name and "enum" not in by_name["data-ref"]
+    assert "data-version" not in by_name
 
 
 def test_step_name_guards():
@@ -395,7 +396,7 @@ def test_cpu_only_environment_routes_gpu_steps_to_cpu_default():
     ctx["computeClasses"].pop("gpu", None)
     ctx["computeClasses"]["all"] = [c for c in ctx["computeClasses"]["all"] if c.get("tier") != "gpu"]
     cpu_default = ctx["computeClasses"]["cpu"]["name"]
-    wft = enhance.enhance(_render(), ctx, CATALOG)
+    wft = enhance.enhance(_render(), ctx)
     params = {p["name"]: p for p in wft["spec"]["arguments"]["parameters"]}
     assert params["model-training-class"]["value"] == cpu_default
     assert cpu_default in params["model-training-class"]["enum"]
@@ -403,7 +404,7 @@ def test_cpu_only_environment_routes_gpu_steps_to_cpu_default():
     ctx["computeClasses"].pop("cpu", None)
     ctx["computeClasses"]["all"] = []
     try:
-        enhance.enhance(_render(), ctx, CATALOG)
+        enhance.enhance(_render(), ctx)
     except enhance.EnhanceError as e:
         assert "declares no compute flavours" in str(e)
     else:
@@ -418,7 +419,7 @@ def test_ml_environment_selector_is_project_scoped():
 
     ctx = copy.deepcopy(CONTEXT)
     ctx["mlEnvironment"] = {"name": "training", "namespace": f"{ctx['project']}-training"}
-    wft = enhance.enhance(_render(), ctx, CATALOG)
+    wft = enhance.enhance(_render(), ctx)
     checked = 0
     for t in wft["spec"]["templates"]:
         # only in-cluster step templates carry a nodeSelector (the MeluXina
@@ -447,7 +448,7 @@ def test_dedicated_ml_environment_uses_operator_selector_and_app_taint():
         "tolerations": [{"key": "platform.kubecore.io/app", "operator": "Equal",
                          "value": "yolo", "effect": "NoSchedule"}],
     }
-    wft = enhance.enhance(_render(), ctx, CATALOG)
+    wft = enhance.enhance(_render(), ctx)
     checked = 0
     for t in wft["spec"]["templates"]:
         if "container" not in t or not t.get("nodeSelector"):
