@@ -15,7 +15,9 @@ Old env vars: LAKEFS_URL, LAKEFS_REPO, LAKEFS_BRANCH, LOCAL_DIR,
               LAKEFS_COOKIE (optional), CONCURRENCY (optional),
               UPLOAD_PREFIX (optional; overrides the standard dataset/),
               LAKEFS_SYNC_YES=1 (optional; delete remote files that are not in
-              LOCAL_DIR without asking — otherwise you are asked first).
+              LOCAL_DIR without asking — otherwise you are asked first),
+              LAKEFS_SYNC_LEGACY=remove|keep (a dataset still in the old
+              dataset/<version>/ layout: delete it, or keep it unchanged).
 LAKEFS_DATA_VERSION was removed: a dataset lives at <branch>/dataset/.
 """
 from __future__ import annotations
@@ -62,6 +64,8 @@ def main() -> None:
     do_sync(pathlib.Path(local), client, repo, branch,
             prefix=prefix, concurrency=concurrency,
             confirm_deletes=os.environ.get("LAKEFS_SYNC_YES") != "1",
+            remove_legacy=os.environ.get("LAKEFS_SYNC_LEGACY") == "remove",
+            keep_legacy=os.environ.get("LAKEFS_SYNC_LEGACY") == "keep",
             created_from=created_from, validated=False)
 
 

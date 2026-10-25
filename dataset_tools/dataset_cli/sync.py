@@ -18,9 +18,11 @@ read. Because the sync mirrors, callers that act for a person pass
 ``confirm_deletes=True`` so remote files are never deleted silently.
 
 A dataset uploaded before the version folder was dropped sits one level deeper,
-at ``dataset/<branch>/`` (the old default version = the branch name). Apps still
-on the old step code read it there, and one lakeFS repo serves every app of a
-project, so the mirror never deletes that folder unless asked (``remove_legacy``).
+at ``dataset/<version>/`` (default version = the branch name). Apps created from
+the template before 2026-10-25 read it there, and one lakeFS repo serves every app
+of a project. Uploading only to ``dataset/`` would leave that copy stale and the
+older apps training on it without a warning, so a sync that finds one stops and
+asks for a decision: ``remove_legacy`` deletes it, ``keep_legacy`` keeps it.
 
 A new branch is created only once the plan is confirmed, and removed again if
 the upload fails: a half-made branch would otherwise be a copy of its source
@@ -145,15 +147,32 @@ def _remote_index(client: LakeFSClient, repo: str, ref: str, prefix: str) -> dic
     return out
 
 
-def _legacy_roots(remote: dict[str, str], local: dict, prefix: str, name: str) -> list[str]:
-    """This dataset's old-layout folder, ``<prefix>/<name>/`` (the old default
-    version folder), when the remote has it and the local folder does not. Only
-    that one: another dataset's old folder copied onto a new branch is nobody's
-    data there, so the mirror removes it like any other stray file."""
-    root = f"{prefix}/{name}/" if prefix else f"{name}/"
-    if any(p.startswith(root) for p in remote) and not any(p.startswith(root) for p in local):
-        return [root]
-    return []
+def _legacy_roots(remote: dict[str, str], local: dict, prefix: str, name: str,
+                  any_version: bool = False) -> list[str]:
+    """Old-layout version folders the remote has and the local folder does not:
+    ``<prefix>/<name>/`` (the old default version), and on the branch itself
+    (``any_version``) every ``<prefix>/<version>/`` holding a data.yaml (an upload
+    with an explicit --data-version). Another dataset's old folder copied onto a
+    new branch is nobody's data there, so the mirror removes it like any stray file."""
+    base = f"{prefix}/" if prefix else ""
+    roots = {f"{base}{name}/"}
+    if any_version:
+        roots |= {p[:-len("data.yaml")] for p in remote
+                  if p.startswith(base) and p.endswith("/data.yaml")
+                  and p[len(base):].count("/") == 1}
+    return sorted(r for r in roots if any(p.startswith(r) for p in remote)
+                  and not any(p.startswith(r) for p in local))
+
+
+def _legacy_message(repo: str, branch: str, legacy: list[str]) -> str:
+    return (f"lakefs://{repo}/{branch} still holds this dataset in the old layout: "
+            f"{', '.join(legacy)}.\n"
+            "Apps created before 2026-10-25 read that folder; apps created since read "
+            "dataset/. This upload changes dataset/ only, so the older apps would keep "
+            "training on the old copy without any warning. Re-run with one of:\n"
+            "  --remove-legacy  delete the old folder (older apps then stop with "
+            "'dataset not found')\n"
+            "  --keep-legacy    keep it unchanged (older apps keep reading the old data)")
 
 
 def plan_sync(root: pathlib.Path, client: LakeFSClient, repo: str, ref: str,
@@ -164,7 +183,8 @@ def plan_sync(root: pathlib.Path, client: LakeFSClient, repo: str, ref: str,
     remote = _remote_index(client, repo, ref, prefix)
     plan = SyncPlan()
     if not remove_legacy:
-        plan.legacy = _legacy_roots(remote, local, prefix, name or ref)
+        plan.legacy = _legacy_roots(remote, local, prefix, name or ref,
+                                    any_version=(name or ref) == ref)
 
     for repo_path, (local_path, md5) in local.items():
         remote_sum = remote.get(repo_path)
@@ -217,7 +237,8 @@ def sync(root: pathlib.Path, client: LakeFSClient, repo: str, branch: str,
          prefix: str = "", concurrency: int = 16, dry_run: bool = False,
          commit_message: str | None = None, extra_metadata: dict | None = None,
          confirm_deletes: bool = False, remove_legacy: bool = False,
-         created_from: str | None = None, validated: bool = True) -> str | None:
+         created_from: str | None = None, validated: bool = True,
+         keep_legacy: bool = False) -> str | None:
     """Execute the incremental sync and commit. Returns the commit id (or None).
 
     ``created_from``: ``branch`` does not exist yet and starts as a copy of this
@@ -234,8 +255,7 @@ def sync(root: pathlib.Path, client: LakeFSClient, repo: str, branch: str,
     print(f"  delete:      {len(plan.delete)}")
     print(f"  unchanged:   {plan.unchanged}")
     for r in plan.legacy:
-        print(f"  kept:        {r} (dataset in the old layout — apps on older step code "
-              "may still read it; --remove-legacy deletes it)")
+        print(f"  old layout:  {r}")
 
     if plan.changes == 0:
         print("Nothing to sync — branch already matches local.")
@@ -244,6 +264,12 @@ def sync(root: pathlib.Path, client: LakeFSClient, repo: str, branch: str,
         if created_from:
             client.ensure_branch(repo, branch, created_from)
         return client.branch_tip(repo, branch)
+
+    if plan.legacy and not keep_legacy:
+        msg = _legacy_message(repo, branch, plan.legacy)
+        if not dry_run:
+            raise SystemExit(msg)
+        print(msg)
 
     if dry_run:
         for _, rp in plan.add[:20]:

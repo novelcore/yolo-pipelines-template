@@ -55,8 +55,12 @@ def main() -> int:
                     help="advanced: override the standard dataset/ location")
     ap.add_argument("--yes", action="store_true",
                     help="don't ask before deleting remote files that are not in your folder")
-    ap.add_argument("--remove-legacy", action="store_true",
-                    help="also delete old-layout dataset/<version>/ folders on the branch")
+    legacy = ap.add_mutually_exclusive_group()
+    legacy.add_argument("--remove-legacy", action="store_true",
+                        help="also delete old-layout dataset/<version>/ folders on the branch")
+    legacy.add_argument("--keep-legacy", action="store_true",
+                        help="keep old-layout dataset/<version>/ folders unchanged "
+                             "(apps created before 2026-10-25 keep reading them)")
     ap.add_argument("--dry-run", action="store_true", help="show what would sync, upload nothing")
     args = ap.parse_args()
 
@@ -103,7 +107,7 @@ def main() -> int:
                         prefix=prefix, concurrency=args.concurrency,
                         extra_metadata={"branch": branch},
                         confirm_deletes=not args.yes, remove_legacy=args.remove_legacy,
-                        created_from=created_from)
+                        keep_legacy=args.keep_legacy, created_from=created_from)
     print(f"\n✓ Uploaded to s3://{repo}/{branch}/{prefix}/  (commit {commit_id})")
     print(f"  When you run the pipeline, set data-ref = {branch}.")
     return 0
