@@ -153,6 +153,8 @@ class ModelRegistrationService:
             tags["training_run_id"] = params.mlflow_run_id
         if params.dataset_version is not None:
             tags["dataset_version"] = params.dataset_version
+        if params.dataset_commit is not None:
+            tags["dataset_commit"] = params.dataset_commit
         if params.dataset_sample_size is not None:
             tags["dataset_sample_size"] = str(params.dataset_sample_size)
         if params.config_hash is not None:

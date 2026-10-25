@@ -30,6 +30,7 @@ from torchao.quantization.pt2e.quantize_pt2e import convert_pt2e, prepare_qat_pt
 from ultralytics import YOLO
 
 from app.models.quantization import QATParams, QATResult
+from app.services import lakefs_objects
 
 # Interval (seconds) between system-metric samples during the QAT run.
 _SYSTEM_METRICS_INTERVAL_S = 15.0
@@ -489,19 +490,38 @@ class QATService:
         self._lakefs_commit(
             params.output_bucket, branch,
             f"qat-finetune: INT8 tflite {Path(local_path).name}",
+            {"step": "qat-finetune", "experiment": params.experiment_name},
         )
         return f"s3://{params.output_bucket}/{key}"
 
-    def _lakefs_commit(self, repo: str, branch: str, message: str) -> None:
+    def _lakefs_commit(self, repo: str, branch: str, message: str,
+                       metadata: Optional[dict] = None) -> None:
         """Commit staged lakeFS changes on ``branch`` (S3-gateway only stages).
 
         Best-effort: a failure (including 'nothing to commit') never fails the
         step — the object is already uploaded. Uses the lakeFS REST API on the
-        same endpoint as the S3 gateway with the injected lakeFS credentials.
+        same endpoint as the S3 gateway with the injected lakeFS credentials, or
+        off-cluster the objects API with the run's bearer token. The commit
+        records the run and the dataset it was computed from (set by entry.py).
         """
         import base64
         import json
         import urllib.request
+
+        metadata = dict(metadata or {})
+        metadata.update({
+            "run": os.environ.get("KUBECORE_RUN_ID", ""),
+            "dataset_ref": os.environ.get("KUBECORE_DATASET_REF", ""),
+            "dataset_commit": os.environ.get("KUBECORE_DATASET_COMMIT", ""),
+        })
+        metadata = {k: str(v) for k, v in metadata.items() if v}
+        if lakefs_objects.bearer_available():
+            try:
+                cid = lakefs_objects.commit(repo, branch, message, metadata)
+                self._logger.info("lakeFS commit %s @ %s/%s", cid[:12], repo, branch)
+            except Exception as exc:  # noqa: BLE001
+                self._logger.warning("lakeFS commit failed (non-fatal): %s", exc)
+            return
 
         endpoint = os.environ.get("LAKEFS_ENDPOINT", "").rstrip("/")
         access = os.environ.get("LAKEFS_ACCESS_KEY", "")
@@ -512,7 +532,8 @@ class QATService:
         url = f"{endpoint}/api/v1/repositories/{repo}/branches/{branch}/commits"
         auth = base64.b64encode(f"{access}:{secret}".encode()).decode()
         req = urllib.request.Request(
-            url, data=json.dumps({"message": message}).encode(), method="POST"
+            url, data=json.dumps({"message": message, "metadata": metadata}).encode(),
+            method="POST",
         )
         req.add_header("Content-Type", "application/json")
         req.add_header("Authorization", f"Basic {auth}")

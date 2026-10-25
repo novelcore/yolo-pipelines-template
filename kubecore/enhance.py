@@ -7,9 +7,8 @@ and injects everything the developer never had to think about: namespace,
 service account, secrets, compute-class routing, node scheduling, image
 supply-chain wiring, per-run sizing knobs ({step}-cpu/{step}-mem/{step}-disk via
 podSpecPatch), per-step compute-class dropdowns ({step}-class, matching the
-live render-wft), dynamic enum dropdowns (compute classes from the pool,
-dataset refs from the dataset-catalog probe), and the read-only pipeline-info
-form parameter.
+live render-wft, listing the pool's compute classes), and the read-only
+pipeline-info form parameter.
 
 Golden rule: only fill ABSENT keys. If a developer already set a field (a
 nodeSelector, an env var, a memory request) we leave it alone. The one
@@ -19,7 +18,7 @@ scanned, versioned) that a developer's local placeholder must never leak into
 (see CON-18 / Zot registry). The `platform.kubecore.io/image` annotation is the
 sanctioned escape hatch for unbuilt utility images.
 
-Compute model (matches the LIVE WorkflowTemplate on gke-dev): each step gets a
+Compute model (matches the live in-cluster WorkflowTemplate): each step gets a
 `{step}-class` submit-form parameter defaulting to the pool's cpu/gpu tier
 class; the step's nodeSelector is
 `platform.kubecore.io/nodegroup-type: {{workflow.parameters.{step}-class}}`, so
@@ -48,6 +47,9 @@ release-gate rule):
   platform.kubecore.io/hpc            future MeluXina leg (accepted,
                                       not acted on)
 
+connections (pipeline-context `connections[]`): optional envFrom ConfigMap refs on every
+developer step, never on meluxina-run.
+
 This file deals in plain dicts (parsed with pyyaml), not Hera objects. The
 enhancer runs at CI render time, after Hera has already produced Argo-native
 YAML, so it has no reason to depend on Hera at all — this is what keeps the
@@ -66,7 +68,7 @@ ANNOTATION_PREFIX = "platform.kubecore.io/"
 KNOWN_ANNOTATIONS = {"compute-class", "inject", "source", "image", "shm", "workspace", "hpc"}
 WORKSPACE_MOUNT = "/workspace"
 # Mount path for the Zitadel machine-key secret backing MLflow bearer auth
-# (#868) — matches kubeline's working reference (/etc/mlflow-svc).
+# (#868) — matches the previous DSL's working reference (/etc/mlflow-svc).
 MLFLOW_SVC_MOUNT = "/etc/mlflow-svc"
 
 
@@ -142,7 +144,7 @@ def enhance_metadata(wft: dict, ctx: dict) -> None:
     # FORCE the WFT name to the app-authoritative {app}-pipeline, OVERRIDING
     # whatever pipeline.py declared. The name is an IDENTITY / multi-tenant
     # isolation concern the platform must own — not a developer choice. A
-    # template's hardcoded pipeline("yolo-training-pipeline") copied into every
+    # template's hardcoded pipeline("ml-pipeline") copied into every
     # seeded app would otherwise make app B's render OVERWRITE app A's live WFT
     # in the shared ml-{project} namespace (the cross-app contamination class).
     # This is the one-and-only name authority, same rationale as force-
@@ -302,8 +304,8 @@ def enhance_gpu_routing(spec: dict, step: dict, ctx: dict, annots: dict) -> None
     A gpu=True step used to carry a STATIC nvidia.com/gpu request +
     GPU-only scheduling, so submitting {step}-class=<cpu class> produced a
     pod that targets a CPU node while requesting a GPU — permanently
-    Unschedulable. CPU smoke tests and PTQ-on-CPU (routine on the kubeline
-    template, which had separate cpu/gpu step variants) were impossible.
+    Unschedulable. CPU smoke tests and CPU-only quantization (routine on the
+    previous DSL, which had separate cpu/gpu step variants) were impossible.
 
     Mechanics — static render, runtime routing, using only PROVEN eval
     sites (the platform's podSpecPatch sizing model + {{=}} in DAG task
@@ -393,7 +395,7 @@ def enhance_class_param(spec: dict, step: dict, ctx: dict, annots: dict) -> None
     options = [c["name"] for c in ctx["computeClasses"]["all"]]
     if default not in options:
         options.insert(0, default)
-    # HPC classes (kubecore-operator#1191): every step can be placed on the
+    # HPC classes: every step can be placed on the
     # HPC provider per run — the class is provider-prefixed (meluxina-gpu),
     # and kubecore/meluxina.py gates the in-cluster/Slurm twin pair on it.
     hpc_names = [c["name"] for c in hpc_classes(ctx)]
@@ -438,7 +440,7 @@ def enhance_env(step: dict, ctx: dict, annots: dict) -> None:
         add({"name": "MLFLOW_TRACKING_URI", "value": ctx["mlflow"]["trackingUri"]})
         # MLflow AUTH (#868): the tracking server sits behind mlflow-oidc-auth,
         # so a bare MLFLOW_TRACKING_URI 401s on any real logging/registry call.
-        # Mirror kubeline's working reference: the step mints a Zitadel machine
+        # Mirror the previous DSL's working reference: the step mints a Zitadel machine
         # JWT from the key file (mounted by enhance_volumes from
         # mlflow.svcSecret) and sends it as the bearer. Injected only when the
         # context carries the OIDC coordinates — a context without them (OIDC
@@ -469,11 +471,13 @@ def enhance_env(step: dict, ctx: dict, annots: dict) -> None:
             }
         )
     # checkpoint bucket/prefix (the live WFT injects these; step code derives
-    # checkpoint locations from them). Only when the context declares them.
+    # checkpoint locations from them), plus the run id that keeps one run's
+    # checkpoints from overwriting another's. Only when the context declares them.
     checkpoints = ctx.get("checkpoints")
     if checkpoints:
         add({"name": "CHECKPOINT_BUCKET", "value": str(checkpoints.get("bucket", ""))})
         add({"name": "CHECKPOINT_PREFIX", "value": str(checkpoints.get("prefix", ""))})
+        add({"name": "KUBECORE_RUN_ID", "value": "{{workflow.name}}"})
 
 
 # How long a step may sit Pending before the platform calls it unschedulable.
@@ -584,7 +588,7 @@ def enhance_scheduling(step: dict, ctx: dict, annots: dict) -> None:
         requests.setdefault(field_name, default)
         limits.setdefault(field_name, requests[field_name])  # limits follow requests
     # Disk request floor (#892) — request only, deliberately NO limit (see
-    # DISK_REQUEST_DEFAULT): kubeline-parity eviction shield for every step.
+    # DISK_REQUEST_DEFAULT): an eviction shield for every step.
     requests.setdefault("ephemeral-storage", DISK_REQUEST_DEFAULT)
     # NOTE (#865): the GPU request is deliberately NOT set here for
     # class-routable steps — enhance_gpu_routing moves it into the
@@ -682,8 +686,8 @@ def validate_scheduling(step: dict, compute_class: dict, gpu: bool = None, env_h
 
 # Ephemeral-storage baseline for every step (#892). Unlike cpu/mem there is
 # no whole-node "allocatable disk" in the class catalog, so the platform sets
-# a flat floor: kubeline requested 10Gi on its heavy steps (model-training,
-# model-quantization) and that proved sufficient; qat-class steps that need
+# a flat floor: the previous DSL requested 10Gi on its heavy steps (a couple
+# of compute-heavy steps) and that proved sufficient; steps that need
 # more declare disk="20Gi" in pipeline.py. Request-only, never a limit: the
 # request is the eviction shield (a pod under its request is evicted LAST and
 # the scheduler won't place it on a nearly-full node); a limit would instead
@@ -821,28 +825,6 @@ def enhance_workspace_pvc(spec: dict, steps: list) -> None:
         )
 
 
-# ------------------------------------------------------------- dynamic enums
-
-
-def enhance_dynamic_enums(spec: dict, ctx: dict, catalog: dict) -> None:
-    """Decorate specific parameters with live enum values the developer
-    could never know at authoring time. Only fills absent `enum` keys, so
-    a static Choice enum derived from the config tree wins over the platform."""
-    by_name = {p["name"]: p for p in spec["arguments"]["parameters"]}
-
-    def set_enum(param_name: str, values: list) -> None:
-        param = by_name.get(param_name)
-        if param is None or "enum" in param:
-            return
-        default = param.get("default") or param.get("value")
-        if default and default not in values:
-            values = [default] + values
-        param["enum"] = values
-
-    if catalog:
-        set_enum("data-ref", list(catalog.get("refs", [])))
-
-
 def enhance_platform_group(steps: list, ctx: dict) -> None:
     """Inject the REAL platform config values into the compose step's overrides.
 
@@ -924,10 +906,56 @@ def enhance_pipeline_info(spec: dict, ctx: dict, steps: list) -> None:
     )
 
 
+def connection_env_from(ctx: dict) -> list:
+    """Optional envFrom refs for the app connections in the pipeline context.
+
+    Mirrors render-wft's `_connection_env_from`: entries without a configMapName
+    are skipped, duplicate configMapNames collapse, and an entry carrying a
+    non-empty `environment` is kept only when it equals ctx mlEnvironment.name.
+    Always returns fresh dicts (shared objects would make yaml.dump emit aliases).
+    """
+    env_name = (ctx.get("mlEnvironment") or {}).get("name") or ""
+    out = []
+    seen = set()
+    for c in ctx.get("connections") or []:
+        if not isinstance(c, dict):
+            continue
+        cm = c.get("configMapName")
+        if not isinstance(cm, str) or not cm.strip():
+            continue
+        if c.get("environment") and c.get("environment") != env_name:
+            continue
+        if cm in seen:
+            continue
+        seen.add(cm)
+        out.append({"configMapRef": {"name": cm, "optional": True}})
+    return out
+
+
+def enhance_connections(step: dict, ctx: dict) -> None:
+    refs = connection_env_from(ctx)
+    if not refs:
+        return
+    container = step["container"]
+    existing = container.get("envFrom")
+    if not isinstance(existing, list):  # absent, null or malformed: treat as absent
+        container["envFrom"] = refs
+        return
+    # developer entries stay first
+    have = {
+        (e.get("configMapRef") or {}).get("name")
+        for e in existing
+        if isinstance(e, dict) and e.get("configMapRef")
+    }
+    for ref in refs:
+        if ref["configMapRef"]["name"] not in have:
+            existing.append(ref)
+
+
 # ---------------------------------------------------------------------- main
 
 
-def enhance(wft: dict, ctx: dict, catalog: dict = None) -> dict:
+def enhance(wft: dict, ctx: dict) -> dict:
     enhance_metadata(wft, ctx)
     spec = wft["spec"]
     enhance_spec_top_level(spec, ctx)
@@ -955,9 +983,9 @@ def enhance(wft: dict, ctx: dict, catalog: dict = None) -> dict:
         # the full gpu-tier picture.
         enhance_gpu_routing(spec, step, ctx, annots)
         enhance_volumes(step, annots, ctx)
+        enhance_connections(step, ctx)
     enhance_workspace_pvc(spec, steps)
     enhance_platform_group(steps, ctx)
-    enhance_dynamic_enums(spec, ctx, catalog or {})
     enhance_pipeline_info(spec, ctx, steps)
     # PRD-1016: the MeluXina leg — must run LAST (twin tasks copy each routed
     # step's FINAL container image/command, and the depends rewrite needs the
@@ -970,17 +998,17 @@ def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description="Enhance a raw Hera WorkflowTemplate with platform wiring.")
     parser.add_argument("--raw", required=True, help="Path to the raw WorkflowTemplate YAML (from pipeline.py).")
     parser.add_argument("--context", required=True, help="Path to pipeline-context.yaml.")
-    parser.add_argument("--catalog", default="", help="Optional path to the dataset-catalog probe output.")
+    # Ignored: data-ref is free text (datasets are listed by `kubecore-dataset
+    # list` and config-validation). Still accepted so a CI that passes it keeps
+    # rendering.
+    parser.add_argument("--catalog", default="", help=argparse.SUPPRESS)
     parser.add_argument("--output", required=True, help="Path to write the enhanced WorkflowTemplate YAML.")
     args = parser.parse_args(argv)
 
     raw = yaml.safe_load(Path(args.raw).read_text())
     ctx = yaml.safe_load(Path(args.context).read_text())
-    catalog = {}
-    if args.catalog and Path(args.catalog).exists():
-        catalog = yaml.safe_load(Path(args.catalog).read_text()) or {}
 
-    enhanced = enhance(raw, ctx, catalog)
+    enhanced = enhance(raw, ctx)
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(yaml.safe_dump(enhanced, sort_keys=False, default_flow_style=False))

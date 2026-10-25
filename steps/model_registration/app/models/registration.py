@@ -28,6 +28,7 @@ class RegistrationParams(BaseModel):
 
     # Lineage tags — all optional; passed through to MLflow model version tags
     dataset_version: Optional[str] = Field(default=None)
+    dataset_commit: Optional[str] = Field(default=None)
     dataset_sample_size: Optional[int] = Field(default=None)
     config_hash: Optional[str] = Field(
         default=None, description="SHA-256 of the experiment YAML"
