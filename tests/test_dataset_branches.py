@@ -64,7 +64,8 @@ class _S3:
     def list_objects_v2(self, Bucket, Prefix="", MaxKeys=1000, Delimiter=None):
         keys = [k[len(Bucket) + 1:] for k in self.keys if k.startswith(Bucket + "/")]
         if Delimiter:
-            refs = sorted({k.split("/", 1)[0] + "/" for k in keys})
+            refs = sorted({Prefix + k[len(Prefix):].split("/", 1)[0] + "/" for k in keys
+                           if k.startswith(Prefix) and "/" in k[len(Prefix):]})
             return {"CommonPrefixes": [{"Prefix": r} for r in refs]}
         hits = [k for k in keys if k.startswith(Prefix)]
         return {"KeyCount": len(hits), "Contents": [{"Key": k} for k in hits]}
@@ -95,6 +96,18 @@ def test_loading_falls_back_to_the_old_layout():
 def test_loading_prefers_the_standard_path_over_the_old_one():
     keys = {"poulaki/c0ffee/dataset/data.yaml", "poulaki/c0ffee/dataset/cats/data.yaml"}
     assert _resolve(keys) == ("poulaki", "c0ffee/dataset/")
+
+
+def test_loading_falls_back_to_the_one_explicit_version_folder():
+    # Uploaded with --data-version v2 before the version folder was dropped.
+    assert _resolve({"poulaki/c0ffee/dataset/v2/data.yaml",
+                     "poulaki/c0ffee/dataset/v2/images/a.jpg"}) == ("poulaki", "c0ffee/dataset/v2/")
+
+
+def test_loading_refuses_to_guess_between_version_folders():
+    with pytest.raises(Exception, match="2 old-layout versions.*dataset/v1/.*dataset/v2/") as exc:
+        _resolve({"poulaki/c0ffee/dataset/v1/data.yaml", "poulaki/c0ffee/dataset/v2/data.yaml"})
+    assert type(exc.value).__name__ == "DatasetLoadingError"
 
 
 def test_loading_reads_the_ref_when_no_commit_resolved():
@@ -136,6 +149,18 @@ def test_validation_accepts_both_layouts():
     _, svc = _cv()
     svc._check_dataset_path(_S3({"poulaki/cats/dataset/data.yaml"}), DATA, PLATFORM)
     svc._check_dataset_path(_S3({"poulaki/cats/dataset/cats/data.yaml"}), DATA, PLATFORM)
+
+
+def test_validation_accepts_one_explicit_version_folder():
+    _, svc = _cv()
+    svc._check_dataset_path(_S3({"poulaki/cats/dataset/v2/data.yaml"}), DATA, PLATFORM)
+
+
+def test_validation_refuses_to_guess_between_version_folders():
+    mod, svc = _cv()
+    s3 = _S3({"poulaki/cats/dataset/v1/data.yaml", "poulaki/cats/dataset/v2/data.yaml"})
+    with pytest.raises(mod.ConfigValidationError, match="2 old-layout versions.*path_override"):
+        svc._check_dataset_path(s3, DATA, PLATFORM)
 
 
 def test_validation_miss_names_the_datasets_that_exist():

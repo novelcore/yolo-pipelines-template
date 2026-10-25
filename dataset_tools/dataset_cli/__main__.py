@@ -109,7 +109,7 @@ def cmd_sync(args, *, do_auth: bool = True) -> int:
         prefix=prefix, concurrency=args.concurrency, dry_run=args.dry_run,
         extra_metadata={"branch": branch},
         confirm_deletes=not args.yes, remove_legacy=args.remove_legacy,
-        created_from=created_from, validated=validated,
+        keep_legacy=args.keep_legacy, created_from=created_from, validated=validated,
     )
     if commit_id and not args.dry_run:
         # No cluster/kubectl instructions here: the client has only the browser
@@ -174,8 +174,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help=argparse.SUPPRESS)  # removed; parsed only to explain why
         sp.add_argument("--yes", action="store_true",
                         help="don't ask before deleting remote files that are not in your folder")
-        sp.add_argument("--remove-legacy", action="store_true",
-                        help="also delete old-layout dataset/<version>/ folders on the branch")
+        legacy = sp.add_mutually_exclusive_group()
+        legacy.add_argument("--remove-legacy", action="store_true",
+                            help="also delete old-layout dataset/<version>/ folders on the branch")
+        legacy.add_argument("--keep-legacy", action="store_true",
+                            help="keep old-layout dataset/<version>/ folders unchanged "
+                                 "(apps created before 2026-10-25 keep reading them)")
         sp.add_argument("--concurrency", type=int, default=16)
         sp.add_argument("--paste", action="store_true",
                         help="skip the browser login; use guided cookie paste")

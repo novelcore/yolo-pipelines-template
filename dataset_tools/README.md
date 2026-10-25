@@ -140,9 +140,11 @@ Every run records the exact commit it trained on (MLflow `dataset.lakefs_commit`
 and the registered model's `dataset_commit` tag), so a result is always traceable
 to its data, even after the dataset changed.
 
-> **Older uploads** sit one level deeper, at `<name>/dataset/<name>/`. Runs still
-> read them there, and a sync never deletes them unless you pass `--remove-legacy`
-> (apps on older step code in the same project may still read them).
+> **Older uploads** sit one level deeper, at `<name>/dataset/<version>/`. Runs still
+> read them there. Apps created before 2026-10-25 read *only* that folder, so a
+> sync that finds one stops and asks you to choose: `--remove-legacy` deletes it
+> (older apps then stop with "dataset not found"), `--keep-legacy` keeps it as it
+> is (older apps keep training on that old copy, not on what you upload now).
 
 ---
 
@@ -166,6 +168,8 @@ you're running outside the app clone:
 | `--branch` (sync) / 2nd argument (upload-dataset.py) | the dataset name, which is what you type as `data-ref` |
 | `--from` | when the name is new, start it as a copy of this dataset/tag (default: the default branch) |
 | `--remove-legacy` | also delete a dataset left in the old `dataset/<version>/` layout on that branch |
+| `--keep-legacy` | keep that old-layout dataset unchanged (apps created before 2026-10-25 keep reading it) |
+| `LAKEFS_SYNC_LEGACY=remove\|keep` | the same choice for `upload_to_lakefs_api.py` |
 | `--yes` | don't ask before removing files that aren't in your folder |
 | `--paste` | guided sign-in instead of the automatic browser flow |
 | `--dry-run` | show what would change without uploading |

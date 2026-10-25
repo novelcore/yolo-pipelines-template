@@ -406,6 +406,49 @@ def test_a_failed_upload_removes_the_new_branch(monkeypatch, tmp_path):
     assert client.writes[-1] == ("drop", ("cats",))
 
 
+class _VersionsRemote:
+    """main holding the new layout plus versions uploaded with --data-version."""
+
+    def list_objects(self, repo, ref, prefix=""):
+        for path in ("dataset/data.yaml", "dataset/v2/data.yaml", "dataset/v2/images/a.jpg",
+                     "dataset/images/b.jpg"):
+            if path.startswith(prefix):
+                yield {"path": path, "checksum": "x"}
+
+
+def test_sync_finds_every_old_version_folder_on_the_branch(tmp_path):
+    """dataset/v2/ (an explicit --data-version) is read by older apps too; a
+    sub-folder without data.yaml (images/) is the dataset itself, not a version."""
+    (tmp_path / "data.yaml").write_text("path: .\n")
+    plan = sync_mod.plan_sync(tmp_path, _VersionsRemote(), "r", "main", "dataset")
+    assert plan.legacy == ["dataset/v2/"]
+    assert "dataset/v2/data.yaml" not in plan.delete
+
+
+class _UploadClient(_WriteClient):
+    def list_objects(self, repo, ref, prefix=""):
+        return _LegacyRemote().list_objects(repo, ref, prefix)
+
+
+def test_sync_stops_when_an_old_layout_copy_would_go_stale(tmp_path):
+    """Uploading dataset/ alone would leave older apps training on dataset/main/
+    without a warning: the sync stops and names both choices."""
+    (tmp_path / "data.yaml").write_text("path: .\n")
+    client = _UploadClient()
+    with pytest.raises(SystemExit, match="(?s)dataset/main/.*--remove-legacy.*--keep-legacy"):
+        sync_mod.sync(tmp_path, client, "r", "main", prefix="dataset", concurrency=1)
+    assert client.writes == []
+
+
+def test_sync_keep_legacy_uploads_and_keeps_it(tmp_path):
+    (tmp_path / "data.yaml").write_text("path: .\n")
+    client = _UploadClient()
+    sync_mod.sync(tmp_path, client, "r", "main", prefix="dataset", concurrency=1,
+                  keep_legacy=True)
+    deleted = [w[1] for w in client.writes if w[0] == "del"]
+    assert deleted and not any("dataset/main/" in str(d) for d in deleted)
+
+
 def test_sync_remove_legacy_deletes_it(tmp_path):
     (tmp_path / "data.yaml").write_text("path: .\n")
     plan = sync_mod.plan_sync(tmp_path, _LegacyRemote(), "r", "main", "dataset", remove_legacy=True)

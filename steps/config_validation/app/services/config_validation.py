@@ -140,6 +140,19 @@ class ConfigValidationService:
         except Exception:  # noqa: BLE001 — absent or unreadable: not there
             return False
 
+    def _version_folders(self, s3, repo: str, ref: str) -> list:
+        """Old-layout version folders, s3://{repo}/{ref}/dataset/<version>/ holding
+        a data.yaml (uploaded with an explicit --data-version before the version
+        folder was dropped). Same rule as dataset-loading. Best-effort: [] when the
+        listing fails."""
+        try:
+            resp = s3.list_objects_v2(Bucket=repo, Prefix=f"{ref}/dataset/", Delimiter="/",
+                                      MaxKeys=1000)
+        except Exception:  # noqa: BLE001
+            return []
+        return [f"s3://{repo}/{cp['Prefix']}" for cp in resp.get("CommonPrefixes") or []
+                if self._has_key(s3, repo, cp["Prefix"] + "data.yaml")]
+
     def _available_datasets(self, s3, repo: str, limit: int = 50) -> list:
         """Branches of the lakeFS repo that hold a dataset (either layout), for
         the error message. Best-effort: [] when the listing fails."""
@@ -167,6 +180,21 @@ class ConfigValidationService:
                         "dataset CLI to move it to %s", uri, uris[0])
                 self._log.info("dataset path OK (%s, data.yaml present)", uri)
                 return
+        if str(data.get("source") or "lakefs") == "lakefs" and not data.get("path_override"):
+            parsed = urlparse(uris[0])
+            ref = str(data.get("ref") or "main")
+            folders = self._version_folders(s3, parsed.netloc, ref)
+            if len(folders) == 1:
+                self._log.warning(
+                    "dataset is in the old layout (%s) — re-upload it with the "
+                    "dataset CLI to move it to %s", folders[0], uris[0])
+                self._log.info("dataset path OK (%s, data.yaml present)", folders[0])
+                return
+            if folders:
+                raise ConfigValidationError(
+                    f"no dataset at {uris[0]}, and {len(folders)} old-layout versions under it: "
+                    f"{', '.join(folders)} — pick one with data.path_override=<one of them>, "
+                    "or re-upload it with the dataset CLI.")
 
         # No candidate has a data.yaml: explain what is wrong with the standard
         # location, and name the datasets that do exist.

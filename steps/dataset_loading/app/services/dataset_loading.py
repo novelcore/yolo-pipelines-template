@@ -1325,23 +1325,42 @@ class DatasetLoadingService:
             bucket = params.lakefs_repo
             read_ref = lakefs_commit or params.lakefs_branch
             prefix = f"{read_ref}/dataset/"
+            if self._key_exists(bucket, prefix + "data.yaml"):
+                return bucket, prefix
+            # The old default version folder, else the one version folder that
+            # holds a data.yaml (an upload with an explicit --data-version).
             legacy = f"{read_ref}/dataset/{params.lakefs_branch}/"
-            if not self._key_exists(bucket, prefix + "data.yaml") and self._key_exists(
-                bucket, legacy + "data.yaml"
-            ):
+            folders = ([legacy] if self._key_exists(bucket, legacy + "data.yaml")
+                       else self._version_folders(bucket, prefix))
+            if len(folders) > 1:
+                raise DatasetLoadingError(
+                    f"no dataset at s3://{bucket}/{prefix}, and {len(folders)} old-layout "
+                    f"versions under it: {', '.join(f's3://{bucket}/{f}' for f in folders)} — "
+                    "pick one with data.path_override, or re-upload it with the dataset CLI")
+            if folders:
                 self._logger.warning(
                     "Dataset %s is in the old layout (%s) — re-upload it with the "
                     "dataset CLI to move it to %s",
                     params.lakefs_branch,
-                    legacy,
+                    folders[0],
                     prefix,
                 )
-                prefix = legacy
+                prefix = folders[0]
             return bucket, prefix
 
         bucket = _DEFAULT_BUCKET
         prefix = _DEFAULT_PREFIX_TEMPLATE.format(version=params.version)
         return bucket, prefix
+
+    def _version_folders(self, bucket: str, prefix: str) -> list[str]:
+        """Sub-folders of ``prefix`` that hold a data.yaml (old-layout versions)."""
+        try:
+            resp = self._s3.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/",
+                                            MaxKeys=1000)
+        except Exception:  # noqa: BLE001 — unreadable: the standard path's error stands
+            return []
+        return [cp["Prefix"] for cp in resp.get("CommonPrefixes") or []
+                if self._key_exists(bucket, cp["Prefix"] + "data.yaml")]
 
     def _key_exists(self, bucket: str, key: str) -> bool:
         try:
