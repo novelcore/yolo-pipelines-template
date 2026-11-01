@@ -1,17 +1,14 @@
 """Manager for the QAT fine-tune pipeline step.
 
-Wires together Config, the boto3 S3 client, and QATService.
+Wires together Config and QATService.
 """
 
 import logging
 import os
 from typing import Optional
 
-import boto3
-from botocore.config import Config as BotoConfig
 
 from app.logger import setup_logging
-from app.services import lakefs_objects
 from app.models.config import Config
 from app.models.quantization import QATParams, QATResult
 from app.services.qat_service import QATService
@@ -31,42 +28,8 @@ class Manager:
         if self._config.mlflow_tracking_password:
             os.environ["MLFLOW_TRACKING_PASSWORD"] = self._config.mlflow_tracking_password
 
-        self._s3_client = self._build_s3_client()
         self._service = QATService(
-            s3_client=self._s3_client,
             mlflow_tracking_uri=self._config.mlflow_tracking_uri,
-        )
-
-    def _build_s3_client(self) -> object:
-        boto_cfg = BotoConfig(retries={"max_attempts": 3, "mode": "adaptive"})
-        cfg = self._config
-
-        if cfg.lakefs_endpoint and cfg.lakefs_access_key and cfg.lakefs_secret_key:
-            self._logger.info(
-                "S3 client: lakeFS gateway at %s", cfg.lakefs_endpoint
-            )
-            return boto3.client(
-                "s3",
-                endpoint_url=cfg.lakefs_endpoint,
-                aws_access_key_id=cfg.lakefs_access_key,
-                aws_secret_access_key=cfg.lakefs_secret_key,
-                region_name=None,
-                config=boto_cfg,
-            )
-
-        if lakefs_objects.bearer_available():
-            # Off-cluster (MeluXina): no S3 gateway keys, only the run's bearer
-            # token — the objects API stands in for boto3 (PRD-1016 F-05).
-            self._logger.info("S3 client: lakeFS objects API (bearer) at %s", os.environ["LAKEFS_ENDPOINT"])
-            return lakefs_objects.BearerClient()
-        self._logger.info("S3 client: cloud credential chain")
-        return boto3.client(
-            "s3",
-            endpoint_url=cfg.s3_endpoint_url,
-            aws_access_key_id=cfg.aws_access_key_id,
-            aws_secret_access_key=cfg.aws_secret_access_key,
-            region_name=cfg.aws_default_region,
-            config=boto_cfg,
         )
 
     def run(
@@ -76,7 +39,6 @@ class Manager:
         dataset_dir: str,
         output_dir: str,
         output_bucket: str,
-        output_prefix: str,
         experiment_name: str,
         image_size: int = 640,
         device: Optional[str] = None,
@@ -101,7 +63,6 @@ class Manager:
             dataset_dir=dataset_dir,
             output_dir=output_dir,
             output_bucket=output_bucket,
-            output_prefix=output_prefix,
             experiment_name=experiment_name,
             image_size=image_size,
             device=device,

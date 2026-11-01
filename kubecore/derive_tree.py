@@ -115,7 +115,6 @@ class QuantizationConfig:
     calibration_seed: int = 42
     parity_frames: int = 100
     parity_max_abs_error: float = 0.05
-    output_prefix: str = ""
 
 
 # {config-store name registered in config.yaml's defaults list: node}

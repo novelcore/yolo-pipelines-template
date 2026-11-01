@@ -567,7 +567,8 @@ def test_wait_survives_pod_loss_and_wallet_expiry():
     is about to expire is resubmitted with a fresh one."""
     out = enhance(_raw(), _ctx())
     run = next(t for t in out["spec"]["templates"] if t["name"] == "meluxina-run")
-    assert run["retryStrategy"] == {"limit": "2", "retryPolicy": "OnError"}
+    # (the retry policy itself is pinned in tests/test_meluxina_retry.py)
+    assert run["retryStrategy"]["limit"] == "2"
     from kubecore.meluxina import MELUXINA_SUBMIT_CODE as code
     ns = {}
     exec(code.split("\nWALLET = None", 1)[0], ns)

@@ -24,7 +24,6 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
-import requests
 import yaml
 
 if TYPE_CHECKING:
@@ -161,17 +160,14 @@ class DatasetLoadingService:
         output_path = Path(params.output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # CON-04: resolve the dataset version to its commit FIRST and read that
-        # commit: every later step reads the same prefix (manifest-summary), so
-        # a run sees one immutable snapshot even if `main` moves mid-run. Not
-        # optional — a version that does not resolve is a wrong dataset or
-        # version, and the run stops here with that message.
+        # CON-04: read the commit the caller pinned (entry.py resolved the run's
+        # dataset choice with the kubecore package): every later step reads the same
+        # prefix (manifest-summary), so a run sees one immutable snapshot even if
+        # `main` moves mid-run.
         lakefs_commit: Optional[str] = None
         if (params.source == "lakefs" and params.lakefs_repo and params.lakefs_ref
                 and not params.path_override):
-            lakefs_commit = self._fetch_lakefs_commit(
-                params.lakefs_repo, params.lakefs_ref
-            )
+            lakefs_commit = params.lakefs_ref
 
         bucket, prefix = self._resolve_source(params, lakefs_commit)
 
@@ -1219,42 +1215,6 @@ class DatasetLoadingService:
     # ------------------------------------------------------------------
     # Dataset lineage helpers
     # ------------------------------------------------------------------
-
-    def _fetch_lakefs_commit(self, repo: str, ref: str) -> str:
-        """Return the commit ``ref`` (``main`` or a ``vN`` tag) of ``repo``
-        points at, from the lakeFS HTTP API (CON-04: the run's pinned commit).
-
-        Raises ``DatasetLoadingError`` when it cannot be resolved: reading an
-        unpinned ref would let two steps of one run see different data.
-        """
-        if not self._lakefs_endpoint:
-            raise DatasetLoadingError(
-                "LAKEFS_ENDPOINT is not configured — cannot pin the dataset commit"
-            )
-        url = f"{self._lakefs_endpoint.rstrip('/')}/api/v1/repositories/{repo}/refs/{ref}/commits"
-        try:
-            resp = requests.get(
-                url,
-                params={"amount": 1},
-                auth=(self._lakefs_access_key or "", self._lakefs_secret_key or ""),
-                timeout=5,
-            )
-            if resp.status_code == 404:
-                raise DatasetLoadingError(
-                    f"dataset {repo}@{ref} not found — check the repository name and "
-                    f"that version {ref!r} exists (lakeFS: {url})"
-                )
-            resp.raise_for_status()
-        except requests.RequestException as exc:
-            raise DatasetLoadingError(
-                f"could not resolve {repo}@{ref} to a commit: {exc}"
-            ) from exc
-        results = resp.json().get("results", [])
-        if not results or not results[0].get("id"):
-            raise DatasetLoadingError(
-                f"dataset {repo}@{ref} has no commits — upload a dataset to it first"
-            )
-        return str(results[0]["id"])
 
     def _resolve_dataset_identity(
         self, image_keys: list[str], lakefs_commit: Optional[str]

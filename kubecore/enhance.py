@@ -63,7 +63,7 @@ from pathlib import Path
 import yaml
 
 from kubecore.meluxina import enhance_hpc, hpc_classes
-from kubecore.outputs import checkpoint_prefix, outputs_repo
+from kubecore.outputs_repo import checkpoint_prefix, outputs_repo
 
 ANNOTATION_PREFIX = "platform.kubecore.io/"
 KNOWN_ANNOTATIONS = {"compute-class", "inject", "source", "image", "shm", "workspace", "hpc"}
@@ -471,10 +471,9 @@ def enhance_env(step: dict, ctx: dict, annots: dict) -> None:
                 "valueFrom": {"secretKeyRef": {"name": secret_name, "key": keys["secretKey"]}},
             }
         )
-    # checkpoint bucket/prefix (step code derives checkpoint locations from
-    # them): the app's own outputs repository `outputs-<app>`, on `main` — never
-    # the dataset repository — plus the run id that keeps one run's checkpoints
-    # from overwriting another's and names the run in its lakeFS commit.
+    # Results location: the app's own outputs repository `outputs-<app>` on `main`
+    # (never a dataset repository), plus the run id that names the run's
+    # directory and its lakeFS commit. Steps write with kubecore.outputs.write_run.
     add({"name": "CHECKPOINT_BUCKET", "value": outputs_repo(ctx)})
     add({"name": "CHECKPOINT_PREFIX", "value": checkpoint_prefix()})
     add({"name": "KUBECORE_RUN_ID", "value": "{{workflow.name}}"})
@@ -996,7 +995,8 @@ def main(argv=None) -> None:
     parser.add_argument("--raw", required=True, help="Path to the raw WorkflowTemplate YAML (from pipeline.py).")
     parser.add_argument("--context", required=True, help="Path to pipeline-context.yaml.")
     # Ignored: the `dataset` parameter is filled from the platform's dataset
-    # catalog, not here. Still accepted so a CI that passes it keeps rendering.
+    # catalog (hera-enhance-commit), not here. Still accepted so a CI that passes
+    # it keeps rendering.
     parser.add_argument("--catalog", default="", help=argparse.SUPPRESS)
     parser.add_argument("--output", required=True, help="Path to write the enhanced WorkflowTemplate YAML.")
     args = parser.parse_args(argv)

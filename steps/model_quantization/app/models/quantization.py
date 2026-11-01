@@ -40,7 +40,6 @@ class QuantizationParams(BaseModel):
     )
     output_dir: str = Field(..., description="Local directory for intermediate artifacts.")
     output_bucket: str = Field(..., description="S3 bucket for TFLite artifact upload.")
-    output_prefix: str = Field(..., description="S3 key prefix for TFLite artifact.")
     experiment_name: str = Field(..., description="MLflow experiment name.")
 
     image_size: int = Field(default=640, gt=0)

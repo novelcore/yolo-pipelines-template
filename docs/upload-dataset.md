@@ -1,18 +1,20 @@
 # Upload your dataset
 
-The pipeline trains on a dataset that lives in lakeFS. lakeFS is the storage for your images and labels. This page shows you how to put your dataset there, using the upload tool that ships inside your project.
+The pipeline trains on a dataset that lives in lakeFS, the storage for your images and labels. A dataset is its own lakeFS repository, called `dataset-<name>`. Your project starts with one, `dataset-default`.
 
 You do this once per dataset. After it is up, you can run the pipeline on it as many times as you like.
 
+- A **version** is a tag: `v1`, `v2`, and so on. `latest` means the newest data on `main`.
+- Changes reach `main` only through a **pull request**, so someone reviews them before they become the new data.
+- Your results never go into a dataset. They go to your app's own repository, `outputs-<app>`.
+
 !!! warning "First, you need an app"
-    This page assumes you have **already created an app from this template**. The upload tool ships inside that app. If you have not created one yet, do that first, or ask your platform contact. Without an app there is nothing to clone and no lakeFS to upload to.
+    This page assumes you have **already created an app from this template**. Your app carries a small settings file, `.kubecore/dataset-config.yaml`, that tells the tool where your project's lakeFS is. Without an app there is nothing to clone and no lakeFS to upload to.
 
 !!! note "Before you start"
-    You need your dataset in the shape from [What you need](what-you-need.md): a `data.yaml`, an `images/` folder, and a `labels/` folder, each split into `train`, `val`, and `test`. That is all. Your app already knows your lakeFS, so you do not need any links or passwords.
+    You need your dataset in the shape from [What you need](what-you-need.md): a `data.yaml`, an `images/` folder, and a `labels/` folder, each split into `train`, `val`, and `test`. Your app already knows your lakeFS, so you do not need any links or passwords.
 
 ## Step 1. Get your app on your computer
-
-Copy your app from GitHub to your computer. This is called cloning, and you do it once. Your platform contact gives you the address.
 
 ```bash
 git clone https://github.com/<your-org>/<your-app>.git
@@ -21,80 +23,49 @@ cd <your-app>
 
 Everything else on this page happens inside that folder.
 
-## Step 2. Install the tool
+## Step 2. Install the tool and sign in
 
-The upload tool is already in your app, in a folder called `dataset_tools`. Install it once, inside a small private Python space for this project (a "virtual environment").
+The `kubecore` tool is a Python package. Install it once, inside a small private Python space for this project (a "virtual environment").
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
-pip install ./dataset_tools
+pip install "git+https://github.com/novelcore/hera-pipeline-template@<commit>#subdirectory=packages/kubecore"
+kubecore login
 ```
 
-On Windows, the middle line is `.venv\Scripts\activate` instead.
+Your platform contact gives you the `<commit>`. On Windows, the second line is `.venv\Scripts\activate` instead. Your browser opens once and asks you to sign in. Log in, close the tab, and go back to the Terminal. The tool remembers you.
 
-You only install once. Next time, just run the middle line again to step back into that space before uploading.
+!!! tip "Why the virtual environment?"
+    Many computers no longer let `pip install` change the system's own Python. They stop with a message that mentions `externally-managed-environment`. The virtual environment avoids that.
 
-!!! tip "Why the extra two lines?"
-    Many computers no longer let `pip install` change the system's own Python. They stop with a message that mentions `externally-managed-environment`. The virtual environment avoids that, and keeps the tool out of the way of everything else on your computer.
-
-## Step 3. Your lakeFS is already set up
-
-Good news, there is nothing to configure. When your app was created, the platform already wrote your lakeFS link, your repo, and your sign-in settings into a file called `.kubecore/dataset-config.yaml`. You do not open it and you do not edit it. The tool reads it on its own.
-
-So you go straight to the upload.
-
-## Step 4. Start the upload
-
-Run the tool and point it at your dataset folder.
+## Step 3. Create the dataset and send your files in
 
 ```bash
-python3 scripts/upload-dataset.py /path/to/your-dataset
+kubecore dataset create cats --classes cat,kitten      # makes dataset-cats with the starter layout
+kubecore dataset pull dataset-cats@latest ./dataset-cats
+# put your images in images/train, images/val, images/test and one label file per image in labels/...
+kubecore dataset validate ./dataset-cats
+kubecore dataset push ./dataset-cats dataset-cats -m "first 200 images"
 ```
 
-Replace `/path/to/your-dataset` with the real folder on your computer. You do not pass any links, the tool already has them. That uploads it as the dataset called `main`.
+`push` checks your folder, uploads it to a draft, and opens a **pull request**. It prints the link. Open it in lakeFS and merge it when it looks right: nothing changes on `main` until you do.
 
-To keep more than one dataset, give each one a name after the folder. The name is what you will type as `data-ref` when you run.
+## Step 4. Release a version
 
 ```bash
-python3 scripts/upload-dataset.py /path/to/your-dataset my-cats-v1
+kubecore dataset release dataset-cats     # tags the head of main as the next version: v1, then v2, ...
+kubecore dataset versions dataset-cats
+kubecore dataset list                     # every dataset you can see
 ```
 
-!!! warning "Same name replaces"
-    Uploading again with a name you already used makes that dataset match your folder. Files you do not have on your computer are removed from it. The tool shows you which files and asks before it removes anything. To keep the old one, pick a new name.
-
-A new name starts as a copy of `main`, or of the dataset you name with `--from`. So when your folder is a variant of a dataset you already have, only the changed files upload:
-
-```bash
-python3 scripts/upload-dataset.py /path/to/your-dataset my-cats-v2 --from my-cats-v1
-```
-
-## Step 5. Sign in when the browser opens
-
-The first time, the tool opens your web browser and asks you to sign in. This is the same sign in you use for the other pages. Log in, and the browser shows you a short "Signed in" message. Close that tab and go back to the Terminal. The tool remembers you for next time.
-
-![The browser confirming you are signed in](img/upload-signin.png)
-
-## Step 6. Let it upload
-
-Back in the Terminal, the tool checks your dataset, uploads the files, and saves them. You will see it count the files as it goes, then a `Committed` line and a `Uploaded` line. The last line tells you which data ref to use when you run, usually `main`.
-
-![The Terminal: signed in, the files uploaded, and committed](img/upload-terminal.png)
-
-## Step 7. Check it in lakeFS
-
-Open the lakeFS link in your browser. Pick your dataset's name as the branch and open the `dataset` folder: you should see `data.yaml`, `images`, and `labels`. That confirms it landed.
-
-![The lakeFS page showing the uploaded dataset](img/upload-lakefs-tree.png)
+The run form's `dataset` field is a dropdown of `dataset-<name>@<version>` choices. A new version shows up the next time your pipeline is released.
 
 ## What to remember
 
-The tool told you a **data ref**. It is the name you gave the dataset, or `main` if you did not give one. Write it down. You will type it into the run form in the next step, so the pipeline knows which dataset to train on.
+You choose `dataset-cats@v1` (or `@latest`) in the run form. The run reads exactly that version, and every result records the commit it came from.
 
 Next, run the pipeline. Go to [Run the pipeline](run-it.md).
 
 !!! tip "Uploading a new version later"
-    To update the dataset, run the same command again with your changed folder. The tool uploads only what changed and keeps a history, so you can always go back. Every run records the exact version it trained on, so a result always points back to its data.
-
-!!! tip "See your datasets"
-    `kubecore-dataset list` shows every dataset name you can type as `data-ref`.
+    Pull the dataset, change it, `push` again, merge the pull request, `release`. Old versions stay as they are, so a result always points back to its data.

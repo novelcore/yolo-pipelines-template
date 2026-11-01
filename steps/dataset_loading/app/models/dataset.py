@@ -1,48 +1,8 @@
 """Domain models for the YOLO dataset loading step."""
 
-import re
-from typing import NamedTuple, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
-
-# A dataset is its own lakeFS repository, `dataset-<name>`; the run picks one
-# version of it: a tag `vN`, or `latest` (= the head of `main`).
-_DATASET_REPO_RE = re.compile(r"^dataset-[a-z0-9][a-z0-9-]*$")
-_DATASET_VERSION_RE = re.compile(r"^(latest|v[0-9]+)$")
-
-
-class DatasetRef(NamedTuple):
-    """A parsed ``<dataset-repo>@<version>`` selection."""
-
-    repo: str
-    version: str
-
-    @property
-    def ref(self) -> str:
-        """The lakeFS ref to resolve to a commit: ``main`` for ``latest``,
-        else the version tag."""
-        return "main" if self.version == "latest" else self.version
-
-    def __str__(self) -> str:
-        return f"{self.repo}@{self.version}"
-
-
-def parse_dataset_ref(value: object) -> DatasetRef:
-    """Parse the ``dataset`` submit parameter (``dataset-default@latest``).
-
-    Refuses anything else with a message that shows the expected shape — the
-    value is typed on a form, so a typo must be obvious, not a lakeFS 404 later.
-    """
-    text = str(value or "").strip()
-    repo, sep, version = text.partition("@")
-    if not (sep and _DATASET_REPO_RE.match(repo) and _DATASET_VERSION_RE.match(version)):
-        raise ValueError(
-            f"dataset must be '<dataset-repo>@<version>' — a repository named "
-            f"dataset-<name> and a version v<N> or latest (e.g. dataset-default@latest); "
-            f"got {text!r}"
-        )
-    return DatasetRef(repo, version)
-
 
 class YoloDatasetParams(BaseModel):
     """Parameters passed into the dataset loading step from the CLI / orchestrator."""
@@ -58,8 +18,9 @@ class YoloDatasetParams(BaseModel):
     )
     lakefs_ref: Optional[str] = Field(
         default=None,
-        description="Version ref in that repository ('main' for latest, or a vN tag); "
-        "resolved to the commit every step of the run reads.",
+        description="The COMMIT of that repository this run reads: the caller resolved the run's "
+        "<dataset-repo>@<version> choice with kubecore.datasets.resolve, so every step of the "
+        "run reads the same snapshot.",
     )
     path_override: Optional[str] = Field(
         default=None,

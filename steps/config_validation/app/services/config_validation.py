@@ -27,9 +27,10 @@ fast convenience, and compose-time schema validation is the hard contract.
 
 import logging
 import os
-import re
-from typing import NamedTuple
 from urllib.parse import urlparse
+
+from kubecore import datasets
+from kubecore.errors import KubecoreError
 
 # Same canonical S3 layout the dataset-loading service uses when no explicit
 # path is given — kept in sync so the check probes exactly where the loader
@@ -39,36 +40,6 @@ _DEFAULT_BUCKET = "io-audio-text-data"
 
 class ConfigValidationError(Exception):
     """A required external dependency is missing or unreachable."""
-
-
-_DATASET_REPO_RE = re.compile(r"^dataset-[a-z0-9][a-z0-9-]*$")
-_DATASET_VERSION_RE = re.compile(r"^(latest|v[0-9]+)$")
-
-
-class DatasetRef(NamedTuple):
-    """A parsed `<dataset-repo>@<version>` selection."""
-
-    repo: str
-    version: str
-
-    @property
-    def ref(self) -> str:
-        """The lakeFS ref to read: `main` for `latest`, else the version tag."""
-        return "main" if self.version == "latest" else self.version
-
-
-def parse_dataset_ref(value) -> DatasetRef:
-    """Parse the `dataset` parameter. Same rule as dataset-loading's
-    parse_dataset_ref (each step image carries only its own app/)."""
-    text = str(value or "").strip()
-    repo, sep, version = text.partition("@")
-    if not (sep and _DATASET_REPO_RE.match(repo) and _DATASET_VERSION_RE.match(version)):
-        raise ConfigValidationError(
-            f"dataset must be '<dataset-repo>@<version>' — a repository named "
-            f"dataset-<name> and a version v<N> or latest (e.g. dataset-default@latest); "
-            f"got {text!r}"
-        )
-    return DatasetRef(repo, version)
 
 
 class ConfigValidationService:
@@ -90,7 +61,10 @@ class ConfigValidationService:
         model = resolved.get("model") or {}
         platform = resolved.get("platform") or {}
         # Pure format check: runs even when no object store is reachable.
-        dataset = parse_dataset_ref(resolved.get("dataset"))
+        try:
+            dataset = datasets.DatasetRef.parse(resolved.get("dataset"))
+        except KubecoreError as exc:
+            raise ConfigValidationError(str(exc)) from exc
 
         self._check_mlflow()
 
@@ -102,7 +76,10 @@ class ConfigValidationService:
             )
             return
 
-        self._check_dataset_path(s3, data, dataset)
+        if str(data.get("source") or "lakefs") == "lakefs" and not str(data.get("path_override") or "").strip():
+            self._check_dataset(dataset)
+        else:
+            self._check_dataset_path(s3, data, dataset)
         self._check_pretrained_weights(s3, model)
         self._check_checkpoint_resume(s3, data, platform)
         self._log.info("config-validation: all liveness checks passed")
@@ -148,15 +125,34 @@ class ConfigValidationService:
             config=cfg,
         )
 
-    def _dataset_uri(self, data: dict, dataset: DatasetRef) -> str:
-        """The s3:// URI the dataset-loading step reads (mirrors that step's
-        _resolve_source), so the check probes exactly what it uses: the root of
-        the dataset repository at the picked version."""
+    def _check_dataset(self, dataset, client=None) -> None:
+        """The picked ``<dataset-repo>@<version>`` exists and holds data.yaml (kubecore package).
+
+        ``datasets.resolve`` says what is wrong: no such dataset, or no such version and
+        which versions exist.
+        """
+        try:
+            commit = datasets.resolve(dataset, client)
+            c = client or self._lakefs()
+            has_yaml = any(True for _ in c.list_objects(dataset.repo, commit, "data.yaml"))
+        except KubecoreError as exc:
+            raise ConfigValidationError(f"dataset {dataset}: {exc}") from exc
+        if not has_yaml:
+            raise ConfigValidationError(
+                f"dataset {dataset} (commit {commit[:12]}) has no data.yaml at the root of its "
+                "repository - a valid Ultralytics YOLO dataset has data.yaml, images/ and labels/.")
+        self._log.info("dataset OK (%s -> commit %s, data.yaml present)", dataset, commit[:12])
+
+    @staticmethod
+    def _lakefs():
+        from kubecore.lakefs import LakeFS
+        return LakeFS.connect()
+
+    def _dataset_uri(self, data: dict, dataset) -> str:
+        """The s3:// URI of a dataset given as an explicit override (the only S3 probe left)."""
         override = str(data.get("path_override") or "").strip()
         if override:
             return override
-        if str(data.get("source") or "lakefs") == "lakefs":
-            return f"s3://{dataset.repo}/{dataset.ref}/"
         return f"s3://{_DEFAULT_BUCKET}/upload-initial/dataset/{dataset.version}/"
 
     @staticmethod
@@ -167,16 +163,7 @@ class ConfigValidationService:
         except Exception:  # noqa: BLE001 — absent or unreadable: not there
             return False
 
-    def _available_datasets(self, s3) -> list:
-        """Dataset repositories (dataset-<name>) in lakeFS, for the error
-        message. Best-effort: [] when the listing fails."""
-        try:
-            buckets = s3.list_buckets().get("Buckets") or []
-        except Exception:  # noqa: BLE001
-            return []
-        return sorted(b["Name"] for b in buckets if str(b.get("Name", "")).startswith("dataset-"))
-
-    def _check_dataset_path(self, s3, data: dict, dataset: DatasetRef) -> None:
+    def _check_dataset_path(self, s3, data: dict, dataset) -> None:
         uri = self._dataset_uri(data, dataset)
         parsed = urlparse(uri)
         bucket, prefix = parsed.netloc, parsed.path.lstrip("/")
@@ -188,10 +175,6 @@ class ConfigValidationService:
         # No data.yaml: explain what is wrong with the picked dataset, and name
         # the dataset repositories that do exist.
         hint = ""
-        if str(data.get("source") or "lakefs") == "lakefs" and not data.get("path_override"):
-            found = self._available_datasets(s3)
-            hint = (f" Dataset repositories: {', '.join(found)}." if found
-                    else " `kubecore-dataset list` shows the datasets that exist.")
         self._log.info("checking dataset path %s", uri)
         try:
             resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=1)

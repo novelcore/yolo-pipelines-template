@@ -16,7 +16,7 @@ the production YOLO pipeline). It:
      pipeline.py via outputs=["data-yaml", "manifest-summary"]):
        - data-yaml         : the dataset's data.yaml (kpt_shape, names, splits)
        - manifest-summary  : {bucket, prefix, label_keys sentinel, ref, repo,
-                             version, commit} — the compact pointer to the
+                             version, dataset_commit} — the compact pointer to the
                              object-store layout (the full key list is far too
                              large for an Argo parameter). bucket is the dataset
                              repository; prefix is pinned to the commit the
@@ -37,7 +37,7 @@ from pathlib import Path
 import yaml
 
 from app.manager import Manager
-from app.models.dataset import parse_dataset_ref
+from kubecore import datasets
 
 # The config sections this step reads from params.yaml. The compose-and-validate
 # release gate fails the render if the config tree has no `data` section, so a
@@ -61,7 +61,7 @@ def _int_field(value, name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer, got {raw!r}")
 
 
-def _resolve_dataset_params(cfg: dict) -> dict:
+def _resolve_dataset_params(cfg: dict, client=None) -> dict:
     """Map the run's `dataset` pick + the experiment `data` config slice onto
     the dataset-loading service's run parameters.
 
@@ -73,7 +73,13 @@ def _resolve_dataset_params(cfg: dict) -> dict:
 
     source = str(data.get("source") or "lakefs")
 
-    dataset = parse_dataset_ref(cfg.get("dataset"))
+    # The package parses the choice and resolves it to a commit ONCE (CON-04): a malformed
+    # value, an unknown dataset or a missing version stops the run here, with the message
+    # saying what exists. Every later step reads this commit.
+    dataset = datasets.DatasetRef.parse(cfg.get("dataset"))
+    commit = ""
+    if str(data.get("source") or "lakefs") == "lakefs" and not str(data.get("path_override") or "").strip():
+        commit = datasets.resolve(dataset, client)
 
     # sample_size is a string in the form ("" = full dataset); coerce to a
     # positive int, or None when empty. A bad value is a form mistake, so fail
@@ -111,7 +117,7 @@ def _resolve_dataset_params(cfg: dict) -> dict:
         params["path_override"] = path_override
     elif source == "lakefs":
         params["lakefs_repo"] = dataset.repo
-        params["lakefs_ref"] = dataset.ref
+        params["lakefs_ref"] = commit
 
     return params
 
@@ -122,7 +128,7 @@ def _write_outputs(cfg: dict) -> None:
     model-training reconstructs /work/dataset from these:
       - data-yaml        : the full data.yaml content (verbatim)
       - manifest-summary : a compact {bucket, prefix, label_keys, ref, repo,
-                           version, commit} pointer; the label_keys sentinel
+                           version, dataset_commit} pointer; the label_keys sentinel
                            tells training to stream labels from object storage
                            too (manifest-only mode). prefix starts with the
                            pinned commit; commit is "" only for source=s3.
@@ -143,15 +149,15 @@ def _write_outputs(cfg: dict) -> None:
     # Non-empty sentinel = labels are also streamed from object storage (we never
     # embed the actual key lists — too large for an Argo parameter).
     label_keys_sentinel = {"_present": True} if manifest.get("label_keys") else {}
-    dataset = parse_dataset_ref(cfg.get("dataset"))
+    dataset = datasets.DatasetRef.parse(cfg.get("dataset"))
     summary = {"bucket": bucket, "prefix": prefix, "label_keys": label_keys_sentinel,
                "ref": str(dataset), "repo": dataset.repo, "version": dataset.version,
-               "commit": manifest.get("lakefs_commit") or ""}
+               "dataset_commit": manifest.get("lakefs_commit") or ""}
     (OUTPUT_DIR / "manifest-summary.json").write_text(
         json.dumps(summary, separators=(",", ":"))
     )
     print(f"[dataset-loading] outputs written: data-yaml + manifest-summary "
-          f"(bucket={bucket} prefix={prefix} dataset={dataset} commit={summary['commit'] or 'unresolved'})")
+          f"(bucket={bucket} prefix={prefix} dataset={dataset} commit={summary['dataset_commit'] or 'unresolved'})")
 
 
 def main() -> None:

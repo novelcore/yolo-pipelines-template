@@ -17,6 +17,14 @@ later step reads that commit. Checkpoints and quantized models go to
 `outputs-<app>` on `main`, under `checkpoints/<experiment>/<run>/` (and
 `quantization/<experiment>/<run>/`), one commit per step per run naming the run.
 
+The steps use the `kubecore` Python **package** (from `hera-pipeline-template`
+`packages/kubecore`, pinned by commit in each step Dockerfile) for this: the
+dataset ref and its commit (`datasets`), the local or MeluXina-staged copy
+(`formats` consumer), and the results (`outputs.write_run`). The package and the
+vendored `kubecore/` engine share an import name and never share a `sys.path`:
+engine tests run with `python -m pytest tests`, step tests with `pytest step_tests`
+(see `step_tests/README.md`). Manage datasets with `kubecore dataset ...`.
+
 Lineage: `hera-mlops-template` (generic Hera+Hydra scaffold, Petros) →
 `yolo-hera-yolo` (real YOLO implementation, Alexandra) → promoted to the
 official template 2026-08-18 with full history preserved. Battle-tested

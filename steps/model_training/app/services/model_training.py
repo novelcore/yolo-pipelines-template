@@ -23,14 +23,15 @@ import json
 import logging
 import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import yaml
 
 from app.models.training import TrainingParams, TrainingResult
-from app.services import lakefs_objects
+from app.services import lakefs_io
 from app.services.resource_monitor import ResourceMonitor
 
 
@@ -99,6 +100,7 @@ class TrainingService:
         mlflow_tracking_uri: str,
     ) -> None:
         self._s3 = s3_client
+        self._outputs_stage: Optional[Path] = None  # set per run in _run_training
         self._mlflow_tracking_uri = mlflow_tracking_uri
         self._logger = logging.getLogger(__name__)
 
@@ -241,6 +243,9 @@ class TrainingService:
 
         with tempfile.TemporaryDirectory(prefix="io-model-training-") as tmp_dir:
             tmp_path = Path(tmp_dir)
+            # Results are staged here and written once (see _commit_outputs).
+            self._outputs_stage = tmp_path / "outputs"
+            self._outputs_stage.mkdir()
 
             # 1. Resolve model path (download from S3 if needed)
             model_path = self._resolve_model_path(params, tmp_path)
@@ -314,7 +319,12 @@ class TrainingService:
                     params.disk_cache_bytes // (1024 * 1024),
                 )
 
-            trainer = model.train(**train_kwargs)
+            try:
+                trainer = model.train(**train_kwargs)
+            except Exception:
+                # Keep the epoch checkpoints reached so far: a retry can resume from them.
+                self._keep_partial_outputs(params)
+                raise
 
             # 6. Determine save directory
             save_dir = Path(model.trainer.save_dir)  # type: ignore[union-attr]
@@ -1070,10 +1080,11 @@ class TrainingService:
                 key,
                 local_pt,
             )
-            if lakefs_objects.bearer_available():
-                lakefs_objects.download(bucket, key, local_pt)
-            else:
-                self._s3.download_file(bucket, key, str(local_pt))
+            if bucket.startswith(("outputs-", "dataset-")):
+                # a lakeFS repository (our naming rule): read with the kubecore client,
+                # which works with the app's keys in-cluster and the bearer on MeluXina
+                return Path(lakefs_io.download_object(uri_or_path, str(tmp_path)))
+            self._s3.download_file(bucket, key, str(local_pt))
             return local_pt
 
         # Local path
@@ -1288,80 +1299,40 @@ class TrainingService:
 
         return best_uri
 
-    def _commit_outputs(self, params: TrainingParams) -> None:
-        """S3-gateway writes only STAGE objects on the lakeFS branch — commit so
-        the checkpoints are a versioned artifact (one commit captures the
-        best/last/epoch files and exports staged during this run), not dangling
-        changes. Runs after the exports so they are in this run's commit, on
-        `main` of the app's outputs repository (checkpoint_bucket,
-        `outputs-<app>`) with the run named in the message."""
-        branch = params.checkpoint_prefix.split("/", 1)[0] or "main"
-        run = os.environ.get("KUBECORE_RUN_ID", "").strip()
-        self._lakefs_commit(
-            params.checkpoint_bucket,
-            branch,
-            f"model-training: {params.experiment_name} {run}".rstrip(),
-            {
-                "run": run,
-                "step": "model-training",
-                "experiment": params.experiment_name,
-                "dataset_ref": (f"{params.dataset_repo}@{params.dataset_version}"
-                                if params.dataset_repo else ""),
-                "dataset_commit": params.lakefs_commit or "",
-                "mlflow_run_id": self._get_mlflow_run_id() or "",
-            },
-        )
-
-    def _lakefs_commit(self, repo: str, branch: str, message: str,
-                       metadata: dict | None = None) -> None:
-        """Commit staged lakeFS changes on ``branch`` (S3-gateway only stages).
-
-        Best-effort: a failure (including 'nothing to commit') never fails the
-        step — the objects are already uploaded. Uses the lakeFS REST API on the
-        same endpoint as the S3 gateway with the injected lakeFS credentials, or
-        off-cluster the objects API with the run's bearer token.
-        """
-        import base64
-        import urllib.request
-
-        metadata = {k: str(v) for k, v in (metadata or {}).items() if v}
-        if lakefs_objects.bearer_available():
-            try:
-                cid = lakefs_objects.commit(repo, branch, message, metadata)
-                self._logger.info("lakeFS commit %s @ %s/%s", cid[:12], repo, branch)
-            except Exception as exc:  # noqa: BLE001
-                self._logger.warning("lakeFS commit failed (non-fatal): %s", exc)
-            return
-        endpoint = os.environ.get("LAKEFS_ENDPOINT", "").rstrip("/")
-        access = os.environ.get("LAKEFS_ACCESS_KEY", "")
-        secret = os.environ.get("LAKEFS_SECRET_KEY", "")
-        if not (endpoint and access and secret):
-            self._logger.warning("lakeFS commit skipped — endpoint/creds unset.")
-            return
-        url = f"{endpoint}/api/v1/repositories/{repo}/branches/{branch}/commits"
-        auth = base64.b64encode(f"{access}:{secret}".encode()).decode()
-        req = urllib.request.Request(
-            url, data=json.dumps({"message": message, "metadata": metadata}).encode(),
-            method="POST",
-        )
-        req.add_header("Content-Type", "application/json")
-        req.add_header("Authorization", f"Basic {auth}")
+    def _keep_partial_outputs(self, params: TrainingParams) -> None:
+        """Best effort after a failed train(): write the checkpoints staged so far."""
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                cid = str(json.loads(resp.read().decode()).get("id", "?"))
-            self._logger.info("lakeFS commit %s @ %s/%s", cid[:12], repo, branch)
-        except Exception as exc:  # noqa: BLE001
-            self._logger.warning("lakeFS commit failed (non-fatal): %s", exc)
+            if any(self._outputs_stage.iterdir()):
+                self._commit_outputs(params)
+        except Exception as exc:  # noqa: BLE001 - never mask the training error
+            self._logger.warning("could not keep partial results: %s", exc)
+
+    def _commit_outputs(self, params: TrainingParams) -> None:
+        """Write everything staged during this run (best/last/epoch checkpoints, exports)
+        to ``outputs-<app>`` as ONE commit on ``main``, under
+        ``checkpoints/<experiment>/<run>/`` (kubecore ``write_run``: a per-run branch
+        merged into main, so simultaneous runs never share a staging area).
+
+        A failure is fatal: results that never reached lakeFS must not look like success.
+        """
+        files = sorted(p for p in self._outputs_stage.iterdir() if p.is_file())  # type: ignore[union-attr]
+        try:
+            prefix = lakefs_io.write_outputs(params.checkpoint_bucket, params.experiment_name, files)
+        except Exception as exc:  # noqa: BLE001 - re-raised with the repository named
+            raise TrainingError(
+                f"writing results to {params.checkpoint_bucket} failed: {exc}") from exc
+        self._logger.info("Wrote %d result files to %s", len(files), prefix)
 
     def _upload_to_s3(self, local_path: Path, bucket: str, key: str) -> None:
-        """Upload a single file to S3 (or, off-cluster, via the lakeFS objects
-        API with the run's bearer token — see services/lakefs_objects.py)."""
+        """Stage one result file for the run's single write to ``outputs-<app>``.
+
+        ``bucket``/``key`` keep the ``{branch}/{path}`` vocabulary of the URIs we hand to
+        later steps; only the file name is used here, the location comes from
+        ``write_run`` (``checkpoints/<experiment>/<run>/<name>``).
+        """
+        if self._outputs_stage is None:
+            raise TrainingError("no results staging directory: _upload_to_s3 outside a training run")
         try:
-            if lakefs_objects.bearer_available():
-                lakefs_objects.upload(local_path, bucket, key)
-                return
-            self._s3.upload_file(str(local_path), bucket, key)
-        except Exception as exc:
-            raise TrainingError(
-                f"S3 upload failed for s3://{bucket}/{key}: {exc}"
-            ) from exc
+            shutil.copy(local_path, self._outputs_stage / Path(key).name)
+        except OSError as exc:
+            raise TrainingError(f"staging {key} for {bucket} failed: {exc}") from exc

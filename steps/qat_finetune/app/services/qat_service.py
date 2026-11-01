@@ -30,7 +30,7 @@ from torchao.quantization.pt2e.quantize_pt2e import convert_pt2e, prepare_qat_pt
 from ultralytics import YOLO
 
 from app.models.quantization import QATParams, QATResult
-from app.services import lakefs_objects
+from app.services import lakefs_io
 
 # Interval (seconds) between system-metric samples during the QAT run.
 _SYSTEM_METRICS_INTERVAL_S = 15.0
@@ -46,8 +46,7 @@ class QATError(Exception):
 class QATService:
     """Runs PT2E QAT fine-tuning and exports an INT8 TFLite artifact."""
 
-    def __init__(self, s3_client: Any, mlflow_tracking_uri: str) -> None:
-        self._s3 = s3_client
+    def __init__(self, mlflow_tracking_uri: str) -> None:
         self._mlflow_uri = mlflow_tracking_uri
         self._logger = logging.getLogger(__name__)
 
@@ -190,12 +189,8 @@ class QATService:
         if not path.startswith("s3://"):
             return path
 
-        without_scheme = path[len("s3://"):]
-        bucket, _, key = without_scheme.partition("/")
-        local_path = os.path.join(output_dir, Path(key).name)
-
-        self._logger.info("Downloading checkpoint: %s → %s", path, local_path)
-        self._s3.download_file(bucket, key, local_path)
+        self._logger.info("Downloading checkpoint: %s -> %s", path, output_dir)
+        local_path = lakefs_io.download_object(path, output_dir)
         return local_path
 
     # ------------------------------------------------------------------
@@ -477,74 +472,16 @@ class QATService:
     # Step 8 — Upload TFLite to S3
     # ------------------------------------------------------------------
 
-    def _upload_tflite(self, local_path: str, params: QATParams) -> str:
-        """Upload the TFLite artifact to S3 and return its s3:// URI."""
-        key = f"{params.output_prefix}/{Path(local_path).name}"
-        self._logger.info(
-            "Uploading TFLite to s3://%s/%s", params.output_bucket, key
-        )
-        self._s3.upload_file(local_path, params.output_bucket, key)
-        # S3-gateway writes only STAGE objects on the lakeFS branch — commit so
-        # the QAT INT8 tflite becomes a versioned artifact, not dangling changes.
-        # One commit for this run's output, naming the run.
-        branch = params.output_prefix.split("/", 1)[0] or "main"
-        run = os.environ.get("KUBECORE_RUN_ID", "").strip()
-        self._lakefs_commit(
-            params.output_bucket, branch,
-            f"qat-finetune: INT8 tflite {Path(local_path).name} {run}".rstrip(),
-            {"step": "qat-finetune", "experiment": params.experiment_name},
-        )
-        return f"s3://{params.output_bucket}/{key}"
+    def _upload_tflite(self, local_path: str, params) -> str:
+        """Write the INT8 TFLite to ``outputs-<app>`` (one commit on main) and return its s3:// URI.
 
-    def _lakefs_commit(self, repo: str, branch: str, message: str,
-                       metadata: Optional[dict] = None) -> None:
-        """Commit staged lakeFS changes on ``branch`` (S3-gateway only stages).
-
-        Best-effort: a failure (including 'nothing to commit') never fails the
-        step — the object is already uploaded. Uses the lakeFS REST API on the
-        same endpoint as the S3 gateway with the injected lakeFS credentials, or
-        off-cluster the objects API with the run's bearer token. The commit
-        records the run and the dataset it was computed from (set by entry.py).
+        The commit is the kubecore package's ``write_run``: ``quantization/<experiment>/<run>/``
+        on a per-run branch merged into main, so simultaneous runs never share a staging area.
         """
-        import base64
-        import json
-        import urllib.request
-
-        metadata = dict(metadata or {})
-        metadata.update({
-            "run": os.environ.get("KUBECORE_RUN_ID", ""),
-            "dataset_ref": os.environ.get("KUBECORE_DATASET_REF", ""),
-            "dataset_commit": os.environ.get("KUBECORE_DATASET_COMMIT", ""),
-        })
-        metadata = {k: str(v) for k, v in metadata.items() if v}
-        if lakefs_objects.bearer_available():
-            try:
-                cid = lakefs_objects.commit(repo, branch, message, metadata)
-                self._logger.info("lakeFS commit %s @ %s/%s", cid[:12], repo, branch)
-            except Exception as exc:  # noqa: BLE001
-                self._logger.warning("lakeFS commit failed (non-fatal): %s", exc)
-            return
-
-        endpoint = os.environ.get("LAKEFS_ENDPOINT", "").rstrip("/")
-        access = os.environ.get("LAKEFS_ACCESS_KEY", "")
-        secret = os.environ.get("LAKEFS_SECRET_KEY", "")
-        if not (endpoint and access and secret):
-            self._logger.warning("lakeFS commit skipped — endpoint/creds unset.")
-            return
-        url = f"{endpoint}/api/v1/repositories/{repo}/branches/{branch}/commits"
-        auth = base64.b64encode(f"{access}:{secret}".encode()).decode()
-        req = urllib.request.Request(
-            url, data=json.dumps({"message": message, "metadata": metadata}).encode(),
-            method="POST",
-        )
-        req.add_header("Content-Type", "application/json")
-        req.add_header("Authorization", f"Basic {auth}")
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                cid = str(json.loads(resp.read().decode()).get("id", "?"))
-            self._logger.info("lakeFS commit %s @ %s/%s", cid[:12], repo, branch)
-        except Exception as exc:  # noqa: BLE001
-            self._logger.warning("lakeFS commit failed (non-fatal): %s", exc)
+        prefix = lakefs_io.write_outputs(params.output_bucket, params.experiment_name,
+                                         [local_path], kind="quantization")
+        self._logger.info("qat-finetune: INT8 tflite written to %s", prefix)
+        return prefix + Path(local_path).name
 
     # ------------------------------------------------------------------
     # Step 9 — MLflow logging (FR-M-05)

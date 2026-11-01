@@ -21,7 +21,7 @@ Also open lakeFS and confirm your dataset repository is really there, with `data
 
 ## The upload cannot sign in
 
-The tool opens your browser to sign in and waits about three minutes. If the browser did not open, copy the link the tool printed into your browser yourself. If signing in keeps failing, sign in the guided way with `kubecore-dataset login --paste` and follow the steps it shows, then run the upload again. It remembers that you signed in.
+The tool opens your browser to sign in and waits about three minutes. If the browser did not open, copy the link the tool printed into your browser yourself. If signing in keeps failing, run `kubecore login` again. It remembers that you signed in.
 
 ## The upload says `externally-managed-environment`
 

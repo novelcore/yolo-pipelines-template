@@ -27,6 +27,8 @@ from pathlib import Path
 
 import yaml
 
+from app.services import lakefs_io
+
 # Config sections this step consumes (declared in pipeline.py reads=).
 READS = ["experiment", "dataset", "data", "model", "train", "image_processing", "logging"]
 
@@ -51,34 +53,15 @@ def _dataset_location(summary: dict) -> tuple[str, str, str]:
     if not (bucket and prefix):
         raise SystemExit("[model-training] no dataset location: --manifest-summary from "
                          "dataset-loading is empty, so there is no pinned dataset commit to read.")
-    return bucket, prefix if prefix.endswith("/") else prefix + "/", str(summary.get("commit") or "")
+    return bucket, prefix if prefix.endswith("/") else prefix + "/", str(summary.get("dataset_commit") or "")
 
 
-def _staged_dataset_dir(prefix: str) -> str | None:
-    """Off-cluster (MeluXina) the platform stages the dataset commit onto the
-    node and bind-mounts it read-only at KUBECORE_DATASET_DIR (PRD-1016 F-04).
-    Return the directory holding data.yaml for this run, or None when nothing
-    is staged (in-cluster: stream from the lakeFS S3 gateway). The mount is the
-    dataset repository's commit root, which IS the dataset (data.yaml, images/,
-    labels/); the prefix without its leading commit is "" for the platform
-    layout."""
-    root = os.environ.get("KUBECORE_DATASET_DIR")
-    if not root or not os.path.isdir(root):
-        return None
-    resolved = prefix.split("/", 1)[1].strip("/") if "/" in prefix else ""
-    candidate = os.path.join(root, resolved) if resolved else root
-    if os.path.exists(os.path.join(candidate, "data.yaml")):
-        return candidate
-    # Off-cluster there is no S3 gateway to fall back to (live job 5149139:
-    # a silent fallback ended in boto3 "Unable to locate credentials"). A
-    # path_override outside the dataset repository is not staged either, and
-    # reading anything else here would train on a different dataset than the
-    # in-cluster copy of the run.
-    raise SystemExit(
-        f"[model-training] KUBECORE_DATASET_DIR={root} is mounted but holds no "
-        f"data.yaml for {prefix} — the staged dataset repository root must carry "
-        "data.yaml, images/ and labels/ (a data.path_override is not staged "
-        "off-cluster; run this step in-cluster).")
+def _staged() -> bool:
+    """True on MeluXina: the platform staged the pinned dataset commit onto the node
+    (bind-mounted read-only, announced as KUBECORE_STAGED_DIR, PRD-1016 F-04 / PRD-1541).
+    There is no S3 gateway off-cluster, so the dataset is read as local files through the
+    kubecore consumer; in-cluster the trainer streams from the lakeFS S3 gateway."""
+    return bool(os.environ.get("KUBECORE_STAGED_DIR"))
 
 
 def _guard_mlflow() -> bool:
@@ -178,11 +161,13 @@ def main() -> None:
     # (No data.yaml needed: the service generates the correct pose default when
     # dataset_dir has none — kpt_shape [11,3], names {0: spacecraft}.)
     os.makedirs(RUNS_DIR, exist_ok=True)
-    staged = _staged_dataset_dir(prefix)
-    if staged:
-        # Local mode: the staged ref is on the node (read-only bind mount).
-        dataset_dir, source = staged, "local"
-        print(f"[model-training] dataset staged at {staged} -> local mode", flush=True)
+    if _staged():
+        # Local mode: the pinned commit is on the node. The kubecore consumer finds the
+        # staged copy (it checks the commit), nothing is downloaded, and returns a data.yaml
+        # whose path: points at it.
+        data_yaml = lakefs_io.materialize(ds_ref, commit, DATASET_DIR)
+        dataset_dir, source = str(data_yaml.parent), "local"
+        print(f"[model-training] dataset {ds_ref} @ {commit} staged -> {data_yaml} (local mode)", flush=True)
     else:
         dataset_dir, source = DATASET_DIR, "s3"
         os.makedirs(os.path.join(DATASET_DIR, "labels"), exist_ok=True)

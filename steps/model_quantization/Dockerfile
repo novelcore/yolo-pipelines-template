@@ -32,6 +32,13 @@ RUN /opt/poetry/bin/poetry export --only=main -f requirements.txt --output /tmp/
  && rm -rf /opt/poetry /tmp/requirements.txt \
  && python -c "from charset_normalizer import md; import requests"
 
+# The kubecore PACKAGE (datasets, run outputs), pinned to a commit of hera-pipeline-template.
+# It shares the import name `kubecore` with the vendored engine at the repo root, which is
+# NOT in this image: only app/ is copied. Bump the commit to take a newer package.
+ARG KUBECORE_PKG_COMMIT=5e718a1e957bc9c5a1d6c13c12afe687e91d05b1
+RUN pip install --no-cache-dir \
+    "https://github.com/novelcore/hera-pipeline-template/archive/${KUBECORE_PKG_COMMIT}.zip#subdirectory=packages/kubecore"
+
 COPY app/ ./app/
 
 # Ultralytics TFLite INT8 export toolchain (PTQ path). Baked at build time so the
