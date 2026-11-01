@@ -34,4 +34,8 @@ MLflow has a compare view for exactly this. Select two or more runs, and it show
 
 You never have to remember what you did. If a run turns out well, its parameters are right there. You can read them, and set the same values again to repeat it. If a run turns out badly, you can see what to change.
 
+## Your files
+
+Checkpoints, exports and the INT8 model are not in MLflow's charts: they are in your app's repository `outputs-<app>` in lakeFS, branch `main`, one commit per step per run, under `checkpoints/<experiment>/<run>/` and `quantization/<experiment>/<run>/`. The commit's details name the dataset and the MLflow run. [First dataset to results](first-run.md), step 6, shows how to download them.
+
 Happy with a model? Go to [Promote a model](promote.md).

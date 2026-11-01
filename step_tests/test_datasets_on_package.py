@@ -11,8 +11,9 @@ import yaml
 from conftest import DATA_YAML, ROOT, import_in, step_app
 from kubecore.errors import DatasetError
 
-MALFORMED = ["", "dataset-default", "dataset-default@", "@latest", "cats@v1", "dataset-cats@main",
-             "dataset-cats@1", "dataset-cats@v1.2", "dataset-@v1", "dataset-Cats@v1",
+# What the package refuses. Any repository name and any ref (vN, latest, a branch, a tag, a commit id)
+# are valid picks since package round 3; the run still pins whatever it is to one commit.
+MALFORMED = ["", "dataset-default", "dataset-default@", "@latest", "dataset-Cats@v1",
              "dataset-cats@latest@v1", "dataset-cats @v1"]
 
 
@@ -370,3 +371,9 @@ def test_step_images_install_the_package_and_not_the_vendored_engine():
         assert "COPY kubecore" not in text, step
         shas.add(next(l.split("=")[1] for l in text.splitlines() if l.startswith("ARG KUBECORE_PKG_COMMIT")))
     assert len(shas) == 1 and len(next(iter(shas))) == 40, "one pinned package commit, a full sha"
+
+
+def test_should_pin_a_branch_pick_to_its_commit_too(client, fake):
+    entry = import_in("dataset_loading", "app.entry")
+    p = entry._resolve_dataset_params({"dataset": "dataset-cats@main", "data": {"source": "lakefs"}}, client)
+    assert p["lakefs_ref"] == fake.head("dataset-cats"), "a moving branch is resolved once, to a commit"

@@ -15,10 +15,12 @@ your-repo/
 ├── pipeline.py              # the DAG: steps, what they read, how they connect
 ├── config/                  # THE experiment config tree (all your parameters)
 │   ├── config.yaml          #   defaults list (which group options are default)
+│   ├── dataset.yaml         #   the `dataset` field: <dataset-repo>@<version>
 │   ├── data.yaml  train.yaml  quantization.yaml  ...
 │   ├── train/optimizer/{sgd,adam,adamw}.yaml     # a config GROUP
 │   └── image_processing/{mosaic_default,...}.yaml
-├── kubecore/                # platform-owned helpers (seeded — do not edit)
+├── kubecore/                # platform-owned engine (seeded — do not edit)
+├── tests/, step_tests/      # engine tests, step-code tests (two commands: §15)
 └── steps/
     ├── model_training/      # Dockerfile + entry point (your code)
     └── ...
@@ -416,17 +418,10 @@ with mlflow.start_run():
     mlflow.log_metric("mAP50", 0.87)
 ```
 
-lakeFS speaks the S3 API (repo = bucket, `ref/path` = key; a dataset's files sit at
-the root of its own `dataset-<name>` repository):
-
-```python
-import os, boto3
-s3 = boto3.client("s3",
-    endpoint_url=os.environ["LAKEFS_ENDPOINT"],
-    aws_access_key_id=os.environ["LAKEFS_ACCESS_KEY"],
-    aws_secret_access_key=os.environ["LAKEFS_SECRET_KEY"])
-s3.download_file("dataset-default", "main/data.yaml", "/work/data.yaml")
-```
+Datasets and results go through the `kubecore` package (see `docs/datasets-in-the-steps.md`):
+`datasets.materialize("<repo>@<ref>", prefix="folder/")` reads any repository at a pinned ref,
+`outputs.run(...)` writes results. You write no endpoint and no credential: the step's environment has
+them.
 
 When you run locally, the same `platform` section is filled from a
 local fallback file, so `python steps/model_training/entry.py --params
@@ -557,3 +552,31 @@ that's normal; parameters live in the template, not the images.
 **"Can I put big things (file contents, long lists) in config?"**
 The resolved params.yaml is capped (200KB, checked with a clear error).
 Config is for knobs; bulk data goes through lakeFS/checkpoints (§9).
+
+---
+
+## 15. Running the tests
+
+There are two test commands, on purpose:
+
+```bash
+python -m pytest tests                             # the engine: the vendored kubecore/
+pip install "https://github.com/novelcore/hera-pipeline-template/archive/<commit>.zip#subdirectory=packages/kubecore" \
+    pytest boto3 psutil pydantic pydantic-settings    # once, in a virtual environment
+pytest step_tests                                  # step code that imports the kubecore package
+```
+
+**Why two.** The repository holds two things that are both imported as `kubecore`: the platform's
+engine in `kubecore/` (render, compose, enhance; it runs in CI and is never in a step image) and the
+Python package (datasets, run outputs; it is installed in the step images from a pinned commit,
+`KUBECORE_PKG_COMMIT`). Python can import only one of them in a process, whichever comes first on
+`sys.path`. So:
+
+- the engine tests put the repository root on the path, and run with `python -m pytest tests`;
+- the step tests need the *package*: run them with the `pytest` command (not `python -m pytest`, which
+  adds the repository root and loads the engine instead). `step_tests/conftest.py` stops with an
+  explanation if it sees the engine;
+- a step image copies only its `app/` folder.
+
+The step tests use the package's in-memory lakeFS (`step_tests/fake_lakefs.py`, copied from the package),
+so no network or cluster is needed.

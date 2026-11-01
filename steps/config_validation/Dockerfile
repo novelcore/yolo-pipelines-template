@@ -7,7 +7,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Step runtime dependencies:
-#   boto3    — S3 / lakeFS (S3-compatible) dataset/weights/checkpoint checks
+#   boto3    — S3 checks of an s3:// dataset override, pretrained weights and checkpoints
 #   requests — MLflow /health liveness check
 #   PyYAML   — params.yaml parsing
 RUN pip install --no-cache-dir \
@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir \
 # The kubecore PACKAGE (datasets, run outputs), pinned to a commit of hera-pipeline-template.
 # It shares the import name `kubecore` with the vendored engine at the repo root, which is
 # NOT in this image: only app/ is copied. Bump the commit to take a newer package.
-ARG KUBECORE_PKG_COMMIT=e25488cf5eb20f9218d471849bb8bb829d9cd75f
+ARG KUBECORE_PKG_COMMIT=8edfb911f634bdeeb08caaea78fa5693d9e8b630
 RUN pip install --no-cache-dir \
     "https://github.com/novelcore/hera-pipeline-template/archive/${KUBECORE_PKG_COMMIT}.zip#subdirectory=packages/kubecore"
 

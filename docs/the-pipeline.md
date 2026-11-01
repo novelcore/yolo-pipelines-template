@@ -6,7 +6,7 @@ This page has no tasks. It is a short read so the run form makes sense later. Ea
 
 **1. Check your settings.** Before anything heavy runs, the pipeline looks at the options you picked and makes sure they fit together. If something is off, it stops here and tells you, in seconds, before it spends time or a graphics card. This step is your safety net.
 
-**2. Load your dataset.** It finds the dataset you picked in lakeFS and gets it ready for training. It does not copy the whole thing around. It streams the images straight from storage, so even a large dataset works.
+**2. Load your dataset.** It turns the dataset you picked (for example `dataset-cats@v1`) into one exact version in lakeFS, so every later step reads the same data. It does not copy the whole thing around: training streams the images straight from storage, so even a large dataset works.
 
 **3. Train the model.** This is the main event. It trains a YOLO model on a graphics card, for the number of rounds you asked for. This is the step that takes real time, from minutes to hours depending on your settings.
 
@@ -25,4 +25,4 @@ If you turn quantization on, steps 4 and 5 join in to produce a smaller model to
 !!! note "You do not run these one by one"
     You do not start each step yourself. You press Submit once, and the pipeline runs all of them in order for you. The next pages show you how.
 
-Next, get your data in. Go to [Upload your dataset](upload-dataset.md).
+Next, get your data in and run. Go to [First dataset to results](first-run.md).

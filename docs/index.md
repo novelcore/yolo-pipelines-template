@@ -40,13 +40,13 @@ Steps four and five only run if you turn on quantization. If you leave it off, t
 
     [:octicons-arrow-right-24: What you need](what-you-need.md)
 
-- :material-database-arrow-up: **Upload your dataset**
+- :material-database-arrow-up: **First dataset to results**
 
     ---
 
-    Put your images and labels where the pipeline can read them.
+    Make a dataset, run on it, find your files. Every command.
 
-    [:octicons-arrow-right-24: Upload your dataset](upload-dataset.md)
+    [:octicons-arrow-right-24: First dataset to results](first-run.md)
 
 - :material-play-circle: **Run the pipeline**
 

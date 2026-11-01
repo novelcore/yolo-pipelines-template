@@ -2,69 +2,41 @@
 
 **The official YOLO pipelines KubeApp template.** Scaffolding a KubeApp with
 `kubeAppTemplateRef: yolo-pipelines` gives you a complete, working YOLO pose
-pipeline: dataset loading (lakeFS S3 streaming), real YOLOv8 training with
-authenticated MLflow tracking, optional QAT fine-tune (GPU or CPU-routed),
-INT8 TFLite export (PTQ or QAT) committed to the app's own `outputs-<app>`
-lakeFS repository, and model registration.
+pipeline: dataset loading, real YOLOv8 training with authenticated MLflow
+tracking, optional QAT fine-tune (GPU or CPU-routed), INT8 TFLite export (PTQ or
+QAT), and model registration. Results go to the app's own `outputs-<app>` lakeFS
+repository.
 
-**Datasets and outputs.** A dataset is its own lakeFS repository,
-`dataset-<name>` (the project's default is `dataset-default`), with the YOLO
-layout at the repository root: `data.yaml`, `images/{train,val,test}/`,
-`labels/{train,val,test}/`. A run picks `dataset = <dataset-repo>@<version>`
-(default `dataset-default@latest`): the version is a tag `vN`, or `latest` (the
-head of `main`). `dataset-loading` pins the commit that resolves to and every
-later step reads that commit. Checkpoints and quantized models go to
-`outputs-<app>` on `main`, under `checkpoints/<experiment>/<run>/` (and
-`quantization/<experiment>/<run>/`), one commit per step per run naming the run.
+It is the worked example built on the scaffold
+[`hera-pipeline-template`](https://github.com/novelcore/hera-pipeline-template): start
+from the scaffold to write your own pipeline, read this one to see a real one. The
+platform injects the environment's MLflow, lakeFS and compute context at render time
+(each app binds to one PRD-858 `ml`-type environment via `environmentSelector`);
+nothing environment-specific lives in this repo.
 
-The steps use the `kubecore` Python **package** (from `hera-pipeline-template`
-`packages/kubecore`, pinned by commit in each step Dockerfile) for this: the
-dataset ref and its commit (`datasets`), the local or MeluXina-staged copy
-(`formats` consumer), and the results (the run writer `outputs.run`: every checkpoint saved on `run-<run>-<kind>`, resume on retry, one merge commit on main). The package and the
-vendored `kubecore/` engine share an import name and never share a `sys.path`:
-engine tests run with `python -m pytest tests`, step tests with `pytest step_tests`
-(see `step_tests/README.md`). Manage datasets with `kubecore dataset ...`.
+## Contents
 
-Lineage: `hera-mlops-template` (generic Hera+Hydra scaffold, Petros) →
-`yolo-hera-yolo` (real YOLO implementation, Alexandra) → promoted to the
-official template 2026-08-18 with full history preserved. Battle-tested
-fixes baked in: isolated-poetry Dockerfiles (charset-normalizer class),
-per-step disk requests (#892), lakeFS branch-prefixed artifact paths
-(#896), retag-all-safe image pinning (#1008).
+- [The pipeline](#the-pipeline)
+- [Datasets](#datasets)
+- [Results](#results)
+- [The `kubecore` package](#the-kubecore-package)
+- [Running steps on MeluXina](#running-steps-on-meluxina-hpc)
+- [Local iteration](#local-iteration-no-cluster)
+- [Where to read next](#where-to-read-next)
 
-Targets PRD-858 `ml`-type environments: each app binds to one environment
-via `environmentSelector`; the platform injects that environment's MLflow,
-lakeFS and compute context at render time — nothing environment-specific
-lives in this repo.
-
----
-
-# hera-mlops-template
-
-A KubeCore ML pipeline you author in **Python** ([Hera](https://github.com/argoproj-labs/hera))
-with parameters in a **[Hydra](https://github.com/facebookresearch/hydra) config tree**.
-Clone it, add your steps and parameters, push — the platform builds your images
-and releases a runnable pipeline. You never touch Kubernetes.
-
-This template is the source new ML KubeApps are seeded from (`spec.type:
-ml-pipeline`). It replaces the old `kubeline.yaml` DSL.
-
-## Why this exists
-
-The whole DAG is **one 38-line `pipeline.py`** and a tree of small YAML files —
-the same YOLO training pipeline that used to be a **1551-line `kubeline.yaml`**.
+## The pipeline
 
 ```python
 # pipeline.py — the ENTIRE pipeline definition
-from kubecore.authoring import pipeline, step
-
 with pipeline("ml-pipeline") as p:  # platform renames to {app}-pipeline at release
-    load = step("dataset-loading", reads=["data"],
+    validate = step("config-validation", reads=["data", "dataset", "model"])
+    load = step("dataset-loading", reads=["data", "dataset"], needs=[validate],
                 outputs=["data-yaml", "manifest-summary"])
-    train = step("model-training", gpu=True, needs=[load],
-                 reads=["experiment", "data", "model", "train", "image_processing", "logging"],
+    summary = step("data-summary", reads=["data", "dataset", "summary"], needs=[load])
+    train = step("model-training", gpu=True, needs=[load], hpc_time_limit="12h",
+                 reads=["experiment", "dataset", "data", "model", "train", "image_processing", "logging"],
                  outputs=["training-result"])
-    qat = step("qat-finetune", gpu=True, needs=[train],
+    qat = step("qat-finetune", gpu=True, needs=[train], disk="20Gi",
                reads=["experiment", "train", "quantization"],
                when="{{workflow.parameters.quantization-mode}} == qat",
                outputs=["qat-result"])
@@ -73,57 +45,105 @@ with pipeline("ml-pipeline") as p:  # platform renames to {app}-pipeline at rele
                  when="{{workflow.parameters.quantization-mode}} != none",
                  outputs=["quantization-result"])
     register = step("model-registration", needs=[train, quant],
-                    reads=["data", "model", "registration"])
+                    reads=["dataset", "data", "model", "registration"],
+                    outputs=["registration-result"])
 ```
 
 **One rule: the `config/` tree IS the submit form.** Every scalar in `config/`
 becomes a form field; every group directory becomes a dropdown. Add a leaf → a
 field appears. No parameter wiring anywhere.
 
-## Layout
-
 ```
 pipeline.py            the DAG (steps, reads=, gpu=, needs=, when=)
 config/                THE experiment config tree — all your parameters
   config.yaml            the defaults list (which group options are default)
+  dataset.yaml           the `dataset` field: <dataset-repo>@<version>
   data.yaml train.yaml … sections of scalar leaves
   train/optimizer/*.yaml a config GROUP → a dropdown
-steps/<name>/          your step code + Dockerfile (one dir per step)
-kubecore/              platform-owned helpers — SEEDED, DO NOT EDIT
-pyproject.toml         PEP 621, pinned render deps
+steps/<name>/          step code + Dockerfile (one dir per step)
+kubecore/              platform-owned engine — SEEDED, DO NOT EDIT
+tests/, step_tests/    engine tests; step-code tests (two commands, see DEVELOPER.md §15)
+docs/                  the user guide (see "Where to read next")
 ```
 
-## Two core moves (full guide: [DEVELOPER.md](DEVELOPER.md))
+## Datasets
 
-- **Add a parameter** → add a leaf to `config/…`. Push. The form has it.
-- **Add a step** → `mkdir steps/<name>` + a Dockerfile + an entry that reads its
-  config slice, then one `step("<name>", reads=[…], needs=[…])` line in
-  `pipeline.py`. Push.
+A **dataset is a lakeFS repository** named `dataset-<name>`, with the YOLO layout at its
+root: `data.yaml`, `images/{train,val,test}/`, `labels/{train,val,test}/`. The project's
+default is `dataset-default`.
 
-## Local iteration (no cluster)
+- **Versions** are tags on `main`: `v1`, `v2`, … `latest` is the head of `main`. A run
+  picks one and every step reads that same commit, whatever happens to the dataset meanwhile.
+- **Changes** go in through a **pull request**; after a merge, `kubecore dataset release`
+  tags the next version.
+- **Pick it in the pipeline.** The run form's `dataset` field is a dropdown of
+  `<dataset-repo>@<version>` choices (default `dataset-default@latest`, or its newest
+  version). `config-validation` checks the pick exists and has a `data.yaml`;
+  `dataset-loading` pins its commit; later steps read that commit.
+- **Pose datasets.** This pipeline trains pose: `data.yaml` carries `kpt_shape` (and
+  `flip_idx`), labels carry the keypoints. `kubecore dataset validate`/`push` check pose,
+  segmentation and detection labels.
+- **Templates are optional.** `kubecore dataset create` can start a repository from the
+  `ultralytics` template, but any `dataset-*` repository made by hand becomes a dataset after
+  its first commit (`--template none` makes an empty one). A repository with no template
+  label validates nothing on `push`; pass `--format ultralytics` to get the YOLO checks.
+  Any repository can be read from code: `datasets.materialize("<repo>@<ref>")`.
+- A pipeline **never writes to a dataset**.
+
+Every command, from an empty project to a finished run:
+[docs/first-run.md](docs/first-run.md). How the steps read the data:
+[docs/datasets-in-the-steps.md](docs/datasets-in-the-steps.md).
+
+## Results
+
+Every step that produces files writes them to the app's repository **`outputs-<app>`**, on
+`main`, as **one merge commit per step per run**, naming the run:
+
+| step | where | what |
+|---|---|---|
+| `model-training` | `checkpoints/<experiment>/<run>/` | `best.pt`, `last.pt`, `epoch_NNNN.pt`, exports |
+| `qat-finetune`, `model-quantization` | `quantization/<experiment>/<run>/` | the INT8 `.tflite` |
+
+The step saves each checkpoint on its own branch `run-<run>-<kind>` as it appears, and merges
+at the end, so a lost pod costs nothing: **a retried training step resumes** from the last
+saved checkpoint instead of starting over. The merge commit records the app, experiment, run,
+the dataset (`dataset_ref`, `dataset_commit`) and the MLflow run id. Metrics, plots and the
+registered model are in MLflow ([docs/results.md](docs/results.md)).
+
+## The `kubecore` package
+
+The steps use the `kubecore` Python package (`packages/kubecore` of
+[`hera-pipeline-template`](https://github.com/novelcore/hera-pipeline-template), pinned by
+commit in every step Dockerfile as `KUBECORE_PKG_COMMIT`): dataset refs and their commits,
+the local or MeluXina-staged copy of a dataset, the run writer for results, and the
+`kubecore` command. Install it on your computer inside a virtual environment:
 
 ```bash
-./run.sh                                              # venv + render + enhance + compose
-python -m kubecore.compose train.epochs=5 train/optimizer=adamw   # try overrides locally
+python3 -m venv .venv && . .venv/bin/activate
+pip install "git+https://github.com/novelcore/hera-pipeline-template@<commit>#subdirectory=packages/kubecore"
+kubecore login                    # opens your browser once
 ```
 
-`out/params.yaml` is exactly what your steps receive at run time; a typo or a
-bad `reads=` fails locally with the same message the cluster gives you.
+Run the commands inside your app folder: it carries the file that tells the tool where your
+project's lakeFS is.
 
-## What the platform does for you (you never write this)
+```bash
+kubecore dataset create <name> --classes a,b [--template ultralytics|none]
+kubecore dataset pull <repo>@<ref> [dir] [--prefix folder/]
+kubecore dataset validate <dir> --format ultralytics
+kubecore dataset push <dir> <repo> -m "message" [--format ultralytics]
+kubecore dataset release <repo>
+kubecore dataset list ; kubecore dataset versions <repo>
+```
 
-Image supply-chain (Zot registry), MLflow/lakeFS/checkpoint env + secrets,
-per-step compute-class selection + node scheduling from your KubePool's classes,
-per-run sizing knobs, `/dev/shm`, GitOps release, and the Argo submit form —
-all injected at release time. Your `pipeline.py` stays pure structure.
+From code: `datasets.materialize("dataset-cats@v2")` returns the local `data.yaml`
+(a folder for a repository with no template label); `outputs.run(app, experiment, run)` is
+the run writer.
 
-**Adding your first step?** Start with **[ADD-A-STEP.md](ADD-A-STEP.md)** — a
-complete copy-paste walkthrough for newcomers (every command, every gotcha).
+The package and the vendored `kubecore/` engine share an import name and never share a
+`sys.path`: step images install the package and copy only `app/`. That is why engine tests
+and step tests are two commands (DEVELOPER.md §15).
 
-See **[DEVELOPER.md](DEVELOPER.md)** for the complete operating manual, and
-**[MECHANISMS.md](MECHANISMS.md)** for how the platform works internally
-(add/remove steps, enhancement, runtime config flow, multi-tenant safety).
-re-render: pick up MLflow auth injection + override-lexing fix (kubecore-operator#867 #868)
 ## Running steps on MeluXina (HPC)
 
 When the project's pool is HPC-enabled, every step's `{step}-class` dropdown on the
@@ -137,21 +157,47 @@ Argo submit form also offers the MeluXina classes:
 
 Pick one for a step and only that step runs as a Slurm job on MeluXina; every other
 step keeps its in-cluster class — mixing (training on `meluxina-gpu`, quantization on
-`gpu-small`, registration in-cluster) is the normal case. Nothing in this repository
-changes: the platform stages the dataset version to Lustre, pulls the step image into an
-Apptainer SIF, runs the same command the pod would run, and brings the step's declared
-outputs back so the next step consumes them as usual. MLflow and lakeFS are reached
-through the public endpoints with a short-lived token minted per job.
+`gpu-small`, registration in-cluster) is the normal case. Nothing in this repository changes:
 
+- **The dataset is staged** on MeluXina before the job starts, by repository and commit (a new
+  version copies only the files that changed), and the step reads it through the same
+  `datasets.materialize(...)` call as in the cluster.
+- **Results come back the same way**: the step runs your image and writes checkpoints with the
+  run writer, so they appear in `outputs-<app>` as for an in-cluster run; the step's declared
+  outputs are brought back so the next step consumes them as usual.
 - Queue time is real (minutes to hours) — the pipeline waits for you; the
   `pipeline-info` field on the form lists the classes and the account.
 - Give long steps a wall-clock limit in `pipeline.py`: `step(..., hpc_time_limit="12h")`
   (default 4 h). See [DEVELOPER.md §8.1](DEVELOPER.md).
-- The node stages the same dataset commit the in-cluster steps read: the
-  dataset repository's `data.yaml`, `images/` and `labels/` at that commit,
-  cached on Lustre by (repository, commit). Step outputs go back to
-  `outputs-<app>` like the in-cluster path.
 - Steps pinned with a `compute-class` annotation stay in-cluster.
+
+## Local iteration (no cluster)
+
+```bash
+./run.sh                                              # venv + render + enhance + compose
+python -m kubecore.compose train.epochs=5 train/optimizer=adamw   # try overrides locally
+```
+
+`out/params.yaml` is exactly what your steps receive at run time; a typo or a
+bad `reads=` fails locally with the same message the cluster gives you.
+
+## What the platform does for you (you never write this)
+
+Image supply-chain (Zot registry), MLflow/lakeFS/outputs env + secrets,
+per-step compute-class selection + node scheduling from your KubePool's classes,
+per-run sizing knobs, `/dev/shm`, GitOps release, and the Argo submit form —
+all injected at release time. Your `pipeline.py` stays pure structure.
+
+## Where to read next
+
+| you want to | read |
+|---|---|
+| train for the first time: dataset, run, results | [docs/first-run.md](docs/first-run.md) |
+| understand datasets, versions, templates | [docs/datasets.md](docs/datasets.md) |
+| see how the steps read data and write results | [docs/datasets-in-the-steps.md](docs/datasets-in-the-steps.md) |
+| add your first step | [ADD-A-STEP.md](ADD-A-STEP.md) |
+| the complete operating manual (config, tests, HPC) | [DEVELOPER.md](DEVELOPER.md) |
+| how the platform works internally | [MECHANISMS.md](MECHANISMS.md) |
 
 ## License
 

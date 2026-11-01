@@ -8,20 +8,19 @@ WORKDIR /app
 
 # Step runtime dependencies:
 #   boto3            — S3 / lakeFS (S3-compatible) object access
-#   requests         — lakeFS commit-hash HTTP API (dataset lineage)
 #   pydantic*        — the service's typed config + domain models
 #   PyYAML           — params.yaml + data.yaml parsing
 RUN pip install --no-cache-dir \
     "boto3>=1.34,<2" \
-    "requests>=2.31,<3" \
     "pydantic>=2,<3" \
     "pydantic-settings>=2,<3" \
     "PyYAML>=6,<7"
 
+# (requests, the lakeFS client's dependency, comes with the kubecore package below.)
 # The kubecore PACKAGE (datasets, run outputs), pinned to a commit of hera-pipeline-template.
 # It shares the import name `kubecore` with the vendored engine at the repo root, which is
 # NOT in this image: only app/ is copied. Bump the commit to take a newer package.
-ARG KUBECORE_PKG_COMMIT=e25488cf5eb20f9218d471849bb8bb829d9cd75f
+ARG KUBECORE_PKG_COMMIT=8edfb911f634bdeeb08caaea78fa5693d9e8b630
 RUN pip install --no-cache-dir \
     "https://github.com/novelcore/hera-pipeline-template/archive/${KUBECORE_PKG_COMMIT}.zip#subdirectory=packages/kubecore"
 

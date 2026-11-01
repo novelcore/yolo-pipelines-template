@@ -85,7 +85,9 @@ nav:
       - What you need: what-you-need.md
       - What the pipeline does: the-pipeline.md
   - Your data:
-      - Upload your dataset: upload-dataset.md
+      - First dataset to results: first-run.md
+      - Datasets: datasets.md
+      - How the steps use datasets: datasets-in-the-steps.md
   - Run it:
       - Run the pipeline: run-it.md
       - Where it trains: where-it-trains.md

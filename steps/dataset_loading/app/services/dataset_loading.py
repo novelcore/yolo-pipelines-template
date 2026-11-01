@@ -123,15 +123,9 @@ class DatasetLoadingService:
         self,
         s3_client: Any,
         max_retries: int = 3,
-        lakefs_endpoint: Optional[str] = None,
-        lakefs_access_key: Optional[str] = None,
-        lakefs_secret_key: Optional[str] = None,
     ) -> None:
         self._s3 = s3_client
         self._max_retries = max_retries
-        self._lakefs_endpoint = lakefs_endpoint
-        self._lakefs_access_key = lakefs_access_key
-        self._lakefs_secret_key = lakefs_secret_key
         self._logger = logging.getLogger(__name__)
 
     # ------------------------------------------------------------------

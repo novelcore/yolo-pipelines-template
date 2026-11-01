@@ -1,4 +1,5 @@
-"""Vendored from hera-pipeline-template packages/kubecore/tests/fake_lakefs.py (the package's in-memory lakeFS).
+"""Vendored from hera-pipeline-template packages/kubecore/tests/fake_lakefs.py (the package's in-memory
+lakeFS: a requests transport adapter, so the real client code runs unchanged).
 
 Keep in step with the package commit the step images install."""
 from __future__ import annotations
@@ -123,7 +124,7 @@ class FakeLakeFS(BaseAdapter):
             return 404, {"message": "repository not found"}
         r = self.repos[repo]
         if not rest:
-            return 200, {"id": repo, "storage_namespace": r["ns"], "default_branch": "main"}
+            return 200, {"id": repo, "storage_namespace": r["ns"], "default_branch": r.get("default_branch", "main")}
         return self._repo_route(m, repo, r, rest, body, q, req)
 
     def _repo_route(self, m, repo, r, rest, body, q, req):
@@ -135,6 +136,8 @@ class FakeLakeFS(BaseAdapter):
             return 204, None
         if kind == "branches":
             return self._branches(m, repo, r, rest[1:], body, req, q)
+        if kind == "commits":
+            return (200, {"id": rest[1]}) if rest[1] in r["commits"] else (404, {})
         if kind == "tags":
             if len(rest) == 1 and m == "GET":
                 return 200, {"results": [{"id": t, "commit_id": c} for t, c in sorted(r["tags"].items())],

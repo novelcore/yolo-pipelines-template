@@ -8,7 +8,7 @@ You will use two web pages and one small tool. Your platform contact gives you t
 
 - **The run page.** This is where you start a training job and watch it. It is run by a tool called Argo Workflows. You do not need to learn it.
 - **The results page.** This is where the numbers and charts land. It is called MLflow.
-- **lakeFS.** This is the storage where your dataset lives. You upload your images and labels here.
+- **lakeFS.** This is the storage where your datasets live (one repository per dataset), and where your results land.
 
 Ask your contact for the link to each one, plus confirmation that your account can sign in. Without access you cannot upload data or start a run.
 
@@ -16,12 +16,12 @@ You also need access to your app's code on GitHub, because you copy it to your c
 
 ## A computer with Python
 
-To upload a dataset you run a small tool on your own computer. It needs Python.
+To make and send in a dataset you run the `kubecore` tool on your own computer. It needs Python.
 
 - Most Macs and Linux machines already have Python. To check, open your Terminal and type `python3 --version`. If you see a number, you are set.
 - If not, download it from [python.org/downloads](https://www.python.org/downloads/) and install it with the default options.
 
-You only need this for the upload step. Running the pipeline itself happens on the web page, not on your computer.
+You only need this to prepare datasets. Running the pipeline itself happens on the web page, not on your computer.
 
 ## Your dataset, in the right shape
 
@@ -50,4 +50,4 @@ A `data.yaml` file at the top. An `images` folder and a `labels` folder, each sp
 - [ ] Python is installed (`python3 --version` shows a number).
 - [ ] My dataset has `data.yaml`, `images/`, and `labels/` in the shape above.
 
-When these are done, read [What the pipeline does](the-pipeline.md), then [Upload your dataset](upload-dataset.md).
+When these are done, read [What the pipeline does](the-pipeline.md), then [First dataset to results](first-run.md).
