@@ -21,7 +21,7 @@ from app.manager import Manager
 # The config sections this step reads from params.yaml. The compose-and-validate
 # release gate fails the render if any of these sections is missing, so a
 # renamed/deleted section is caught before any run.
-READS = ["data", "model"]
+READS = ["data", "dataset", "model"]
 
 
 def main() -> None:

@@ -10,8 +10,9 @@ automatically (field names match).
 Dataset: the cluster is manifest-only (no shared FS between step pods), so we use
 the kubeline S3-streaming mode — the trainer streams images/labels straight from
 the lakeFS S3 gateway at the bucket/prefix dataset-loading resolved
-(``--manifest-summary``): ``{commit}/dataset/``, pinned to the commit the ref
-pointed at when the run started.
+(``--manifest-summary``): ``{commit}/`` of the dataset repository (the layout
+sits at the repository root), pinned to the commit the picked
+``<dataset-repo>@<version>`` pointed at when the run started.
 
 MLflow auth (Zitadel machine JWT) is NOT injected by the platform yet, so MLflow
 logging is made NON-FATAL: with no auth present we disable Ultralytics' built-in
@@ -27,7 +28,7 @@ from pathlib import Path
 import yaml
 
 # Config sections this step consumes (declared in pipeline.py reads=).
-READS = ["experiment", "data", "model", "train", "image_processing", "logging"]
+READS = ["experiment", "dataset", "data", "model", "train", "image_processing", "logging"]
 
 OUTPUT_DIR = Path("/work/output")   # where the platform collects declared outputs
 DATASET_DIR = "/work/dataset"       # streaming cache/root on this pod's volume
@@ -42,46 +43,42 @@ def _mlflow_auth_present() -> bool:
     )
 
 
-def _dataset_location(summary: dict, repo: str, ref: str) -> tuple[str, str, str]:
+def _dataset_location(summary: dict) -> tuple[str, str, str]:
     """(bucket, prefix, commit) of this run's dataset: what dataset-loading
-    resolved (its manifest-summary), else the standard ``{ref}/dataset/``."""
-    bucket = str(summary.get("bucket") or "") or repo
-    prefix = str(summary.get("prefix") or "") or f"{ref}/dataset/"
+    resolved and pinned (its manifest-summary). Without it there is no pinned
+    commit to read, so the step stops rather than guess a location."""
+    bucket, prefix = str(summary.get("bucket") or ""), str(summary.get("prefix") or "")
+    if not (bucket and prefix):
+        raise SystemExit("[model-training] no dataset location: --manifest-summary from "
+                         "dataset-loading is empty, so there is no pinned dataset commit to read.")
     return bucket, prefix if prefix.endswith("/") else prefix + "/", str(summary.get("commit") or "")
 
 
-def _staged_dataset_dir(prefix: str, ref: str) -> str | None:
+def _staged_dataset_dir(prefix: str) -> str | None:
     """Off-cluster (MeluXina) the platform stages the dataset commit onto the
     node and bind-mounts it read-only at KUBECORE_DATASET_DIR (PRD-1016 F-04).
     Return the directory holding data.yaml for this run, or None when nothing
     is staged (in-cluster: stream from the lakeFS S3 gateway). The mount is the
-    commit root, so the dataset sits where dataset-loading found it (the prefix
-    without its leading ref)."""
+    dataset repository's commit root, which IS the dataset (data.yaml, images/,
+    labels/); the prefix without its leading commit is "" for the platform
+    layout."""
     root = os.environ.get("KUBECORE_DATASET_DIR")
     if not root or not os.path.isdir(root):
         return None
     resolved = prefix.split("/", 1)[1].strip("/") if "/" in prefix else ""
-    if resolved not in ("dataset", f"dataset/{ref}") and not os.path.exists(
-            os.path.join(root, resolved, "data.yaml")):
-        # A path_override outside the platform layout: the stage-in staged the
-        # ref's dataset/, not this folder, so reading anything else here would
-        # train on a different dataset than the in-cluster copy of the run.
-        raise SystemExit(
-            f"[model-training] the dataset at "
-            f"{prefix} (data.path_override) is not staged off-cluster; run this step in-cluster "
-            "or upload the dataset with the dataset CLI.")
-    # What dataset-loading resolved first, then the standard dataset/, the old
-    # dataset/{ref}/ layout, and a ref whose root IS the dataset (legacy CLI).
-    for candidate in (os.path.join(root, resolved), os.path.join(root, "dataset"),
-                      os.path.join(root, "dataset", ref), root):
-        if os.path.exists(os.path.join(candidate, "data.yaml")):
-            return candidate
+    candidate = os.path.join(root, resolved) if resolved else root
+    if os.path.exists(os.path.join(candidate, "data.yaml")):
+        return candidate
     # Off-cluster there is no S3 gateway to fall back to (live job 5149139:
-    # a silent fallback ended in boto3 "Unable to locate credentials").
+    # a silent fallback ended in boto3 "Unable to locate credentials"). A
+    # path_override outside the dataset repository is not staged either, and
+    # reading anything else here would train on a different dataset than the
+    # in-cluster copy of the run.
     raise SystemExit(
         f"[model-training] KUBECORE_DATASET_DIR={root} is mounted but holds no "
-        "data.yaml under dataset/ or its root — the staged ref does not carry a "
-        "dataset in the platform layout.")
+        f"data.yaml for {prefix} — the staged dataset repository root must carry "
+        "data.yaml, images/ and labels/ (a data.path_override is not staged "
+        "off-cluster; run this step in-cluster).")
 
 
 def _guard_mlflow() -> bool:
@@ -149,7 +146,6 @@ def main() -> None:
     cfg = yaml.safe_load(args.params)
 
     experiment = cfg["experiment"]
-    data = cfg["data"]
     model = cfg["model"]
     train = cfg["train"]
     aug = cfg["image_processing"]
@@ -161,14 +157,16 @@ def main() -> None:
     ckpt = train.get("checkpointing", {})
     export = train.get("export", {})
 
-    repo = platform["lakefs"]["repository"]
-    ref = data.get("ref", "main")
     try:
         summary = json.loads(args.manifest_summary or "{}") or {}
     except ValueError:
         summary = {}
-    bucket, prefix, commit = _dataset_location(summary, repo, ref)
-    print(f"[model-training] dataset s3://{bucket}/{prefix} (ref={ref} "
+    bucket, prefix, commit = _dataset_location(summary)
+    # What the run picked (`<dataset-repo>@<version>`), as dataset-loading recorded it.
+    ds_repo = str(summary.get("repo") or bucket)
+    ds_version = str(summary.get("version") or "")
+    ds_ref = str(summary.get("ref") or cfg.get("dataset") or "")
+    print(f"[model-training] dataset s3://{bucket}/{prefix} (dataset={ds_ref} "
           f"commit={commit or 'unresolved'})", flush=True)
 
     freeze = train.get("freeze")
@@ -180,7 +178,7 @@ def main() -> None:
     # (No data.yaml needed: the service generates the correct pose default when
     # dataset_dir has none — kpt_shape [11,3], names {0: spacecraft}.)
     os.makedirs(RUNS_DIR, exist_ok=True)
-    staged = _staged_dataset_dir(prefix, ref)
+    staged = _staged_dataset_dir(prefix)
     if staged:
         # Local mode: the staged ref is on the node (read-only bind mount).
         dataset_dir, source = staged, "local"
@@ -260,10 +258,15 @@ def main() -> None:
         dfl=float(loss.get("dfl", 1.5)),
         # ---- early stopping ----
         patience=int(cb.get("patience", 50)),
-        # ---- checkpointing (platform injects CHECKPOINT_BUCKET/PREFIX; else derive) ----
+        # ---- checkpointing: the app's own outputs repository, `main`, under
+        # checkpoints/<experiment>/<run>/ (the platform injects CHECKPOINT_BUCKET =
+        # outputs-<app> and CHECKPOINT_PREFIX = main/checkpoints; platform.checkpoints
+        # carries the same values) ----
         checkpoint_interval=int(ckpt.get("interval_epochs", 10)),
-        checkpoint_bucket=os.environ.get("CHECKPOINT_BUCKET") or repo,
-        checkpoint_prefix=os.environ.get("CHECKPOINT_PREFIX") or f"{ref}/checkpoints",
+        checkpoint_bucket=(os.environ.get("CHECKPOINT_BUCKET")
+                           or platform["checkpoints"]["bucket"]),
+        checkpoint_prefix=(os.environ.get("CHECKPOINT_PREFIX")
+                           or platform["checkpoints"]["prefix"]),
         # ---- augmentation ----
         hsv_h=float(aug.get("hsv_h", 0.015)),
         hsv_s=float(aug.get("hsv_s", 0.7)),
@@ -285,8 +288,8 @@ def main() -> None:
         export_formats=_as_csv(export.get("formats")),
         export_precisions=_as_csv(export.get("precisions")),
         # ---- provenance ----
-        dataset_version=ref,
-        lakefs_branch=ref,
+        dataset_repo=ds_repo,
+        dataset_version=ds_version or None,
         lakefs_commit=(commit or None),
     )
 
@@ -302,8 +305,8 @@ def main() -> None:
             payload = getattr(result, "__dict__", {"result": str(result)})
     payload["_mlflow_logging_enabled"] = mlflow_on
     # The dataset this run trained on, for the steps after it (registration).
-    payload.update(dataset_ref=ref, dataset_commit=commit, dataset_bucket=bucket,
-                   dataset_prefix=prefix)
+    payload.update(dataset_ref=ds_ref, dataset_repo=ds_repo, dataset_version=ds_version,
+                   dataset_commit=commit, dataset_bucket=bucket, dataset_prefix=prefix)
     (OUTPUT_DIR / "training-result.json").write_text(
         json.dumps(payload, default=str, indent=2)
     )

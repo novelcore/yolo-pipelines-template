@@ -395,8 +395,8 @@ class TrainingService:
                     return
 
                 param_map = {
+                    "dataset.repo": params.dataset_repo,
                     "dataset.version": params.dataset_version,
-                    "dataset.lakefs_branch": params.lakefs_branch,
                     "dataset.lakefs_commit": params.lakefs_commit,
                     "pipeline.config_hash": params.config_hash,
                 }
@@ -1292,7 +1292,9 @@ class TrainingService:
         """S3-gateway writes only STAGE objects on the lakeFS branch — commit so
         the checkpoints are a versioned artifact (one commit captures the
         best/last/epoch files and exports staged during this run), not dangling
-        changes. Runs after the exports so they are in this run's commit."""
+        changes. Runs after the exports so they are in this run's commit, on
+        `main` of the app's outputs repository (checkpoint_bucket,
+        `outputs-<app>`) with the run named in the message."""
         branch = params.checkpoint_prefix.split("/", 1)[0] or "main"
         run = os.environ.get("KUBECORE_RUN_ID", "").strip()
         self._lakefs_commit(
@@ -1303,7 +1305,8 @@ class TrainingService:
                 "run": run,
                 "step": "model-training",
                 "experiment": params.experiment_name,
-                "dataset_ref": params.lakefs_branch or "",
+                "dataset_ref": (f"{params.dataset_repo}@{params.dataset_version}"
+                                if params.dataset_repo else ""),
                 "dataset_commit": params.lakefs_commit or "",
                 "mlflow_run_id": self._get_mlflow_run_id() or "",
             },

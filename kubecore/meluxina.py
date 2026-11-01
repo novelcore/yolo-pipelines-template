@@ -40,6 +40,8 @@ Operational notes baked in from the live F-01/F-02 shakedown (2026-08):
 import json
 import re
 
+from kubecore.outputs import OUTPUTS_REF, checkpoint_prefix, outputs_repo
+
 # The submit/poll program the meluxina-run container executes via
 # `python3 -c`. Plain string — no Argo tags inside (all run-time inputs
 # arrive via env), so it survives every templating layer verbatim.
@@ -47,14 +49,14 @@ MELUXINA_SUBMIT_CODE = r'''
 STAGEOUT = r"""
 # F-05 stage-out: the step's declared outputs (/work/output/<name>.json,
 # what Argo would have read as outputs.parameters in-cluster) go to lakeFS
-# at hpc-outputs/{wf-uid}/{step}/ on the project's outputs branch (the run's
-# dataset branch on a project without one); the waiter fetches them back
-# into the twin's outputs so downstream steps see real values.
+# at hpc-outputs/{wf-uid}/{step}/ on `main` of the app's outputs repository
+# (outputs-<app>, same place as the in-cluster checkpoints); the waiter fetches
+# them back into the twin's outputs so downstream steps see real values.
 import json, os, pathlib, urllib.parse, urllib.request
 base = os.environ['LAKEFS_ENDPOINT'].rstrip('/') + '/api/v1'
 H = {'Authorization': 'Bearer ' + os.environ['LAKEFS_BEARER_TOKEN']}
-repo = os.environ['DATASET_REPO']
-branch = os.environ.get('OUTPUTS_BRANCH') or os.environ.get('DATASET_REF') or 'main'
+repo = os.environ['OUTPUTS_REPO']
+branch = os.environ.get('OUTPUTS_REF') or 'main'
 prefix = 'hpc-outputs/%s/%s/' % (os.environ['WF_UID'], os.environ['STEP_NAME'])
 out = pathlib.Path(os.environ['KAOS_WORK']) / 'output'
 for name in [n for n in os.environ.get('STEP_OUTPUTS', '').split(',') if n]:
@@ -71,12 +73,12 @@ for name in [n for n in os.environ.get('STEP_OUTPUTS', '').split(',') if n]:
     urllib.request.urlopen(req, timeout=120).read()
     print('stage-out:', name, len(data), 'bytes ->', prefix, flush=True)
 """
-import base64, json, os, shlex, signal, sys, time, urllib.parse, urllib.request
+import base64, json, os, re, shlex, signal, sys, time, urllib.parse, urllib.request
 
 # F-04 stage-in, run ON the compute node (system python3, stdlib only):
 # take the commit dataset-loading pinned (DATASET_COMMIT) or resolve
-# ref -> commit, download the dataset/ folder of that version (the whole ref
-# only for data uploaded before the dataset/ layout) from the lakeFS PUBLIC
+# ref -> commit, download the dataset (data.yaml, images/, labels/ at the root of
+# the dataset repository) of that version from the lakeFS PUBLIC
 # endpoint (bearer through oauth2-proxy — the in-cluster S3-gateway/manifest
 # streaming path is blocked by the SSO front off-cluster) into a Lustre cache
 # keyed by commit, parallel + resumable (size-matched files are skipped,
@@ -116,9 +118,10 @@ def ls(prefix):
         if not pg.get('has_more'):
             return objs
         after = pg.get('next_offset') or ''
-# Only the dataset: the branch may also hold other files (checkpoints of
-# older runs). Data uploaded before the dataset/ layout sits at the root.
-objs = ls('dataset/') or ls('')
+# Only the dataset: the repository root may also hold other files (README,
+# notes) the steps never read.
+objs = [o for o in ls('') if o['path'] == 'data.yaml'
+        or o['path'].split('/', 1)[0] in ('images', 'labels')]
 print('stage-in:', len(objs), 'objects @', commit[:12], flush=True)
 def fetch(o):
     p = dest / o['path']
@@ -354,6 +357,25 @@ def pinned_commit():
                 return commit
     return ''
 
+
+
+def dataset_coords():
+    """(repo, ref) of the run's `dataset` parameter (`<dataset-repo>@<version>`):
+    the dataset repository and the lakeFS ref to resolve when no commit was
+    pinned (`latest` is the head of `main`). ('', '') when the pipeline has no
+    `dataset` parameter (the batch then runs the step data-less)."""
+    value = (os.environ.get('DATASET') or '').strip()
+    if not value:
+        return '', ''
+    repo, sep, version = value.partition('@')
+    if not (sep and re.match(r'^dataset-[a-z0-9][a-z0-9-]*$', repo)
+            and re.match(r'^(latest|v[0-9]+)$', version)):
+        print('dataset must be <dataset-repo>@<version> (e.g. '
+              'dataset-default@latest), got %r' % value, flush=True)
+        sys.exit(1)
+    return repo, ('main' if version == 'latest' else version)
+
+
 jid = None
 
 
@@ -474,10 +496,11 @@ def submit():
         if lakefs_url:
             env += ['LAKEFS_ENDPOINT=' + lakefs_url,
                     'LAKEFS_BEARER_TOKEN=' + wallet,
-                    'DATASET_REPO=' + (os.environ.get('DATASET_REPO') or ''),
-                    'DATASET_REF=' + (os.environ.get('DATASET_REF') or ''),
+                    'DATASET_REPO=' + dataset_coords()[0],
+                    'DATASET_REF=' + dataset_coords()[1],
                     'DATASET_COMMIT=' + pinned_commit(),
-                    'OUTPUTS_BRANCH=' + (os.environ.get('OUTPUTS_BRANCH') or ''),
+                    'OUTPUTS_REPO=' + (os.environ.get('OUTPUTS_REPO') or ''),
+                    'OUTPUTS_REF=' + (os.environ.get('OUTPUTS_REF') or ''),
                     'STAGEIN_B64='
                     + base64.b64encode(STAGEIN.encode()).decode(),
                     'STAGEOUT_B64='
@@ -560,10 +583,10 @@ for n in OUTPUT_NAMES:
 def fetch_outputs():
     """F-05: pull the step's staged-out outputs back into the twin."""
     base = (os.environ.get('LAKEFS_EXTERNAL_URL') or '').rstrip('/')
-    repo = os.environ.get('DATASET_REPO') or ''
+    repo = os.environ.get('OUTPUTS_REPO') or ''
     if not (OUTPUT_NAMES and base and repo and WALLET):
         return
-    branch = os.environ.get('OUTPUTS_BRANCH') or os.environ.get('DATASET_REF') or 'main'
+    branch = os.environ.get('OUTPUTS_REF') or 'main'
     for n in OUTPUT_NAMES:
         q = urllib.parse.urlencode({'path': 'hpc-outputs/%s/%s/%s.json' % (
             os.environ.get('WF_UID', ''), os.environ.get('STEP_NAME', ''), n)})
@@ -896,16 +919,14 @@ def enhance_hpc(spec: dict, ctx: dict, steps: list, gpu_step_names: set) -> None
     # the legacy render-wft uses on every step) so a non-OIDC deployment
     # still submits — the submit code degrades to no-wallet loudly. Dataset
     # coordinates prefer the pipeline's own workflow params (Alexandra's
-    # WFTs carry lakefs-repo / data-ref) and fall back to the context
-    # repository; no param -> no stage-in, batch runs the step data-less.
+    # WFTs carry the `dataset` parameter, `<dataset-repo>@<version>`, parsed
+    # by the submit code); no param -> no stage-in, batch runs the step
+    # data-less.
     mlflow_ctx = ctx.get("mlflow") or {}
     lakefs_ctx = ctx.get("lakefs") or {}
     wf_params = {p.get("name") for p in parameters}
-    dataset_repo = ("{{workflow.parameters.lakefs-repo}}"
-                    if "lakefs-repo" in wf_params
-                    else str(lakefs_ctx.get("repository") or ""))
-    dataset_ref = ("{{workflow.parameters.data-ref}}"
-                   if "data-ref" in wf_params else "")
+    dataset = ("{{workflow.parameters.dataset}}"
+               if "dataset" in wf_params else "")
     spec["templates"].append({
         "name": "meluxina-run",
         "inputs": {"parameters": [
@@ -966,15 +987,13 @@ def enhance_hpc(spec: dict, ctx: dict, steps: list, gpu_step_names: set) -> None
                  "value": str(mlflow_ctx.get("externalUrl") or "")},
                 {"name": "LAKEFS_EXTERNAL_URL",
                  "value": str(lakefs_ctx.get("externalUrl") or "")},
-                {"name": "DATASET_REPO", "value": dataset_repo},
-                {"name": "DATASET_REF", "value": dataset_ref},
+                {"name": "DATASET", "value": dataset},
                 # Pipeline outputs (stage-out hand-off, checkpoints) go to the
-                # project's outputs branch once it exists ("" = as before).
-                {"name": "OUTPUTS_BRANCH", "value": str(lakefs_ctx.get("outputsBranch") or "")},
-                {"name": "CHECKPOINT_BUCKET",
-                 "value": str((ctx.get("checkpoints") or {}).get("bucket") or "")},
-                {"name": "CHECKPOINT_PREFIX",
-                 "value": str((ctx.get("checkpoints") or {}).get("prefix") or "")},
+                # app's own outputs repository, on main.
+                {"name": "OUTPUTS_REPO", "value": outputs_repo(ctx)},
+                {"name": "OUTPUTS_REF", "value": OUTPUTS_REF},
+                {"name": "CHECKPOINT_BUCKET", "value": outputs_repo(ctx)},
+                {"name": "CHECKPOINT_PREFIX", "value": checkpoint_prefix()},
                 {"name": "KUBECORE_RUN_ID", "value": "{{workflow.name}}"},
             ],
         },

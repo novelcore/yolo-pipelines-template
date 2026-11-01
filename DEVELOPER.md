@@ -288,7 +288,7 @@ in-cluster class. There is no global switch: placement is per step, per run
 in-cluster is a normal combination).
 
 What the platform does for an HPC-placed step: waits in the queue on your
-behalf, stages the dataset ref to Lustre (cached), pulls the step image into an
+behalf, stages the dataset version to Lustre (cached by repository + commit), pulls the step image into an
 Apptainer SIF (cached), runs the same command the pod would run, uploads the
 step's declared outputs to lakeFS and hands them to the next step exactly as
 if it had run in the cluster. MLflow and lakeFS are reached through the
@@ -323,8 +323,8 @@ its own machine with its own disk. Move data like this:
 | data | mechanism |
 |---|---|
 | small manifests / results | `outputs=` parameters (above) |
-| datasets | lakeFS — resolve a ref, stream; endpoints in `cfg["platform"]["lakefs"]` and env |
-| checkpoints | the checkpoint bucket — `cfg["platform"]["checkpoints"]["bucket"]/["prefix"]` |
+| datasets | lakeFS — each dataset is its own repository `dataset-<name>` (layout at the root); the run's `dataset` = `<repo>@<version>`; `dataset-loading` pins the commit, later steps read it (its `manifest-summary`) |
+| checkpoints | the app's outputs repository `outputs-<app>` on `main` — `cfg["platform"]["checkpoints"]["bucket"]/["prefix"]` |
 | metrics, artifacts, models | MLflow (below) |
 
 ---
@@ -394,9 +394,9 @@ contains it (you don't declare or read= it, it's just there):
 
 ```python
 cfg = yaml.safe_load(args.params)
-bucket = cfg["platform"]["checkpoints"]["bucket"]     # "yolo"
-prefix = cfg["platform"]["checkpoints"]["prefix"]     # "outputs/checkpoints" (the project's outputs branch)
-repo   = cfg["platform"]["lakefs"]["repository"]
+bucket = cfg["platform"]["checkpoints"]["bucket"]     # "outputs-yolo" (the app's outputs repository)
+prefix = cfg["platform"]["checkpoints"]["prefix"]     # "main/checkpoints" (branch/path; add <experiment>/<run>/)
+dataset = cfg["dataset"]                               # "dataset-default@latest" — the run's dataset pick
 ```
 
 **Ambient environment variables** — set on every step container:
@@ -416,7 +416,8 @@ with mlflow.start_run():
     mlflow.log_metric("mAP50", 0.87)
 ```
 
-lakeFS speaks the S3 API (repo = bucket, `ref/path` = key):
+lakeFS speaks the S3 API (repo = bucket, `ref/path` = key; a dataset's files sit at
+the root of its own `dataset-<name>` repository):
 
 ```python
 import os, boto3
@@ -424,7 +425,7 @@ s3 = boto3.client("s3",
     endpoint_url=os.environ["LAKEFS_ENDPOINT"],
     aws_access_key_id=os.environ["LAKEFS_ACCESS_KEY"],
     aws_secret_access_key=os.environ["LAKEFS_SECRET_KEY"])
-s3.download_file("yolo", "main/data.yaml", "/work/data.yaml")
+s3.download_file("dataset-default", "main/data.yaml", "/work/data.yaml")
 ```
 
 When you run locally, the same `platform` section is filled from a
@@ -443,10 +444,11 @@ Open the workflow template in the Argo UI, press **Submit**:
   leave untouched follow the group you pick; fields you explicitly
   change win over the group.
 - **Your scalar fields** — every leaf of your tree
-  (`train-epochs`, `data-ref`, `train-loss-pose`, …), plus dropdowns the
+  (`train-epochs`, `dataset`, `train-loss-pose`, …), plus dropdowns the
   platform fills live (`cpu-class`/`gpu-class` list this cluster's node
-  classes; `data-ref` is free text — `kubecore-dataset list` shows the
-  datasets that exist) and
+  classes; `dataset` is `<dataset-repo>@<version>`, default
+  `dataset-default@latest`, its choices come from the platform's dataset
+  catalog) and
   fixed-choice fields it validates (`data-source`, `quantization-mode`).
 - **Per-step sizing** — `{step}-cpu` / `{step}-mem`.
 - **`config` (ADVANCED)** — normally empty. When non-empty it is an

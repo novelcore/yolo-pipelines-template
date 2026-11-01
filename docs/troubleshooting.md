@@ -15,9 +15,9 @@ This is the safety net working. It stopped before spending any training time. Fi
 
 ## The dataset step cannot find my data
 
-Check the `data-ref` you typed on the form. It must match the name you uploaded with. If you uploaded to the default, that is `main`. A typo here means the pipeline looks in the wrong place and finds nothing. The error message lists the datasets that do exist, and `kubecore-dataset list` shows them too.
+Check the `dataset` you typed on the form. It must look like `dataset-default@latest`: the name of a dataset repository (it starts with `dataset-`), an `@`, and a version (`v1`, `v2`, ... or `latest`). A typo here means the pipeline looks in the wrong place and finds nothing. The error message lists the dataset repositories that do exist.
 
-Also open lakeFS and confirm your dataset is really there, with `data.yaml`, `images`, and `labels`. If the upload did not finish, run it again. See [Upload your dataset](upload-dataset.md).
+Also open lakeFS and confirm your dataset repository is really there, with `data.yaml`, `images`, and `labels` at its root. If the upload did not finish, run it again. See [Upload your dataset](upload-dataset.md).
 
 ## The upload cannot sign in
 
@@ -55,7 +55,7 @@ That happens. Copy the message, note what you were doing, and send it to your pl
 
 ## A quick checklist before you submit
 
-- [ ] `data-ref` matches the name I uploaded with, usually `main`.
-- [ ] My dataset shows up in lakeFS with data.yaml, images, and labels.
+- [ ] `dataset` is `<dataset-repository>@<version>` and that version exists, usually `dataset-default@latest`.
+- [ ] My dataset repository shows up in lakeFS with data.yaml, images, and labels at its root.
 - [ ] For a first test: small model, low epochs, quantization off.
 - [ ] `experiment-name` is something I will recognize later.

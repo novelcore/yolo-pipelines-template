@@ -486,10 +486,12 @@ class QATService:
         self._s3.upload_file(local_path, params.output_bucket, key)
         # S3-gateway writes only STAGE objects on the lakeFS branch — commit so
         # the QAT INT8 tflite becomes a versioned artifact, not dangling changes.
+        # One commit for this run's output, naming the run.
         branch = params.output_prefix.split("/", 1)[0] or "main"
+        run = os.environ.get("KUBECORE_RUN_ID", "").strip()
         self._lakefs_commit(
             params.output_bucket, branch,
-            f"qat-finetune: INT8 tflite {Path(local_path).name}",
+            f"qat-finetune: INT8 tflite {Path(local_path).name} {run}".rstrip(),
             {"step": "qat-finetune", "experiment": params.experiment_name},
         )
         return f"s3://{params.output_bucket}/{key}"

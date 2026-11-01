@@ -23,14 +23,14 @@ HERE = Path(__file__).parent
 # each KubeApp gets its own uniquely-named WFT (no collisions across apps in a
 # shared namespace). You don't need to change it per app.
 with pipeline("ml-pipeline") as p:
-    validate = step("config-validation", reads=["data", "model"])
-    load = step("dataset-loading", reads=["data"], needs=[validate],
+    validate = step("config-validation", reads=["data", "dataset", "model"])
+    load = step("dataset-loading", reads=["data", "dataset"], needs=[validate],
                 outputs=["data-yaml", "manifest-summary"])
-    summary = step("data-summary", reads=["data", "summary"], needs=[load])
+    summary = step("data-summary", reads=["data", "dataset", "summary"], needs=[load])
     # hpc_time_limit: Slurm wall-clock when this step is placed on a meluxina-*
     # class (DEVELOPER.md §8.1). Size it to the longest expected epoch budget.
     train = step("model-training", gpu=True, needs=[load], hpc_time_limit="12h",
-                 reads=["experiment", "data", "model", "train", "image_processing", "logging"],
+                 reads=["experiment", "dataset", "data", "model", "train", "image_processing", "logging"],
                  outputs=["training-result"])
     qat = step("qat-finetune", gpu=True, needs=[train], disk="20Gi",
                reads=["experiment", "train", "quantization"],
@@ -41,7 +41,7 @@ with pipeline("ml-pipeline") as p:
                  when="{{workflow.parameters.quantization-mode}} != none",
                  outputs=["quantization-result"])
     register = step("model-registration", needs=[train, quant],
-                    reads=["data", "model", "registration"],
+                    reads=["dataset", "data", "model", "registration"],
                     outputs=["registration-result"])
 
 if __name__ == "__main__":

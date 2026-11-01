@@ -6,7 +6,8 @@ the production YOLO pipeline). It:
 
   1. reads its config slice + platform endpoints from the single resolved
      params.yaml that compose-and-validate produced (--params) — the same file
-     every step receives; this step reads cfg["data"] and cfg["platform"];
+     every step receives; this step reads cfg["dataset"] (the run's
+     `<dataset-repo>@<version>` pick) and cfg["data"];
   2. maps that config onto the service's parameters and runs it in MANIFEST-ONLY
      mode — the only mode that works on the cluster, because each step runs in
      its own pod with no shared filesystem, so images/labels are streamed from
@@ -14,12 +15,13 @@ the production YOLO pipeline). It:
   3. emits two step outputs that model-training consumes (declared in
      pipeline.py via outputs=["data-yaml", "manifest-summary"]):
        - data-yaml         : the dataset's data.yaml (kpt_shape, names, splits)
-       - manifest-summary  : {bucket, prefix, label_keys sentinel, ref, commit} —
-                             the compact pointer to the object-store layout (the
-                             full key list is far too large for an Argo
-                             parameter). prefix is pinned to the commit the ref
-                             resolved to, so every later step reads the same
-                             snapshot.
+       - manifest-summary  : {bucket, prefix, label_keys sentinel, ref, repo,
+                             version, commit} — the compact pointer to the
+                             object-store layout (the full key list is far too
+                             large for an Argo parameter). bucket is the dataset
+                             repository; prefix is pinned to the commit the
+                             version resolved to (CON-04), so every later step
+                             reads the same snapshot.
 
 Credentials + endpoints are NOT read from config or any file: the platform
 injects them as env (LAKEFS_ENDPOINT, LAKEFS_ACCESS_KEY, LAKEFS_SECRET_KEY, or
@@ -35,11 +37,12 @@ from pathlib import Path
 import yaml
 
 from app.manager import Manager
+from app.models.dataset import parse_dataset_ref
 
 # The config sections this step reads from params.yaml. The compose-and-validate
 # release gate fails the render if the config tree has no `data` section, so a
 # renamed/deleted section is caught before any run.
-READS = ["data"]
+READS = ["data", "dataset"]
 
 # Where the service writes the dataset tree (this pod's ephemeral volume) and
 # where the platform expects this step's declared outputs.
@@ -59,23 +62,18 @@ def _int_field(value, name: str, default: int) -> int:
 
 
 def _resolve_dataset_params(cfg: dict) -> dict:
-    """Map the experiment `data` config slice + platform lakeFS repo onto the
-    dataset-loading service's run parameters.
+    """Map the run's `dataset` pick + the experiment `data` config slice onto
+    the dataset-loading service's run parameters.
 
-    The Hydra `data` slice is the developer-facing shape (ref/source/sample_size/…);
-    the lakeFS repository is a platform fact, so it comes from cfg["platform"],
-    never from the developer's config.
+    `dataset` is `<dataset-repo>@<version>`: the dataset is its own lakeFS
+    repository and the version is a `vN` tag or `latest` (= the head of `main`).
+    A malformed value fails here with the expected shape.
     """
     data = cfg.get("data") or {}
-    platform = cfg.get("platform") or {}
-    lakefs = platform.get("lakefs") or {}
 
     source = str(data.get("source") or "lakefs")
 
-    # The lakeFS ref (branch/tag/commit) the developer picked is the dataset;
-    # the repository is platform-owned. The service records it as the dataset
-    # version in its stats.
-    ref = str(data.get("ref") or "main")
+    dataset = parse_dataset_ref(cfg.get("dataset"))
 
     # sample_size is a string in the form ("" = full dataset); coerce to a
     # positive int, or None when empty. A bad value is a form mistake, so fail
@@ -97,7 +95,7 @@ def _resolve_dataset_params(cfg: dict) -> dict:
         sample_size = None
 
     params = {
-        "version": ref,
+        "version": str(dataset),
         "source": source,
         "output_dir": DATASET_DIR,
         # MANIFEST-ONLY is mandatory on the cluster (no shared FS between step
@@ -112,8 +110,8 @@ def _resolve_dataset_params(cfg: dict) -> dict:
     if path_override:
         params["path_override"] = path_override
     elif source == "lakefs":
-        params["lakefs_repo"] = str(lakefs.get("repository") or "")
-        params["lakefs_branch"] = ref
+        params["lakefs_repo"] = dataset.repo
+        params["lakefs_ref"] = dataset.ref
 
     return params
 
@@ -123,11 +121,11 @@ def _write_outputs(cfg: dict) -> None:
 
     model-training reconstructs /work/dataset from these:
       - data-yaml        : the full data.yaml content (verbatim)
-      - manifest-summary : a compact {bucket, prefix, label_keys, ref, commit}
-                           pointer; the label_keys sentinel tells training to
-                           stream labels from object storage too (manifest-only
-                           mode). prefix starts with the commit when the ref
-                           resolved to one; commit is "" when it did not.
+      - manifest-summary : a compact {bucket, prefix, label_keys, ref, repo,
+                           version, commit} pointer; the label_keys sentinel
+                           tells training to stream labels from object storage
+                           too (manifest-only mode). prefix starts with the
+                           pinned commit; commit is "" only for source=s3.
     """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     dataset_dir = Path(DATASET_DIR)
@@ -145,14 +143,15 @@ def _write_outputs(cfg: dict) -> None:
     # Non-empty sentinel = labels are also streamed from object storage (we never
     # embed the actual key lists — too large for an Argo parameter).
     label_keys_sentinel = {"_present": True} if manifest.get("label_keys") else {}
-    ref = str((cfg.get("data") or {}).get("ref") or "main")
+    dataset = parse_dataset_ref(cfg.get("dataset"))
     summary = {"bucket": bucket, "prefix": prefix, "label_keys": label_keys_sentinel,
-               "ref": ref, "commit": manifest.get("lakefs_commit") or ""}
+               "ref": str(dataset), "repo": dataset.repo, "version": dataset.version,
+               "commit": manifest.get("lakefs_commit") or ""}
     (OUTPUT_DIR / "manifest-summary.json").write_text(
         json.dumps(summary, separators=(",", ":"))
     )
     print(f"[dataset-loading] outputs written: data-yaml + manifest-summary "
-          f"(bucket={bucket} prefix={prefix} ref={ref} commit={summary['commit'] or 'unresolved'})")
+          f"(bucket={bucket} prefix={prefix} dataset={dataset} commit={summary['commit'] or 'unresolved'})")
 
 
 def main() -> None:
@@ -163,7 +162,7 @@ def main() -> None:
     cfg = yaml.safe_load(args.params)
 
     params = _resolve_dataset_params(cfg)
-    print(f"[dataset-loading] source={params['source']} ref={params['version']} "
+    print(f"[dataset-loading] source={params['source']} dataset={params['version']} "
           f"manifest-only -> {DATASET_DIR}")
 
     # Manager reads endpoints + credentials from the platform-injected env

@@ -56,8 +56,8 @@ _VALID_VISIBILITY = {0, 1, 2}
 
 # Default S3 bucket and key prefix for the canonical dataset location
 _DEFAULT_BUCKET = "io-audio-text-data"
-# Non-lakeFS fallback only; the lakeFS path is {ref}/dataset/
-# (platform standard — see _resolve_source).
+# Non-lakeFS fallback only; the lakeFS path is the dataset repository's root at
+# the pinned commit (platform standard — see _resolve_source).
 _DEFAULT_PREFIX_TEMPLATE = "upload-initial/dataset/{version}/"
 
 # ---------------------------------------------------------------------------
@@ -161,15 +161,16 @@ class DatasetLoadingService:
         output_path = Path(params.output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # Resolve the ref to its commit FIRST and read that commit: every later
-        # step reads the same prefix (manifest-summary), so a run sees one
-        # immutable snapshot even if the branch moves mid-run. Non-blocking: on
-        # failure the run reads the ref by name, as before.
+        # CON-04: resolve the dataset version to its commit FIRST and read that
+        # commit: every later step reads the same prefix (manifest-summary), so
+        # a run sees one immutable snapshot even if `main` moves mid-run. Not
+        # optional — a version that does not resolve is a wrong dataset or
+        # version, and the run stops here with that message.
         lakefs_commit: Optional[str] = None
-        if (params.source == "lakefs" and params.lakefs_repo and params.lakefs_branch
+        if (params.source == "lakefs" and params.lakefs_repo and params.lakefs_ref
                 and not params.path_override):
             lakefs_commit = self._fetch_lakefs_commit(
-                params.lakefs_repo, params.lakefs_branch
+                params.lakefs_repo, params.lakefs_ref
             )
 
         bucket, prefix = self._resolve_source(params, lakefs_commit)
@@ -1219,18 +1220,18 @@ class DatasetLoadingService:
     # Dataset lineage helpers
     # ------------------------------------------------------------------
 
-    def _fetch_lakefs_commit(self, repo: str, branch: str) -> Optional[str]:
-        """Return the branch-tip commit hash from the lakeFS HTTP API.
+    def _fetch_lakefs_commit(self, repo: str, ref: str) -> str:
+        """Return the commit ``ref`` (``main`` or a ``vN`` tag) of ``repo``
+        points at, from the lakeFS HTTP API (CON-04: the run's pinned commit).
 
-        Implements CON-01: a single attempt with a short timeout; any failure
-        logs a warning and returns ``None`` so the pipeline is not aborted.
+        Raises ``DatasetLoadingError`` when it cannot be resolved: reading an
+        unpinned ref would let two steps of one run see different data.
         """
         if not self._lakefs_endpoint:
-            self._logger.warning(
-                "LAKEFS_ENDPOINT not configured; lakefs_commit will be null"
+            raise DatasetLoadingError(
+                "LAKEFS_ENDPOINT is not configured — cannot pin the dataset commit"
             )
-            return None
-        url = f"{self._lakefs_endpoint.rstrip('/')}/api/v1/repositories/{repo}/refs/{branch}/commits"
+        url = f"{self._lakefs_endpoint.rstrip('/')}/api/v1/repositories/{repo}/refs/{ref}/commits"
         try:
             resp = requests.get(
                 url,
@@ -1238,22 +1239,22 @@ class DatasetLoadingService:
                 auth=(self._lakefs_access_key or "", self._lakefs_secret_key or ""),
                 timeout=5,
             )
+            if resp.status_code == 404:
+                raise DatasetLoadingError(
+                    f"dataset {repo}@{ref} not found — check the repository name and "
+                    f"that version {ref!r} exists (lakeFS: {url})"
+                )
             resp.raise_for_status()
-            results = resp.json().get("results", [])
-            if results:
-                return str(results[0].get("id", ""))
-            self._logger.warning(
-                "lakeFS returned no commits for %s/%s; lakefs_commit will be null",
-                repo,
-                branch,
+        except requests.RequestException as exc:
+            raise DatasetLoadingError(
+                f"could not resolve {repo}@{ref} to a commit: {exc}"
+            ) from exc
+        results = resp.json().get("results", [])
+        if not results or not results[0].get("id"):
+            raise DatasetLoadingError(
+                f"dataset {repo}@{ref} has no commits — upload a dataset to it first"
             )
-            return None
-        except Exception as exc:
-            self._logger.warning(
-                "Failed to fetch lakeFS commit hash (%s); lakefs_commit will be null",
-                exc,
-            )
-            return None
+        return str(results[0]["id"])
 
     def _resolve_dataset_identity(
         self, image_keys: list[str], lakefs_commit: Optional[str]
@@ -1297,9 +1298,8 @@ class DatasetLoadingService:
         """Return (bucket, key_prefix) based on the user's params.
 
         When ``path_override`` is provided it must be a valid ``s3://`` URI.
-        When ``lakefs_repo`` and ``lakefs_branch`` are set (source=lakefs),
-        the bucket is the repo and the prefix starts with the resolved commit
-        (the branch name when it could not be resolved).
+        When ``lakefs_repo`` and ``lakefs_ref`` are set (source=lakefs), the
+        bucket is the dataset repository and the prefix is the pinned commit.
         Otherwise the canonical convention is used.
         """
         if params.path_override:
@@ -1315,52 +1315,24 @@ class DatasetLoadingService:
                 prefix += "/"
             return bucket, prefix
 
-        if params.lakefs_repo and params.lakefs_branch:
-            # PLATFORM STANDARD (same as hera-mlops-template, config-validation
-            # and the dataset CLI): the dataset lives at {ref}/dataset/ — the
-            # same path on every branch, so lakeFS can branch and merge it.
-            # A dataset uploaded before the version folder was dropped sits at
-            # {ref}/dataset/{ref}/; read it there when the standard path has no
-            # data.yaml.
+        if params.lakefs_repo and params.lakefs_ref:
+            # PLATFORM STANDARD: a dataset is its own lakeFS repository and its
+            # YOLO layout (data.yaml, images/, labels/) sits at the repository
+            # ROOT, so the prefix is just the pinned commit.
             bucket = params.lakefs_repo
-            read_ref = lakefs_commit or params.lakefs_branch
-            prefix = f"{read_ref}/dataset/"
-            if self._key_exists(bucket, prefix + "data.yaml"):
-                return bucket, prefix
-            # The old default version folder, else the one version folder that
-            # holds a data.yaml (an upload with an explicit --data-version).
-            legacy = f"{read_ref}/dataset/{params.lakefs_branch}/"
-            folders = ([legacy] if self._key_exists(bucket, legacy + "data.yaml")
-                       else self._version_folders(bucket, prefix))
-            if len(folders) > 1:
+            prefix = f"{lakefs_commit or params.lakefs_ref}/"
+            if not self._key_exists(bucket, prefix + "data.yaml"):
                 raise DatasetLoadingError(
-                    f"no dataset at s3://{bucket}/{prefix}, and {len(folders)} old-layout "
-                    f"versions under it: {', '.join(f's3://{bucket}/{f}' for f in folders)} — "
-                    "pick one with data.path_override, or re-upload it with the dataset CLI")
-            if folders:
-                self._logger.warning(
-                    "Dataset %s is in the old layout (%s) — re-upload it with the "
-                    "dataset CLI to move it to %s",
-                    params.lakefs_branch,
-                    folders[0],
-                    prefix,
+                    f"no data.yaml at s3://{bucket}/{prefix} — dataset "
+                    f"{params.version} must have data.yaml, images/ and labels/ "
+                    "at the root of its repository"
                 )
-                prefix = folders[0]
             return bucket, prefix
 
         bucket = _DEFAULT_BUCKET
-        prefix = _DEFAULT_PREFIX_TEMPLATE.format(version=params.version)
+        prefix = _DEFAULT_PREFIX_TEMPLATE.format(
+            version=params.version.partition("@")[2] or params.version)
         return bucket, prefix
-
-    def _version_folders(self, bucket: str, prefix: str) -> list[str]:
-        """Sub-folders of ``prefix`` that hold a data.yaml (old-layout versions)."""
-        try:
-            resp = self._s3.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/",
-                                            MaxKeys=1000)
-        except Exception:  # noqa: BLE001 — unreadable: the standard path's error stands
-            return []
-        return [cp["Prefix"] for cp in resp.get("CommonPrefixes") or []
-                if self._key_exists(bucket, cp["Prefix"] + "data.yaml")]
 
     def _key_exists(self, bucket: str, key: str) -> bool:
         try:

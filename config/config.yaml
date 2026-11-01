@@ -15,6 +15,7 @@ defaults:
   - data_schema
   - quantization_schema
   - experiment
+  - dataset
   - data
   - model: yolov8n
   - train

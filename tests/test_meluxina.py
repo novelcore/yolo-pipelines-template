@@ -211,7 +211,7 @@ def test_meluxina_run_carries_wallet_plumbing():
     endpoints, and dataset coordinates — never the key into Slurm env."""
     raw = _raw()
     raw["spec"]["arguments"]["parameters"] = [
-        {"name": "lakefs-repo", "value": "r"}, {"name": "data-ref", "value": "dev"}]
+        {"name": "dataset", "value": "dataset-default@latest"}]
     out = enhance(copy.deepcopy(raw), _ctx())
     mr = next(t for t in out["spec"]["templates"] if t["name"] == "meluxina-run")
     vols = {v["name"]: v for v in mr["volumes"]}
@@ -224,21 +224,21 @@ def test_meluxina_run_carries_wallet_plumbing():
     assert env["ZITADEL_DOMAIN"] == "oidc.internal.invalid"
     assert env["MLFLOW_EXTERNAL_URL"] == "https://mlflow.internal.invalid"
     assert env["LAKEFS_EXTERNAL_URL"] == "https://lakefs.internal.invalid"
-    # dataset coordinates prefer the pipeline's own workflow params
-    assert env["DATASET_REPO"] == "{{workflow.parameters.lakefs-repo}}"
-    assert env["DATASET_REF"] == "{{workflow.parameters.data-ref}}"
+    # the run's dataset pick rides in as-is; the submit code parses it
+    assert env["DATASET"] == "{{workflow.parameters.dataset}}"
+    # outputs go to the app's own outputs repository, on main
+    assert env["OUTPUTS_REPO"] == "outputs-PLACEHOLDER-app" and env["OUTPUTS_REF"] == "main"
+    assert env["CHECKPOINT_BUCKET"] == "outputs-PLACEHOLDER-app"
+    assert env["CHECKPOINT_PREFIX"] == "main/checkpoints"
 
 
-def test_dataset_coordinates_fall_back_to_context():
-    """enhance() itself injects the lakefs-repo workflow param (earlier
-    pass), so repo always resolves via the param; data-ref comes only from
-    the app's own authoring — absent, ref stays empty (stage-in disabled,
-    not broken)."""
+def test_dataset_coordinates_are_empty_without_a_dataset_param():
+    """No `dataset` workflow param (an app's own authoring dropped it): the
+    coordinates stay empty (stage-in disabled, not broken)."""
     out = enhance(copy.deepcopy(_raw()), _ctx())
     mr = next(t for t in out["spec"]["templates"] if t["name"] == "meluxina-run")
     env = {e["name"]: e.get("value") for e in mr["container"]["env"]}
-    assert env["DATASET_REPO"] == "{{workflow.parameters.lakefs-repo}}"
-    assert env["DATASET_REF"] == ""
+    assert env["DATASET"] == ""
 
 
 def test_submit_code_stagein_and_wallet_invariants():

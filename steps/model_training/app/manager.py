@@ -176,8 +176,8 @@ class Manager:
         export_formats: Optional[str] = None,
         export_precisions: Optional[str] = None,
         # Dataset provenance (FR-03)
+        dataset_repo: Optional[str] = None,
         dataset_version: Optional[str] = None,
-        lakefs_branch: Optional[str] = None,
         lakefs_commit: Optional[str] = None,
         config_hash: Optional[str] = None,
     ) -> TrainingResult:
@@ -256,8 +256,8 @@ class Manager:
                 formats=export_formats.split(",") if export_formats else [],
                 precisions=export_precisions.split(",") if export_precisions else [],
             ),
+            dataset_repo=dataset_repo,
             dataset_version=dataset_version,
-            lakefs_branch=lakefs_branch,
             lakefs_commit=lakefs_commit,
             config_hash=config_hash,
         )

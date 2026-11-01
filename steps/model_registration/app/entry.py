@@ -23,7 +23,7 @@ from pathlib import Path
 
 import yaml
 
-READS = ["data", "model", "registration"]
+READS = ["dataset", "data", "model", "registration"]
 
 OUTPUT_DIR = Path("/work/output")   # durable step output (survives the pod)
 
@@ -162,9 +162,9 @@ def main() -> None:
         best_checkpoint_path=tr.get("best_checkpoint_s3"),
         registered_model_name=(reg.get("registered_model_name") or None),
         promote_to=(reg.get("promote_to") or None),
-        # The dataset = its lakeFS ref; the commit pins the exact snapshot
-        # model-training read (relayed in training-result).
-        dataset_version=(tr.get("dataset_ref") or data.get("ref") or None),
+        # The dataset = `<dataset-repo>@<version>`; the commit pins the exact
+        # snapshot model-training read (relayed in training-result).
+        dataset_version=(tr.get("dataset_ref") or cfg.get("dataset") or None),
         dataset_commit=(tr.get("dataset_commit") or None),
         dataset_sample_size=sample_size,
         model_variant=(model.get("variant") or tr.get("model_variant")),

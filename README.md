@@ -4,8 +4,18 @@
 `kubeAppTemplateRef: yolo-pipelines` gives you a complete, working YOLO pose
 pipeline: dataset loading (lakeFS S3 streaming), real YOLOv8 training with
 authenticated MLflow tracking, optional QAT fine-tune (GPU or CPU-routed),
-INT8 TFLite export (PTQ or QAT) committed to the environment's lakeFS, and
-model registration.
+INT8 TFLite export (PTQ or QAT) committed to the app's own `outputs-<app>`
+lakeFS repository, and model registration.
+
+**Datasets and outputs.** A dataset is its own lakeFS repository,
+`dataset-<name>` (the project's default is `dataset-default`), with the YOLO
+layout at the repository root: `data.yaml`, `images/{train,val,test}/`,
+`labels/{train,val,test}/`. A run picks `dataset = <dataset-repo>@<version>`
+(default `dataset-default@latest`): the version is a tag `vN`, or `latest` (the
+head of `main`). `dataset-loading` pins the commit that resolves to and every
+later step reads that commit. Checkpoints and quantized models go to
+`outputs-<app>` on `main`, under `checkpoints/<experiment>/<run>/` (and
+`quantization/<experiment>/<run>/`), one commit per step per run naming the run.
 
 Lineage: `hera-mlops-template` (generic Hera+Hydra scaffold, Petros) →
 `yolo-hera-yolo` (real YOLO implementation, Alexandra) → promoted to the
@@ -120,7 +130,7 @@ Argo submit form also offers the MeluXina classes:
 Pick one for a step and only that step runs as a Slurm job on MeluXina; every other
 step keeps its in-cluster class — mixing (training on `meluxina-gpu`, quantization on
 `gpu-small`, registration in-cluster) is the normal case. Nothing in this repository
-changes: the platform stages the dataset ref to Lustre, pulls the step image into an
+changes: the platform stages the dataset version to Lustre, pulls the step image into an
 Apptainer SIF, runs the same command the pod would run, and brings the step's declared
 outputs back so the next step consumes them as usual. MLflow and lakeFS are reached
 through the public endpoints with a short-lived token minted per job.
@@ -129,8 +139,10 @@ through the public endpoints with a short-lived token minted per job.
   `pipeline-info` field on the form lists the classes and the account.
 - Give long steps a wall-clock limit in `pipeline.py`: `step(..., hpc_time_limit="12h")`
   (default 4 h). See [DEVELOPER.md §8.1](DEVELOPER.md).
-- The node stages the same dataset commit the in-cluster steps read: only
-  `{ref}/dataset/` of that commit, cached on Lustre by commit.
+- The node stages the same dataset commit the in-cluster steps read: the
+  dataset repository's `data.yaml`, `images/` and `labels/` at that commit,
+  cached on Lustre by (repository, commit). Step outputs go back to
+  `outputs-<app>` like the in-cluster path.
 - Steps pinned with a `compute-class` annotation stay in-cluster.
 
 ## License

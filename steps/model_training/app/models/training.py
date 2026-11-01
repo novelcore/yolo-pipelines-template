@@ -209,17 +209,17 @@ class TrainingParams(BaseModel):
     export: ExportConfig = Field(default_factory=ExportConfig)
 
     # ---- Dataset provenance (FR-03) ----
+    dataset_repo: Optional[str] = Field(
+        default=None,
+        description="The dataset's lakeFS repository (dataset-<name>).",
+    )
     dataset_version: Optional[str] = Field(
         default=None,
-        description="Dataset version tag from the dataset loading step.",
-    )
-    lakefs_branch: Optional[str] = Field(
-        default=None,
-        description="LakeFS branch the dataset was fetched from.",
+        description="Dataset version the run picked: a vN tag or 'latest'.",
     )
     lakefs_commit: Optional[str] = Field(
         default=None,
-        description="LakeFS branch-tip commit hash at dataset fetch time.",
+        description="LakeFS commit the dataset version resolved to (pinned by dataset-loading).",
     )
     config_hash: Optional[str] = Field(
         default=None,

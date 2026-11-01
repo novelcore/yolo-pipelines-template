@@ -3,7 +3,7 @@
 import argparse
 import yaml
 
-READS = ["data", "summary"]
+READS = ["data", "dataset", "summary"]
 
 
 def main() -> None:
@@ -15,7 +15,7 @@ def main() -> None:
     data = cfg["data"]
     summary = cfg["summary"]
     prefix = summary["label"]
-    print(f"{prefix}: dataset ref='{data['ref']}' source='{data['source']}' seed={data['seed']}")
+    print(f"{prefix}: dataset='{cfg['dataset']}' source='{data['source']}' seed={data['seed']}")
 
 
 if __name__ == "__main__":

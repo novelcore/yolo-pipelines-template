@@ -57,8 +57,8 @@ def _download_prefix(bucket, prefix, dest):
             rel = key[len(prefix):]
             if not rel or key.endswith("/"):
                 continue
-            # Only the dataset itself: the prefix may also hold an old-layout
-            # copy (dataset/<ref>/) kept for older step code.
+            # Only the dataset itself: the repository root may also hold
+            # other files (README, notes) the step never reads.
             if rel != "data.yaml" and rel.split("/", 1)[0] not in ("images", "labels"):
                 continue
             local = os.path.join(dest, rel)
@@ -68,48 +68,54 @@ def _download_prefix(bucket, prefix, dest):
     print(f"[dataset] downloaded {n} objects from s3://{bucket}/{prefix} -> {dest}", flush=True)
 
 
-def _dataset_prefix(tr: dict, ref: str) -> str:
+def _dataset_prefix(tr: dict) -> str:
     """Where this run's dataset lives: the commit-pinned prefix model-training
-    trained on (relayed in training-result), else the standard {ref}/dataset/."""
-    prefix = str(tr.get("dataset_prefix") or "") or f"{ref}/dataset/"
+    trained on (relayed in training-result). Without it there is no pinned
+    commit to read, so the step stops rather than guess a location."""
+    prefix = str(tr.get("dataset_prefix") or "")
+    if not (prefix and tr.get("dataset_bucket")):
+        raise SystemExit("[model-quantization] training-result carries no dataset location "
+                         "(dataset_bucket / dataset_prefix) - nothing pinned to read." )
     return prefix if prefix.endswith("/") else prefix + "/"
 
 
-def _staged_dataset_dir(prefix: str, ref: str):
+def _staged_dataset_dir(prefix: str):
     """Off-cluster (MeluXina) the platform stages the dataset commit onto the
     node and bind-mounts it read-only at KUBECORE_DATASET_DIR (PRD-1016 F-04).
-    Return the directory holding data.yaml — where training found it (the
-    prefix without its leading ref), the standard dataset/, the old
-    dataset/{ref}/ layout, then a ref whose root IS the dataset — or None when
-    nothing is staged (in-cluster: download from the S3 gateway)."""
+    The mount is the dataset repository's commit root, which IS the dataset
+    (data.yaml, images/, labels/) - where training found it (the prefix without
+    its leading commit). Return that directory, or None when nothing is staged
+    (in-cluster: download from the S3 gateway)."""
     root = os.environ.get("KUBECORE_DATASET_DIR")
     if not root or not os.path.isdir(root):
         return None
     resolved = prefix.split("/", 1)[1].strip("/") if "/" in prefix else ""
-    if resolved not in ("dataset", f"dataset/{ref}") and not os.path.exists(
-            os.path.join(root, resolved, "data.yaml")):
-        # A path_override outside the platform layout: the stage-in staged the
-        # ref's dataset/, not this folder, so reading anything else here would
-        # train on a different dataset than the in-cluster copy of the run.
-        raise SystemExit(
-            f"[model-quantization] the dataset at "
-            f"{prefix} (data.path_override) is not staged off-cluster; run this step in-cluster "
-            "or upload the dataset with the dataset CLI.")
-    for candidate in (os.path.join(root, resolved), os.path.join(root, "dataset"),
-                      os.path.join(root, "dataset", ref), root):
-        if os.path.exists(os.path.join(candidate, "data.yaml")):
-            return candidate
+    candidate = os.path.join(root, resolved) if resolved else root
+    if os.path.exists(os.path.join(candidate, "data.yaml")):
+        return candidate
+    # A path_override outside the dataset repository is not staged: reading
+    # anything else here would train on a different dataset than the in-cluster
+    # copy of the run.
     raise SystemExit(
-        f"[model-quantization] KUBECORE_DATASET_DIR={root} is mounted but holds no data.yaml under "
-        "dataset/ or its root — the staged ref does not carry a dataset in the platform layout.")
+        f"[model-quantization] KUBECORE_DATASET_DIR={root} is mounted but holds no data.yaml for "
+        f"{prefix} - the staged dataset repository root must carry data.yaml, "
+        "images/ and labels/ (a data.path_override is not staged off-cluster; "
+        "run this step in-cluster).")
+
+
+def _output_bucket(platform: dict) -> str:
+    """The app's own outputs repository (`outputs-<app>`): the platform injects
+    it as CHECKPOINT_BUCKET and mirrors it in platform.checkpoints.bucket."""
+    return os.environ.get("CHECKPOINT_BUCKET") or str(
+        (platform.get("checkpoints") or {}).get("bucket") or "")
 
 
 def _output_prefix(q: dict, platform: dict, experiment: str) -> str:
-    """lakeFS {branch}/{path} for the INT8 artifacts. The first segment is the
-    branch the service commits on (#896). Default: the branch pipeline outputs
-    go to (the checkpoint prefix's first segment — `outputs` once the project
-    has it), under quantization/{experiment}/{run} so runs never overwrite each
-    other. An explicit quantization.output_prefix is used as given."""
+    """lakeFS {branch}/{path} for the INT8 artifacts, in the app's outputs
+    repository (`outputs-<app>`, see _output_bucket). The first segment is the
+    branch the service commits on (#896). Default: `main` (the checkpoint
+    prefix's first segment), under quantization/{experiment}/{run} so runs never
+    overwrite each other. An explicit quantization.output_prefix is used as given."""
     explicit = str(q.get("output_prefix") or "").strip("/")
     if explicit:
         return explicit
@@ -190,27 +196,25 @@ def main() -> None:
     qr = _load(args.qat_result)
 
     mode = q.get("mode", "ptq")
-    repo = platform["lakefs"]["repository"]
 
     # qat mode passes through the qat-produced tflite; ptq exports from the FP32 .pt.
     tflite_s3_uri = qr.get("tflite_s3_uri") if mode == "qat" else None
     qat_run_id = qr.get("mlflow_run_id") if mode == "qat" else None
 
     # Materialise the calibration dataset locally (dirs + download) before the service.
-    data = cfg.get("data", {})
     # The dataset training used (commit-pinned), so calibration/parity run on
     # the same snapshot; its ref/commit go into the artifacts' lakeFS commit.
-    _ref = str(tr.get("dataset_ref") or data.get("ref") or "main")
-    _prefix = _dataset_prefix(tr, _ref)
+    _ref = str(tr.get("dataset_ref") or "")
+    _prefix = _dataset_prefix(tr)
     os.environ["KUBECORE_DATASET_REF"] = _ref
     os.environ["KUBECORE_DATASET_COMMIT"] = str(tr.get("dataset_commit") or "")
     os.makedirs(DATASET_DIR, exist_ok=True)
     os.makedirs(RUNS_DIR, exist_ok=True)
-    staged = _staged_dataset_dir(_prefix, _ref)
+    staged = _staged_dataset_dir(_prefix)
     if staged:
         _link_staged(staged, DATASET_DIR)
     else:
-        _download_prefix(str(tr.get("dataset_bucket") or repo), _prefix, DATASET_DIR)
+        _download_prefix(str(tr["dataset_bucket"]), _prefix, DATASET_DIR)
     _fix_data_yaml(DATASET_DIR)
 
     _setup_mlflow_auth()
@@ -222,7 +226,7 @@ def main() -> None:
         source_mlflow_run_id=(tr.get("mlflow_run_id") or ""),
         dataset_dir=DATASET_DIR,
         output_dir=RUNS_DIR,
-        output_bucket=repo,
+        output_bucket=_output_bucket(platform),
         output_prefix=_output_prefix(q, platform, exp["name"]),
         experiment_name=exp["name"],
         fp32_checkpoint_path=tr.get("best_checkpoint_s3"),

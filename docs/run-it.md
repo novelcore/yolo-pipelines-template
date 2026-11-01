@@ -25,14 +25,14 @@ Here are the handful worth setting. Everything else can stay as it is.
 | Field | What it does | A good first value |
 |---|---|---|
 | `experiment-name` | Names your run so you can find it later | something like `my-first-run` |
-| `data-ref` | Which dataset to train on | the name from the upload step, usually `main` |
+| `dataset` | Which dataset to train on: `<dataset-repository>@<version>` | `dataset-default@latest`. A version is `v1`, `v2`, ... or `latest` |
 | `model` | Which model size to train | `yolov8n` to start. It is the small, fast one |
 | `train-epochs` | How many rounds of training | a small number like `10` for your first test |
 | `quantization-mode` | Whether to also make a smaller INT8 model | `none` for now |
 
 That is enough for a first run. A small model, a few epochs, no quantization. It finishes quickly and proves the whole thing works end to end.
 
-![The key fields set: experiment-name, data-ref, model, sample size](img/form-fields.png)
+![The key fields set: experiment-name, dataset, model, sample size](img/form-fields.png)
 
 ## Step 4. About the model choices
 

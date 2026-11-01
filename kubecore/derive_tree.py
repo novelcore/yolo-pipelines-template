@@ -101,7 +101,6 @@ class QuantizationMode(Enum):
 
 @dataclass
 class DataConfig:
-    ref: str = "main"
     source: DataSource = DataSource.lakefs
     path_override: str = ""
     sample_size: str = ""
