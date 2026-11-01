@@ -220,7 +220,8 @@ def test_should_write_results_as_one_commit_on_main_of_the_outputs_repository(st
     monkeypatch.setenv("KUBECORE_RUN_ID", "yolo-pipeline-x7k2p")
     f = tmp_path / "model_int8.tflite"
     f.write_bytes(b"tflite")
-    prefix = lio.write_outputs("outputs-yolo", "exp", [f], kind="quantization", client=client)
+    prefix = lio.write_outputs("outputs-yolo", "exp", [f], kind="quantization", client=client,
+                               metadata={"dataset_ref": "dataset-cats@v1"})
     assert prefix == "s3://outputs-yolo/main/quantization/exp/yolo-pipeline-x7k2p/"
     tree = fake.tree("outputs-yolo", fake.head("outputs-yolo"))
     assert set(tree) == {"quantization/exp/yolo-pipeline-x7k2p/model_int8.tflite"}
@@ -237,48 +238,86 @@ def test_should_read_a_checkpoint_back_from_the_s3_uri_we_return(fake, client, t
     assert Path(out).read_bytes() == b"PT" and prefix == "s3://outputs-yolo/main/checkpoints/exp/run-1/"
 
 
-def _training_service(mod, tmp_path):
+def _training_service(mod, tmp_path, client, monkeypatch):
+    """A TrainingService with an OPEN run writer on outputs-yolo (what _run_training sets up)."""
+    from kubecore import outputs
+    monkeypatch.setenv("KUBECORE_RUN_ID", "run-1")
     svc = mod.TrainingService.__new__(mod.TrainingService)
     svc._logger = mod.logging.getLogger("test")
     svc._outputs_stage = tmp_path / "stage"
     svc._outputs_stage.mkdir()
+    svc._run_writer = outputs.run("outputs-yolo", "exp", "run-1", client=client).open()
+    svc._get_mlflow_run_id = lambda: "mlflow-1"
     return svc
 
 
-def test_training_stages_results_and_writes_them_once(fake, connected, tmp_path, monkeypatch):
+def _params():
+    return type("P", (), {"checkpoint_bucket": "outputs-yolo", "experiment_name": "exp",
+                          "dataset_repo": "dataset-cats", "dataset_version": "v2",
+                          "lakefs_commit": "c0ffee"})()
+
+
+def _tree(fake, ref="main"):
+    return fake.tree("outputs-yolo", fake.head("outputs-yolo", ref))
+
+
+def test_training_saves_every_checkpoint_on_the_run_branch_not_on_main(fake, client, tmp_path, monkeypatch):
     mod = import_in("model_training", "app.services.model_training")
-    svc = _training_service(mod, tmp_path)
-    monkeypatch.setenv("KUBECORE_RUN_ID", "run-1")
+    svc = _training_service(mod, tmp_path, client, monkeypatch)
+    (tmp_path / "w.pt").write_bytes(b"w10")
+    main_before = fake.head("outputs-yolo")
+    svc._upload_to_s3(tmp_path / "w.pt", "outputs-yolo", "main/checkpoints/exp/run-1/epoch_0010.pt")
+    assert fake.head("outputs-yolo") == main_before, "main is untouched until finish"
+    tree = _tree(fake, "run-run-1-checkpoints")
+    assert set(tree) == {"checkpoints/exp/run-1/epoch_0010.pt", "checkpoints/exp/run-1/last.pt"}
+
+
+def test_training_finish_merges_one_commit_with_provenance_and_deletes_the_branch(fake, client, tmp_path, monkeypatch):
+    mod = import_in("model_training", "app.services.model_training")
+    svc = _training_service(mod, tmp_path, client, monkeypatch)
     for name in ("best.pt", "last.pt", "epoch_0010.pt"):
         (tmp_path / name).write_bytes(name.encode())
         svc._upload_to_s3(tmp_path / name, "outputs-yolo", f"main/checkpoints/exp/run-1/{name}")
-    params = type("P", (), {"checkpoint_bucket": "outputs-yolo", "experiment_name": "exp"})()
-    svc._commit_outputs(params)
-    tree = fake.tree("outputs-yolo", fake.head("outputs-yolo"))
-    assert set(tree) == {f"checkpoints/exp/run-1/{n}" for n in ("best.pt", "last.pt", "epoch_0010.pt")}
-    assert len([e for e in fake.repos["outputs-yolo"]["commit_log"] if e[0] == "main"]) == 1, "one commit on main"
+    svc._commit_outputs(_params())
+    assert set(_tree(fake)) == {f"checkpoints/exp/run-1/{n}" for n in ("best.pt", "last.pt", "epoch_0010.pt")}
+    merges = [e for e in fake.repos["outputs-yolo"]["commit_log"] if e[0] == "main"]
+    assert len(merges) == 1, "one commit on main per step per run"
+    meta = merges[0][-1] if isinstance(merges[0][-1], dict) else {}
+    assert "run-run-1-checkpoints" not in fake.repos["outputs-yolo"]["branches"]
+    assert meta.get("dataset_ref") == "dataset-cats@v2" and meta.get("dataset_commit") == "c0ffee"
+    assert meta.get("mlflow_run_id") == "mlflow-1" and meta.get("run") == "run-1"
 
 
-def test_training_fails_loudly_when_the_results_cannot_be_written(connected, tmp_path):
+def test_a_retried_step_resumes_from_the_last_checkpoint_of_the_run_branch(fake, client, connected, tmp_path, monkeypatch):
     mod = import_in("model_training", "app.services.model_training")
-    svc = _training_service(mod, tmp_path)
+    (tmp_path / "a").mkdir()
+    first = _training_service(mod, tmp_path / "a", client, monkeypatch)
+    (tmp_path / "w.pt").write_bytes(b"epoch-20-state")
+    first._upload_to_s3(tmp_path / "w.pt", "outputs-yolo", "main/checkpoints/exp/run-1/epoch_0020.pt")
+    # the pod is lost here: nothing merged, the branch stays. The retry:
+    (tmp_path / "b").mkdir()
+    retry = mod.TrainingService.__new__(mod.TrainingService)
+    retry._logger = mod.logging.getLogger("test")
+    resume = retry._open_run_writer(_params(), tmp_path / "b")
+    assert resume is not None and resume.name == "last.pt" and resume.read_bytes() == b"epoch-20-state"
+
+
+def test_a_first_attempt_has_nothing_to_resume(fake, client, connected, tmp_path, monkeypatch):
+    mod = import_in("model_training", "app.services.model_training")
+    monkeypatch.setenv("KUBECORE_RUN_ID", "fresh")
+    svc = mod.TrainingService.__new__(mod.TrainingService)
+    svc._logger = mod.logging.getLogger("test")
+    assert svc._open_run_writer(_params(), tmp_path) is None
+
+
+def test_training_fails_loudly_when_the_results_cannot_be_merged(fake, client, tmp_path, monkeypatch):
+    mod = import_in("model_training", "app.services.model_training")
+    svc = _training_service(mod, tmp_path, client, monkeypatch)
     (tmp_path / "best.pt").write_bytes(b"x")
-    svc._upload_to_s3(tmp_path / "best.pt", "outputs-missing", "main/checkpoints/exp/r/best.pt")
-    params = type("P", (), {"checkpoint_bucket": "outputs-missing", "experiment_name": "exp"})()
-    with pytest.raises(mod.TrainingError, match="outputs-missing"):
-        svc._commit_outputs(params)
-
-
-def test_training_keeps_partial_results_but_never_masks_the_error(connected, fake, tmp_path, monkeypatch):
-    mod = import_in("model_training", "app.services.model_training")
-    svc = _training_service(mod, tmp_path)
-    monkeypatch.setenv("KUBECORE_RUN_ID", "run-2")
-    params = type("P", (), {"checkpoint_bucket": "outputs-yolo", "experiment_name": "exp"})()
-    svc._keep_partial_outputs(params)          # nothing staged: no commit, no exception
-    (tmp_path / "e.pt").write_bytes(b"e")
-    svc._upload_to_s3(tmp_path / "e.pt", "outputs-yolo", "main/checkpoints/exp/run-2/epoch_0010.pt")
-    svc._keep_partial_outputs(params)
-    assert "checkpoints/exp/run-2/epoch_0010.pt" in fake.tree("outputs-yolo", fake.head("outputs-yolo"))
+    svc._upload_to_s3(tmp_path / "best.pt", "outputs-yolo", "main/checkpoints/exp/run-1/best.pt")
+    svc._run_writer.client.merge = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    with pytest.raises(mod.TrainingError, match="outputs-yolo"):
+        svc._commit_outputs(_params())
 
 
 def test_checkpoints_are_scoped_to_the_run(monkeypatch):

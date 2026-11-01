@@ -7,14 +7,13 @@ model-quantization (each step image carries only its own app/):
   (the package's ultralytics consumer: one download, or the copy staged on MeluXina via
   ``KUBECORE_STAGED_DIR``). data.yaml comes back with ``path:`` already pointing at it.
 - ``download_object``: one object of ``s3://<repo>/<ref>/<path>`` (a checkpoint, the qat tflite).
-- ``write_outputs``: the step's results as ONE commit on ``main`` of ``outputs-<app>``,
-  under ``<kind>/<experiment>/<run>/`` (``kubecore.outputs.write_run``).
+- ``run_writer`` / ``write_outputs``: the step's results through the package's run writer:
+  saved on the branch ``run-<run>-<kind>`` of ``outputs-<app>`` (durable, reused on a retry), merged
+  into ``main`` by ``finish`` as ONE commit under ``<kind>/<experiment>/<run>/``, branch deleted.
 """
 from __future__ import annotations
 
 import os
-import shutil
-import tempfile
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -30,19 +29,6 @@ def run_id() -> str:
     return os.environ.get("KUBECORE_RUN_ID", "").strip() or "local"
 
 
-def _pinned_client(commit: str, client: Optional[LakeFS] = None) -> LakeFS:
-    """A lakeFS client whose refs all resolve to ``commit``.
-
-    The consumer resolves the ref it is given, so this makes it read the commit
-    dataset-loading pinned even when the run picked ``latest`` (the package has no
-    ``commit=`` argument yet; drop this when it has).
-    """
-    c = client or LakeFS.connect()
-    c.branch_commit = lambda repo, branch: commit
-    c.tag_commit = lambda repo, tag: commit
-    return c
-
-
 def materialize(dataset_ref: str, dataset_commit: str, dest: str,
                 client: Optional[LakeFS] = None) -> Path:
     """Local data.yaml of ``dataset_ref`` at ``dataset_commit`` (copied/linked into ``dest``).
@@ -53,9 +39,8 @@ def materialize(dataset_ref: str, dataset_commit: str, dest: str,
     if not (dataset_ref and dataset_commit):
         raise SystemExit("no pinned dataset: the upstream result carries no dataset_ref / "
                          "dataset_commit, so there is nothing to read.")
-    ref = datasets.DatasetRef.parse(dataset_ref)
-    return get_format("ultralytics").consumer.materialize(
-        ref, dest, _pinned_client(dataset_commit, client))
+    ref = datasets.DatasetRef.parse(dataset_ref).with_commit(dataset_commit)
+    return get_format("ultralytics").consumer.materialize(ref, dest, client)
 
 
 def download_object(uri: str, dest_dir: str, client: Optional[LakeFS] = None) -> str:
@@ -71,17 +56,28 @@ def download_object(uri: str, dest_dir: str, client: Optional[LakeFS] = None) ->
     return str(local)
 
 
-def write_outputs(app: str, experiment: str, files: Iterable, kind: str = "checkpoints",
-                  client: Optional[LakeFS] = None) -> str:
-    """Write ``files`` as one commit on ``main`` of ``outputs-<app>`` under ``<kind>/<experiment>/<run>/``.
+def run_writer(app: str, experiment: str, kind: str = "checkpoints",
+               client: Optional[LakeFS] = None) -> "outputs.RunWriter":
+    """An OPEN run writer on ``outputs-<app>`` for this run (``save`` ... then ``finish``).
 
-    Returns the ``s3://`` prefix (``s3://outputs-<app>/main/<kind>/<experiment>/<run>/``) the
-    files can be read back from. Raises when nothing could be written: a result that never
-    reached lakeFS must fail the step.
+    The branch is created or reused, so a retried or preempted step resumes from what it saved.
     """
-    run = run_id()
-    with tempfile.TemporaryDirectory() as tmp:
-        for f in files:
-            shutil.copy(f, Path(tmp) / Path(f).name)
-        outputs.write_run(app, experiment, run, tmp, kind=kind, client=client)
-    return f"s3://{outputs.outputs_repo(app)}/{OUTPUTS_REF}/{outputs.run_prefix(experiment, run, kind)}"
+    return outputs.run(app, experiment, run_id(), kind, client).open()
+
+
+def result_prefix(app: str, experiment: str, kind: str = "checkpoints") -> str:
+    """``s3://outputs-<app>/main/<kind>/<experiment>/<run>/``: where finished results can be read back."""
+    return f"s3://{outputs.outputs_repo(app)}/{OUTPUTS_REF}/{outputs.run_prefix(experiment, run_id(), kind)}"
+
+
+def write_outputs(app: str, experiment: str, files: Iterable, kind: str = "checkpoints",
+                  metadata: Optional[dict] = None, client: Optional[LakeFS] = None) -> str:
+    """Save ``files`` and merge them into main of ``outputs-<app>`` as one commit; returns ``result_prefix``.
+
+    ``metadata`` (dataset ref/commit, ...) rides on the merge commit. Raises when nothing could be
+    written: a result that never reached lakeFS must fail the step.
+    """
+    w = run_writer(app, experiment, kind, client)
+    w.save(list(files))
+    w.finish(metadata)
+    return result_prefix(app, experiment, kind)

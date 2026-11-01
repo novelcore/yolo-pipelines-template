@@ -20,7 +20,7 @@ later step reads that commit. Checkpoints and quantized models go to
 The steps use the `kubecore` Python **package** (from `hera-pipeline-template`
 `packages/kubecore`, pinned by commit in each step Dockerfile) for this: the
 dataset ref and its commit (`datasets`), the local or MeluXina-staged copy
-(`formats` consumer), and the results (`outputs.write_run`). The package and the
+(`formats` consumer), and the results (the run writer `outputs.run`: every checkpoint saved on `run-<run>-<kind>`, resume on retry, one merge commit on main). The package and the
 vendored `kubecore/` engine share an import name and never share a `sys.path`:
 engine tests run with `python -m pytest tests`, step tests with `pytest step_tests`
 (see `step_tests/README.md`). Manage datasets with `kubecore dataset ...`.

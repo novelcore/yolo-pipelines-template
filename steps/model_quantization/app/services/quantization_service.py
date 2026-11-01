@@ -278,10 +278,13 @@ class QuantizationService:
         """Write the INT8 TFLite to ``outputs-<app>`` (one commit on main) and return its s3:// URI.
 
         The commit is the kubecore package's ``write_run``: ``quantization/<experiment>/<run>/``
-        on a per-run branch merged into main, so simultaneous runs never share a staging area.
+        saved on the run branch ``run-<run>-quantization`` and merged into main; the merge commit
+        records the dataset ref and commit.
         """
         prefix = lakefs_io.write_outputs(params.output_bucket, params.experiment_name,
-                                         [local_path], kind="quantization")
+                                         [local_path], kind="quantization",
+                                         metadata={"dataset_ref": os.environ.get("KUBECORE_DATASET_REF", ""),
+                                                   "dataset_commit": os.environ.get("KUBECORE_DATASET_COMMIT", "")})
         self._logger.info("model-quantization: INT8 tflite written to %s", prefix)
         return prefix + Path(local_path).name
 

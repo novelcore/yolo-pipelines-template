@@ -100,7 +100,8 @@ class TrainingService:
         mlflow_tracking_uri: str,
     ) -> None:
         self._s3 = s3_client
-        self._outputs_stage: Optional[Path] = None  # set per run in _run_training
+        self._outputs_stage: Optional[Path] = None  # scratch copies for the run writer (set in _run_training)
+        self._run_writer = None  # the open kubecore run writer (set in _run_training)
         self._mlflow_tracking_uri = mlflow_tracking_uri
         self._logger = logging.getLogger(__name__)
 
@@ -243,9 +244,13 @@ class TrainingService:
 
         with tempfile.TemporaryDirectory(prefix="io-model-training-") as tmp_dir:
             tmp_path = Path(tmp_dir)
-            # Results are staged here and written once (see _commit_outputs).
+            # Results are copied here, saved on the run branch as they appear and merged to
+            # main once at the end (see _upload_to_s3 / _commit_outputs).
             self._outputs_stage = tmp_path / "outputs"
             self._outputs_stage.mkdir()
+            resume_pt = self._open_run_writer(params, tmp_path)
+            if resume_pt is not None and not params.resume_from:
+                params = params.model_copy(update={"resume_from": str(resume_pt)})
 
             # 1. Resolve model path (download from S3 if needed)
             model_path = self._resolve_model_path(params, tmp_path)
@@ -319,12 +324,9 @@ class TrainingService:
                     params.disk_cache_bytes // (1024 * 1024),
                 )
 
-            try:
-                trainer = model.train(**train_kwargs)
-            except Exception:
-                # Keep the epoch checkpoints reached so far: a retry can resume from them.
-                self._keep_partial_outputs(params)
-                raise
+            # An exception here leaves the run branch (every checkpoint saved so far) in place:
+            # the retried step finds it and resumes (see _open_run_writer).
+            trainer = model.train(**train_kwargs)
 
             # 6. Determine save directory
             save_dir = Path(model.trainer.save_dir)  # type: ignore[union-attr]
@@ -1299,40 +1301,55 @@ class TrainingService:
 
         return best_uri
 
-    def _keep_partial_outputs(self, params: TrainingParams) -> None:
-        """Best effort after a failed train(): write the checkpoints staged so far."""
-        try:
-            if any(self._outputs_stage.iterdir()):
-                self._commit_outputs(params)
-        except Exception as exc:  # noqa: BLE001 - never mask the training error
-            self._logger.warning("could not keep partial results: %s", exc)
-
     def _commit_outputs(self, params: TrainingParams) -> None:
-        """Write everything staged during this run (best/last/epoch checkpoints, exports)
-        to ``outputs-<app>`` as ONE commit on ``main``, under
-        ``checkpoints/<experiment>/<run>/`` (kubecore ``write_run``: a per-run branch
-        merged into main, so simultaneous runs never share a staging area).
+        """Merge the run branch into ``main`` of ``outputs-<app>``: ONE commit per step per run,
+        carrying the dataset ref/commit and the MLflow run id; the branch is deleted.
 
-        A failure is fatal: results that never reached lakeFS must not look like success.
+        A failure is fatal: results that never reached main must not look like success.
         """
-        files = sorted(p for p in self._outputs_stage.iterdir() if p.is_file())  # type: ignore[union-attr]
         try:
-            prefix = lakefs_io.write_outputs(params.checkpoint_bucket, params.experiment_name, files)
+            commit = self._run_writer.finish({
+                "dataset_ref": (f"{params.dataset_repo}@{params.dataset_version}"
+                                if params.dataset_repo else ""),
+                "dataset_commit": params.lakefs_commit or "",
+                "mlflow_run_id": self._get_mlflow_run_id() or "",
+            })
         except Exception as exc:  # noqa: BLE001 - re-raised with the repository named
             raise TrainingError(
-                f"writing results to {params.checkpoint_bucket} failed: {exc}") from exc
-        self._logger.info("Wrote %d result files to %s", len(files), prefix)
+                f"merging results into {params.checkpoint_bucket} failed: {exc}") from exc
+        self._logger.info("Results merged into %s main: %s", params.checkpoint_bucket, commit)
+
+    def _open_run_writer(self, params: TrainingParams, tmp_path: Path) -> Optional[Path]:
+        """Open the run's writer on ``outputs-<app>`` and return the last checkpoint it already holds.
+
+        The branch ``run-<run>-checkpoints`` is created, or reused when this step is a retry or was
+        preempted: then ``last.pt`` is downloaded so training resumes from it instead of starting over.
+        """
+        self._run_writer = lakefs_io.run_writer(params.checkpoint_bucket, params.experiment_name)
+        resume = self._run_writer.latest("last.pt", dest=tmp_path / "resume")
+        if resume is not None:
+            self._logger.info("Found %s on the run branch: resuming", resume.name)
+        return resume
 
     def _upload_to_s3(self, local_path: Path, bucket: str, key: str) -> None:
-        """Stage one result file for the run's single write to ``outputs-<app>``.
+        """Save one result file on the run branch (a durable commit on ``run-<run>-checkpoints``).
 
-        ``bucket``/``key`` keep the ``{branch}/{path}`` vocabulary of the URIs we hand to
-        later steps; only the file name is used here, the location comes from
-        ``write_run`` (``checkpoints/<experiment>/<run>/<name>``).
+        ``bucket``/``key`` keep the ``{branch}/{path}`` vocabulary of the URIs we hand to later
+        steps; only the file name is used, the location comes from the run writer
+        (``checkpoints/<experiment>/<run>/<name>``). A checkpoint also becomes ``last.pt`` there,
+        which is what a resumed step starts from.
         """
-        if self._outputs_stage is None:
-            raise TrainingError("no results staging directory: _upload_to_s3 outside a training run")
+        if self._outputs_stage is None or self._run_writer is None:
+            raise TrainingError("no run writer: _upload_to_s3 outside a training run")
+        name = Path(key).name
         try:
-            shutil.copy(local_path, self._outputs_stage / Path(key).name)
-        except OSError as exc:
-            raise TrainingError(f"staging {key} for {bucket} failed: {exc}") from exc
+            staged = self._outputs_stage / name
+            shutil.copy(local_path, staged)
+            files = [staged]
+            if name.startswith("epoch_"):
+                last = self._outputs_stage / "last.pt"
+                shutil.copy(local_path, last)
+                files.append(last)
+            self._run_writer.save(files, f"checkpoints: {name}")
+        except Exception as exc:  # noqa: BLE001
+            raise TrainingError(f"saving {key} for {bucket} failed: {exc}") from exc
