@@ -26,7 +26,7 @@ Plain meanings for the words in this guide. One sentence each. Come back any tim
 
 **Pipeline.** The whole set of steps that turns your dataset into a trained, saved model.
 
-**Promote.** To mark a saved model version as ready for a stage, like Staging or Production.
+**Promote.** To give a saved model version a label, `champion` or `challenger`, so everyone knows which one to use.
 
 **PTQ.** One way to make the smaller INT8 model, done after training. You pick it with the quantization mode.
 

@@ -36,6 +36,6 @@ You never have to remember what you did. If a run turns out well, its parameters
 
 ## Your files
 
-Checkpoints, exports and the INT8 model are not in MLflow's charts: they are in your app's repository `outputs-<app>` in lakeFS, branch `main`, one commit per step per run, under `checkpoints/<experiment>/<run>/` and `quantization/<experiment>/<run>/`. The commit's details name the dataset and the MLflow run. [First dataset to results](first-run.md), step 6, shows how to download them.
+Checkpoints, exports and the INT8 model are not in MLflow's charts: they are in your app's repository `outputs-<app>` in lakeFS, branch `main`, one commit per step per run, under `checkpoints/<experiment>/<run>/` and `quantization/<experiment>/<run>/`. The commit's details name the dataset and the MLflow run, and the MLflow run names the commit back: its tags `kaos.outputs_repo`, `kaos.outputs_commit` and `kaos.outputs_path` say where the files are. A registered model has its own tag on that commit, `model-<name>-v<version>` ([Promote a model](promote.md)). [First dataset to results](first-run.md), step 6, shows how to download them.
 
 Happy with a model? Go to [Promote a model](promote.md).
