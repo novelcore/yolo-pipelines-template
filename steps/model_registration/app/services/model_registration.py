@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -12,6 +13,11 @@ from app.models.registration import RegistrationParams, RegistrationResult
 
 class ModelRegistrationError(Exception):
     """Raised when model registration fails unrecoverably."""
+
+
+def lakefs_tag_id(registered_model_name: str, version: int) -> str:
+    """``model-<slug(name)>-v<N>``: the lakeFS tag of version N (slug keeps ``[A-Za-z0-9_-]``)."""
+    return f"model-{re.sub(r'[^A-Za-z0-9_-]', '-', registered_model_name)}-v{version}"
 
 
 class ModelRegistrationService:
@@ -38,6 +44,7 @@ class ModelRegistrationService:
         1. Connect to MLflow.
         2. Register best.pt under params.registered_model_name.
         3. Set lineage tags on the best.pt version.
+        3b. Tag the training run's outputs commit in lakeFS and record the tag on the version.
         4. Optionally register last.pt and tag it.
         5. Optionally assign a registry alias (champion/challenger) to the best.pt version.
         6. Return a RegistrationResult.
@@ -65,6 +72,12 @@ class ModelRegistrationService:
             version=best_version,
             params=params,
             checkpoint_type="best",
+        )
+        self._link_outputs(
+            client=client,
+            registered_model_name=params.registered_model_name,
+            version=best_version,
+            mlflow_run_id=params.mlflow_run_id,
         )
 
         last_version: Optional[int] = None
@@ -176,6 +189,69 @@ class ModelRegistrationService:
                 client.set_model_version_tag(
                     name=registered_model_name,
                     version=version_str,
+                    key=k,
+                    value=v,
+                )
+
+            self._with_retry(_set_tag)
+
+    def _link_outputs(
+        self,
+        client: MlflowClient,
+        registered_model_name: str,
+        version: int,
+        mlflow_run_id: str,
+    ) -> None:
+        """Tag the training run's merge commit in ``outputs-<app>`` as ``model-<slug>-v<N>``
+        (kaos#1283) and set ``kaos.*`` tags on the model version.
+
+        The commit comes from the run's ``kaos.outputs_repo`` / ``kaos.outputs_commit`` tags
+        (written by model-training). A run without them is registered without a lakeFS tag.
+        An existing tag on the same commit is a success; on another commit it is an error.
+        """
+        run_tags = self._with_retry(lambda: client.get_run(mlflow_run_id)).data.tags
+        repo = run_tags.get("kaos.outputs_repo")
+        commit = run_tags.get("kaos.outputs_commit")
+        if not (repo and commit):
+            self._logger.warning(
+                "Training run %s has no kaos.outputs_commit (a run from before kaos#1283, "
+                "or training could not tag it): version %s gets no lakeFS tag",
+                mlflow_run_id,
+                version,
+            )
+            return
+
+        from kubecore.errors import NotFoundError  # noqa: PLC0415
+        from kubecore.lakefs import LakeFS  # noqa: PLC0415
+
+        tag = lakefs_tag_id(registered_model_name, version)
+        lake = LakeFS.connect()
+        try:
+            existing = lake.tag_commit(repo, tag)
+        except NotFoundError:
+            lake.create_tag(repo, tag, commit)
+            self._logger.info("Tagged %s@%s as %s", repo, commit, tag)
+        else:
+            if existing != commit:
+                raise ModelRegistrationError(
+                    f"lakeFS tag {tag} in {repo} already points at {existing}, not at the "
+                    f"training commit {commit}; refusing to move it"
+                )
+            self._logger.info("lakeFS tag %s in %s already on %s", tag, repo, commit)
+
+        tags = {
+            "kaos.outputs_repo": repo,
+            "kaos.outputs_commit": commit,
+            "kaos.lakefs_tag": tag,
+        }
+        if run_tags.get("kaos.workflow"):
+            tags["kaos.workflow"] = run_tags["kaos.workflow"]
+        for key, value in tags.items():
+
+            def _set_tag(k: str = key, v: str = value) -> None:
+                client.set_model_version_tag(
+                    name=registered_model_name,
+                    version=str(version),
                     key=k,
                     value=v,
                 )
