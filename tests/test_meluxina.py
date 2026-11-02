@@ -230,6 +230,8 @@ def test_meluxina_run_carries_wallet_plumbing():
     assert env["OUTPUTS_REPO"] == "outputs-PLACEHOLDER-app" and env["OUTPUTS_REF"] == "main"
     assert env["CHECKPOINT_BUCKET"] == "outputs-PLACEHOLDER-app"
     assert env["CHECKPOINT_PREFIX"] == "main/checkpoints"
+    # the run's id and name follow the job to the HPC site (MLflow run named after the workflow, kaos#1283)
+    assert env["KUBECORE_RUN_ID"] == env["KUBECORE_WORKFLOW_NAME"] == "{{workflow.name}}"
 
 
 def test_dataset_coordinates_are_empty_without_a_dataset_param():
@@ -579,3 +581,11 @@ def test_wait_survives_pod_loss_and_wallet_expiry():
     assert ns["wallet_exp"]("garbage") == 0.0
     assert "WALLET_EXP - WALLET_MARGIN_S" in code and "resubmitting with a" in code
     assert "PULL_RESUBMITS = 3" in code and "resubmits < PULL_RESUBMITS" in code
+
+
+def test_submit_forwards_the_run_id_and_workflow_name_to_the_job():
+    """The Slurm job sees the same KUBECORE_RUN_ID / KUBECORE_WORKFLOW_NAME as an in-cluster step,
+    so outputs land under the run's folder and the MLflow run is named after the workflow."""
+    from kubecore.meluxina import MELUXINA_SUBMIT_CODE
+    forwarded = MELUXINA_SUBMIT_CODE.split("('CHECKPOINT_BUCKET'", 1)[1].split(")", 1)[0]
+    assert "'KUBECORE_RUN_ID'" in forwarded and "'KUBECORE_WORKFLOW_NAME'" in forwarded
