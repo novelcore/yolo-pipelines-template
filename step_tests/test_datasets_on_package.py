@@ -369,12 +369,12 @@ def test_step_images_install_kaos_lib_and_not_the_vendored_engine():
     for step in ("dataset_loading", "config_validation", "model_training", "qat_finetune", "model_quantization",
                  "model_registration"):
         text = (ROOT / "steps" / step / "Dockerfile").read_text()
-        assert 'pip install --no-cache-dir "kaos-lib[zitadel] ${KAOS_LIB_PACKAGE}"' in text, step
+        assert 'pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"' in text, step   # the WHOLE requirement
         assert "COPY kubecore" not in text and "hera-pipeline-template" not in text, step
         specs.add(next(l.split("=", 1)[1] for l in text.splitlines() if l.startswith("ARG KAOS_LIB_PACKAGE=")))
     assert len(specs) == 1, "one kaos-lib pin for every step"
     spec = next(iter(specs))
-    assert re.fullmatch(r'"@ https://github\.com/kaos-io/kaos-lib/archive/[0-9a-f]{40}\.zip"', spec), spec
+    assert re.fullmatch(r'"kaos-lib\[zitadel\] @ https://github\.com/kaos-io/kaos-lib/archive/[0-9a-f]{40}\.zip"', spec), spec
 
 
 def test_should_pin_a_branch_pick_to_its_commit_too(client, fake):

@@ -9,18 +9,19 @@ This page takes you from nothing to a trained model and its files, with every co
 
 ## 1. Install the tool and sign in
 
-The `kaos-cli` tool comes with kaos-lib, a Python package. Install it once, inside a small private Python space
+The `kaosctl` tool comes with kaos-lib, a Python package. Install it once, inside a small private Python space
 for this project (a "virtual environment"), in your app folder.
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
-pip install "kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/<commit>.zip"
-kaos-cli login
+pip install --index-url https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib/simple/ \
+    --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel]==0.4.0"
+kaosctl login
 ```
 
-`<commit>` is the commit in `KAOS_LIB_PACKAGE` in `steps/model_training/Dockerfile` (your
-platform contact can also give it to you). On Windows, the second line is `.venv\Scripts\activate`.
+kaos-lib comes from the platform's public package index (the second line takes its dependencies from PyPI); your
+platform contact can tell you the version your project's steps use. On Windows, the second line is `.venv\Scripts\activate`.
 Your browser opens once and asks you to sign in. Log in, close the tab, and go back to the
 Terminal. The tool remembers you.
 
@@ -31,7 +32,7 @@ Terminal. The tool remembers you.
 ## 2. Create a dataset
 
 ```bash
-kaos-cli dataset create spacecraft --classes spacecraft
+kaosctl dataset create spacecraft --classes spacecraft
 ```
 
 This makes the lakeFS repository `dataset-spacecraft` with the YOLO starter layout:
@@ -42,19 +43,19 @@ of your dataset (`kpt_shape: [4, 3]`, `flip_idx: [0, 3, 2, 1]`, for four keypoin
 visibility): the next step shows how.
 
 !!! note "Templates are optional"
-    `kaos-cli dataset create spacecraft --template none` makes an empty `dataset-spacecraft`,
+    `kaosctl dataset create spacecraft --template none` makes an empty `dataset-spacecraft`,
     and a `dataset-*` repository you create by hand in lakeFS becomes a dataset after its first
     commit. Everything below works the same.
 
 ## 3. Put your files in
 
 ```bash
-kaos-cli dataset pull dataset-spacecraft@latest ./dataset-spacecraft
+kaosctl dataset pull dataset-spacecraft@latest ./dataset-spacecraft
 # edit ./dataset-spacecraft/data.yaml (kpt_shape, flip_idx, names)
 # copy your images into images/train, images/val, images/test
 # and one label file per image into labels/train, labels/val, labels/test
-kaos-cli dataset validate ./dataset-spacecraft --format ultralytics
-kaos-cli dataset push ./dataset-spacecraft dataset-spacecraft -m "first 200 images"
+kaosctl dataset validate ./dataset-spacecraft --format ultralytics
+kaosctl dataset push ./dataset-spacecraft dataset-spacecraft -m "first 200 images"
 ```
 
 - `validate` lists every problem it finds in one go: a label for no image, a class number
@@ -67,8 +68,8 @@ Open the pull request link, look at the change, and merge it. Nothing changes on
 you do. Then tag the new state as a version:
 
 ```bash
-kaos-cli dataset release dataset-spacecraft      # prints v1
-kaos-cli dataset versions dataset-spacecraft
+kaosctl dataset release dataset-spacecraft      # prints v1
+kaosctl dataset versions dataset-spacecraft
 ```
 
 A run reads a version, not "whatever is there now", so a result always points back to its data.
@@ -110,7 +111,7 @@ is staged there for you and the results come back to the same place.
   your computer:
 
 ```bash
-kaos-cli dataset pull outputs-<app>@main ./results --prefix checkpoints/<experiment>/<run>/
+kaosctl dataset pull outputs-<app>@main ./results --prefix checkpoints/<experiment>/<run>/
 ```
 
 The commit's details say which dataset and which commit the run trained on, and the MLflow run id.

@@ -74,16 +74,16 @@ default is `dataset-default`.
 
 - **Versions** are tags on `main`: `v1`, `v2`, … `latest` is the head of `main`. A run
   picks one and every step reads that same commit, whatever happens to the dataset meanwhile.
-- **Changes** go in through a **pull request**; after a merge, `kaos-cli dataset release`
+- **Changes** go in through a **pull request**; after a merge, `kaosctl dataset release`
   tags the next version.
 - **Pick it in the pipeline.** The run form's `dataset` field is a dropdown of
   `<dataset-repo>@<version>` choices (default `dataset-default@latest`, or its newest
   version). `config-validation` checks the pick exists and has a `data.yaml`;
   `dataset-loading` pins its commit; later steps read that commit.
 - **Pose datasets.** This pipeline trains pose: `data.yaml` carries `kpt_shape` (and
-  `flip_idx`), labels carry the keypoints. `kaos-cli dataset validate`/`push` check pose,
+  `flip_idx`), labels carry the keypoints. `kaosctl dataset validate`/`push` check pose,
   segmentation and detection labels.
-- **Templates are optional.** `kaos-cli dataset create` can start a repository from the
+- **Templates are optional.** `kaosctl dataset create` can start a repository from the
   `ultralytics` template, but any `dataset-*` repository made by hand becomes a dataset after
   its first commit (`--template none` makes an empty one). A repository with no template
   label validates nothing on `push`; pass `--format ultralytics` to get the YOLO checks.
@@ -139,24 +139,25 @@ warning. `last.pt` is registered from its lakeFS path, without a tag. A run with
 The steps use [kaos-lib](https://github.com/kaos-io/kaos-lib) (`kaos_lib`, formerly the `kubecore`
 package), pinned in every step Dockerfile as `KAOS_LIB_PACKAGE`: dataset refs and their commits,
 the local or MeluXina-staged copy of a dataset, the run writer for results, and the
-`kaos-cli` command. Install it on your computer inside a virtual environment:
+`kaosctl` command. Install it on your computer inside a virtual environment:
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
-pip install "kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/<commit>.zip"
-kaos-cli login                    # opens your browser once
+pip install --index-url https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib/simple/ \
+    --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel]==0.4.0"
+kaosctl login                    # opens your browser once
 ```
 
 Run the commands inside your app folder: it carries the file that tells the tool where your
 project's lakeFS is.
 
 ```bash
-kaos-cli dataset create <name> --classes a,b [--template ultralytics|none]
-kaos-cli dataset pull <repo>@<ref> [dir] [--prefix folder/]
-kaos-cli dataset validate <dir> --format ultralytics
-kaos-cli dataset push <dir> <repo> -m "message" [--format ultralytics]
-kaos-cli dataset release <repo>
-kaos-cli dataset list ; kaos-cli dataset versions <repo>
+kaosctl dataset create <name> --classes a,b [--template ultralytics|none]
+kaosctl dataset pull <repo>@<ref> [dir] [--prefix folder/]
+kaosctl dataset validate <dir> --format ultralytics
+kaosctl dataset push <dir> <repo> -m "message" [--format ultralytics]
+kaosctl dataset release <repo>
+kaosctl dataset list ; kaosctl dataset versions <repo>
 ```
 
 From code: `datasets.materialize("dataset-cats@v2")` returns the local `data.yaml`

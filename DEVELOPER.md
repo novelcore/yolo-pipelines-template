@@ -561,12 +561,12 @@ There are two test commands, on purpose:
 
 ```bash
 python -m pytest tests                             # the engine: the vendored kubecore/
-pip install "kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/<commit>.zip" \
+pip install "$(sed -n 's/^ARG KAOS_LIB_PACKAGE="\(.*\)"$/\1/p' steps/*/Dockerfile | head -1)" \
     pytest boto3 psutil pydantic pydantic-settings    # once, in a virtual environment
 pytest step_tests                                  # step code that imports kaos_lib
 ```
 
-`<commit>` is the one in `KAOS_LIB_PACKAGE` in the step Dockerfiles.
+That installs exactly the requirement in `KAOS_LIB_PACKAGE` in the step Dockerfiles (run it from the repo root).
 
 **Why two.** The platform's engine in `kubecore/` (render, compose, enhance; it runs in CI and is never
 in a step image) is imported as `kubecore`; the step code imports kaos-lib as `kaos_lib`, installed in
