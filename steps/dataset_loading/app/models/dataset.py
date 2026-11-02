@@ -19,7 +19,7 @@ class YoloDatasetParams(BaseModel):
     lakefs_ref: Optional[str] = Field(
         default=None,
         description="The COMMIT of that repository this run reads: the caller resolved the run's "
-        "<dataset-repo>@<version> choice with kubecore.datasets.resolve, so every step of the "
+        "<dataset-repo>@<version> choice with kaos_lib.datasets.resolve, so every step of the "
         "run reads the same snapshot.",
     )
     path_override: Optional[str] = Field(

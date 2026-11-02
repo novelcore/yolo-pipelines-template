@@ -29,8 +29,8 @@ import logging
 import os
 from urllib.parse import urlparse
 
-from kubecore import datasets
-from kubecore.errors import KubecoreError
+from kaos_lib import datasets
+from kaos_lib.errors import KaosLibError
 
 # Same canonical S3 layout the dataset-loading service uses when no explicit
 # path is given — kept in sync so the check probes exactly where the loader
@@ -63,7 +63,7 @@ class ConfigValidationService:
         # Pure format check: runs even when no object store is reachable.
         try:
             dataset = datasets.DatasetRef.parse(resolved.get("dataset"))
-        except KubecoreError as exc:
+        except KaosLibError as exc:
             raise ConfigValidationError(str(exc)) from exc
 
         self._check_mlflow()
@@ -126,7 +126,7 @@ class ConfigValidationService:
         )
 
     def _check_dataset(self, dataset, client=None) -> None:
-        """The picked ``<dataset-repo>@<version>`` exists and holds data.yaml (kubecore package).
+        """The picked ``<dataset-repo>@<version>`` exists and holds data.yaml (kaos-lib).
 
         ``datasets.resolve`` says what is wrong: no such dataset, or no such version and
         which versions exist.
@@ -135,7 +135,7 @@ class ConfigValidationService:
             commit = datasets.resolve(dataset, client)
             c = client or self._lakefs()
             has_yaml = any(True for _ in c.list_objects(dataset.repo, commit, "data.yaml"))
-        except KubecoreError as exc:
+        except KaosLibError as exc:
             raise ConfigValidationError(f"dataset {dataset}: {exc}") from exc
         if not has_yaml:
             raise ConfigValidationError(
@@ -145,7 +145,7 @@ class ConfigValidationService:
 
     @staticmethod
     def _lakefs():
-        from kubecore.lakefs import LakeFS
+        from kaos_lib.lakefs import LakeFS
         return LakeFS.connect()
 
     def _dataset_uri(self, data: dict, dataset) -> str:

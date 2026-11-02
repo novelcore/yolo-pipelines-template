@@ -17,11 +17,11 @@ This is the safety net working. It stopped before spending any training time. Fi
 
 Check the `dataset` you typed on the form. It must look like `dataset-default@latest`: the name of a dataset repository (it starts with `dataset-`), an `@`, and a version (`v1`, `v2`, ... or `latest`). A typo here means the pipeline looks in the wrong place and finds nothing. The error message lists the dataset repositories that do exist.
 
-Also open lakeFS and confirm your dataset repository is really there, with `data.yaml`, `images`, and `labels` at its root, that its pull request was merged, and that the version exists (`kubecore dataset versions <repo>`). See [First dataset to results](first-run.md).
+Also open lakeFS and confirm your dataset repository is really there, with `data.yaml`, `images`, and `labels` at its root, that its pull request was merged, and that the version exists (`kaos-cli dataset versions <repo>`). See [First dataset to results](first-run.md).
 
 ## The upload cannot sign in
 
-The tool opens your browser to sign in and waits about three minutes. If the browser did not open, copy the link the tool printed into your browser yourself. If signing in keeps failing, run `kubecore login` again. It remembers that you signed in.
+The tool opens your browser to sign in and waits about three minutes. If the browser did not open, copy the link the tool printed into your browser yourself. If signing in keeps failing, run `kaos-cli login` again. It remembers that you signed in.
 
 ## The upload says `externally-managed-environment`
 

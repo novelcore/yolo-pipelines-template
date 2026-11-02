@@ -32,12 +32,11 @@ RUN /opt/poetry/bin/poetry export --only=main -f requirements.txt --output /tmp/
  && rm -rf /opt/poetry /tmp/requirements.txt \
  && python -c "from charset_normalizer import md; import requests"
 
-# The kubecore PACKAGE (datasets, run outputs), pinned to a commit of hera-pipeline-template.
-# It shares the import name `kubecore` with the vendored engine at the repo root, which is
-# NOT in this image: only app/ is copied. Bump the commit to take a newer package.
-ARG KUBECORE_PKG_COMMIT=0136a205a82fbe4ed4a82037329e048f58e7e740
-RUN pip install --no-cache-dir \
-    "https://github.com/novelcore/hera-pipeline-template/archive/${KUBECORE_PKG_COMMIT}.zip#subdirectory=packages/kubecore"
+# kaos-lib, the platform library (datasets, run outputs; formerly kaos-lib), from
+# github.com/kaos-io/kaos-lib. The platform's CI may pass KAOS_LIB_PACKAGE (a pip spec suffix:
+# "@ <url>" or "==X.Y.Z"); the default is this template's pin. Only app/ is copied into the image.
+ARG KAOS_LIB_PACKAGE="@ https://github.com/kaos-io/kaos-lib/archive/dc24f292029bb2a49a2cdf5c24eb169d7706d9a5.zip"
+RUN pip install --no-cache-dir "kaos-lib[zitadel] ${KAOS_LIB_PACKAGE}"
 
 COPY app/ ./app/
 

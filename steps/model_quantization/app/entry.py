@@ -82,7 +82,7 @@ def main() -> None:
     qat_run_id = qr.get("mlflow_run_id") if mode == "qat" else None
 
     # The calibration/parity dataset: the commit training pinned, read through the
-    # kubecore consumer (one download, or the copy staged on MeluXina). Its ref/commit
+    # kaos-lib consumer (one download, or the copy staged on MeluXina). Its ref/commit
     # go into the artifacts' lakeFS commit metadata.
     _ref = str(tr.get("dataset_ref") or "")
     os.environ["KUBECORE_DATASET_REF"] = _ref

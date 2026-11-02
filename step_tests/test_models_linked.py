@@ -99,7 +99,7 @@ def _merged_commit(fake):
 # ---------------------------------------------------------------- training -> MLflow run
 
 def _training_service(mod, tmp_path, client, monkeypatch):
-    from kubecore import outputs
+    from kaos_lib import outputs
     monkeypatch.setenv("KUBECORE_RUN_ID", "wf-abc12")
     svc = mod.TrainingService.__new__(mod.TrainingService)
     svc._logger = mod.logging.getLogger("test")

@@ -72,7 +72,7 @@ def main() -> None:
     tr = json.loads(args.training_result) if args.training_result.strip() not in ("", "{}") else {}
 
     # The calibration/parity dataset: the commit training pinned, read through the
-    # kubecore consumer (one download, or the copy staged on MeluXina). Its ref/commit
+    # kaos-lib consumer (one download, or the copy staged on MeluXina). Its ref/commit
     # go into the artifacts' lakeFS commit metadata.
     _ref = str(tr.get("dataset_ref") or "")
     os.environ["KUBECORE_DATASET_REF"] = _ref

@@ -60,7 +60,7 @@ def _staged() -> bool:
     """True on MeluXina: the platform staged the pinned dataset commit onto the node
     (bind-mounted read-only, announced as KUBECORE_STAGED_DIR, PRD-1016 F-04 / PRD-1541).
     There is no S3 gateway off-cluster, so the dataset is read as local files through the
-    kubecore consumer; in-cluster the trainer streams from the lakeFS S3 gateway."""
+    kaos-lib consumer; in-cluster the trainer streams from the lakeFS S3 gateway."""
     return bool(os.environ.get("KUBECORE_STAGED_DIR"))
 
 
@@ -162,7 +162,7 @@ def main() -> None:
     # dataset_dir has none — kpt_shape [11,3], names {0: spacecraft}.)
     os.makedirs(RUNS_DIR, exist_ok=True)
     if _staged():
-        # Local mode: the pinned commit is on the node. The kubecore consumer finds the
+        # Local mode: the pinned commit is on the node. The kaos-lib consumer finds the
         # staged copy (it checks the commit), nothing is downloaded, and returns a data.yaml
         # whose path: points at it.
         data_yaml = lakefs_io.materialize(ds_ref, commit, DATASET_DIR)

@@ -1,7 +1,7 @@
-"""Vendored from hera-pipeline-template packages/kubecore/tests/fake_lakefs.py (the package's in-memory
-lakeFS: a requests transport adapter, so the real client code runs unchanged).
+"""Vendored from kaos-io/kaos-lib tests/fake_lakefs.py at dc24f292029bb2a49a2cdf5c24eb169d7706d9a5 (kaos-lib's in-memory lakeFS: a
+requests transport adapter, so the real client code runs unchanged). Test only, never in a step image.
 
-Keep in step with the package commit the step images install."""
+Re-vendor it when the template's kaos-lib pin (KAOS_LIB_PACKAGE in steps/*/Dockerfile) moves."""
 from __future__ import annotations
 
 import hashlib
@@ -15,8 +15,8 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import requests
 from requests.adapters import BaseAdapter
 
-from kubecore import credentials, lakefs
-from kubecore.lakefs import LakeFS
+from kaos_lib import credentials, lakefs
+from kaos_lib.lakefs import LakeFS
 
 BRANCH_ID = re.compile(r"^\w[-\w]*$")  # lakeFS's branch id rule
 

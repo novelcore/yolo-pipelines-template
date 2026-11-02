@@ -1,8 +1,8 @@
 # How the steps use datasets and write results
 
 This page is for someone reading or changing the steps. Each step is a folder under `steps/`
-that installs the `kubecore` package (from a pinned commit, see `KUBECORE_PKG_COMMIT` in its
-Dockerfile) and copies only its own `app/`.
+that installs kaos-lib (`kaos_lib`, at the pin in `KAOS_LIB_PACKAGE` in its Dockerfile) and copies
+only its own `app/`.
 
 ## Reading the dataset
 
