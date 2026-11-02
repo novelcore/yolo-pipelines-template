@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Adapts internals of the AGPL-3.0 training library this step depends on; see README.md "License".
 """PoseValidator subclass that builds S3YoloDataset instances.
 
 Mirrors :mod:`app.services.s3_pose_trainer` for the validation path.  When

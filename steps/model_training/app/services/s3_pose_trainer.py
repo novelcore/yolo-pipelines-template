@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Adapts internals of the AGPL-3.0 training library this step depends on; see README.md "License".
 """PoseTrainer subclass that builds S3YoloDataset instances.
 
 Ultralytics' ``model.train(trainer=...)`` accepts a custom trainer class.  We
