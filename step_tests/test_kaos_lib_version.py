@@ -17,7 +17,8 @@ from test_models_linked import LINKED, FakeMlflow, _install, _merged_commit, _re
 PACKAGE_STEPS = ["config_validation", "dataset_loading", "model_quantization", "model_registration",
                  "model_training", "qat_finetune"]
 NO_PACKAGE = ["compose_and_validate", "data_summary"]  # the vendored engine / PyYAML only
-SPEC_RE = re.compile(r'^ARG KAOS_LIB_PACKAGE="(==\S+|@ https://\S+)"$', re.M)
+# The ARG holds the whole requirement: name[extras] then ==X.Y.Z or " @ <url>".
+SPEC_RE = re.compile(r'^ARG KAOS_LIB_PACKAGE="([A-Za-z0-9._-]+(?:\[[A-Za-z0-9,._-]+\])?(?: ?==\S+| @ https://\S+))"$', re.M)
 INSTALLED = version("kubecore")  # still named kubecore until kaos-lib's first release
 
 
@@ -25,7 +26,8 @@ INSTALLED = version("kubecore")  # still named kubecore until kaos-lib's first r
 def test_every_package_step_takes_the_platform_spec(step):
     text = (ROOT / "steps" / step / "Dockerfile").read_text()
     assert SPEC_RE.search(text), "ARG KAOS_LIB_PACKAGE with a ==X.Y.Z or @ <url> default"
-    assert 'RUN pip install --no-cache-dir "kubecore ${KAOS_LIB_PACKAGE}"' in text
+    assert 'RUN pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"' in text
+    assert SPEC_RE.search(text).group(1).startswith("kubecore @ "), "the default names the package and its extras"
     assert "KUBECORE_PKG_COMMIT" not in text
 
 

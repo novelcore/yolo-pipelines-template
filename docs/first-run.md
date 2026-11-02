@@ -15,12 +15,12 @@ for this project (a "virtual environment"), in your app folder.
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
-pip install "kubecore <version>"
+pip install "<requirement>"
 kubecore login
 ```
 
-`<version>` is the value of `KAOS_LIB_PACKAGE` in `steps/model_training/Dockerfile`, for
-example `@ https://github.com/novelcore/hera-pipeline-template/archive/<commit>.zip#subdirectory=packages/kubecore`
+`<requirement>` is the value of `KAOS_LIB_PACKAGE` in `steps/model_training/Dockerfile`, for
+example `kubecore @ https://github.com/novelcore/hera-pipeline-template/archive/<commit>.zip#subdirectory=packages/kubecore`
 ([Package versions and upgrades](kaos-lib-versions.md); your platform contact can also give it to you). On Windows, the second line is `.venv\Scripts\activate`.
 Your browser opens once and asks you to sign in. Log in, close the tab, and go back to the
 Terminal. The tool remembers you.
