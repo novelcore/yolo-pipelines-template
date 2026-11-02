@@ -24,6 +24,13 @@ RUN /opt/poetry/bin/poetry export --only=main -f requirements.txt --output /tmp/
  && rm -rf /opt/poetry /tmp/requirements.txt \
  && python -c "from charset_normalizer import md; import requests"
 
+# The kubecore PACKAGE (its lakeFS client tags the registered model's commit in outputs-<app>),
+# pinned to a commit of hera-pipeline-template, the same commit as the other steps.
+# Bump the commit to take a newer package.
+ARG KUBECORE_PKG_COMMIT=819920b6d73e0fe48db1cbd5643636cb07b57209
+RUN pip install --no-cache-dir \
+    "https://github.com/novelcore/hera-pipeline-template/archive/${KUBECORE_PKG_COMMIT}.zip#subdirectory=packages/kubecore"
+
 COPY app/ ./app/
 
 # Argo runs: python -m app.entry --params <params> --training-result <json> ...

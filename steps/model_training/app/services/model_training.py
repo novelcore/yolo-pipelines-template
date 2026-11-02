@@ -343,7 +343,7 @@ class TrainingService:
                     save_dir=save_dir,
                     data_yaml_path=str(data_yaml_path),
                 )
-            self._commit_outputs(params)
+            outputs_commit = self._commit_outputs(params)
 
             # 9. Post-training evaluation on the test split (reporting only)
             self._evaluate_on_test_set(
@@ -359,6 +359,7 @@ class TrainingService:
 
         # Tag the completed MLflow run with Kubeline platform metadata
         self._tag_kubecore_metadata(mlflow_run_id)
+        self._tag_outputs(mlflow_run_id, outputs_commit)
 
         final_map50 = float(epoch_metrics.get("val/mAP50", 0.0))
         final_map50_95 = float(epoch_metrics.get("val/mAP50_95", 0.0))
@@ -619,6 +620,32 @@ class TrainingService:
                 _logger.info("Tagged MLflow run with %d kubecore tags", len(kubecore_tags))
         except Exception:  # noqa: BLE001
             _logger.warning("Failed to tag MLflow run with kubecore metadata")
+
+    def _tag_outputs(self, run_id: str, commit: str) -> None:
+        """Link the MLflow run to its results in lakeFS (kaos#1283): the ``outputs-<app>``
+        repository, the merge commit on main, the run's path and the workflow.
+
+        model-registration reads ``kaos.outputs_commit`` back to tag that commit in lakeFS.
+        """
+        if not run_id:
+            return
+        w = self._run_writer
+        tags = {
+            "kaos.outputs_repo": w.repo,
+            "kaos.outputs_commit": commit,
+            "kaos.outputs_path": w.prefix,
+            "kaos.workflow": os.environ.get("KUBECORE_WORKFLOW_NAME") or w.run,
+        }
+        try:
+            from mlflow.tracking import MlflowClient  # noqa: PLC0415
+
+            client = MlflowClient()
+            for key, value in tags.items():
+                client.set_tag(run_id, key, value)
+            _logger.info("Tagged MLflow run %s with its outputs: %s@%s", run_id, w.repo, commit)
+        except Exception:  # noqa: BLE001
+            _logger.warning("Failed to tag MLflow run %s with its outputs; model-registration "
+                            "will register without a lakeFS tag", run_id)
 
     # ------------------------------------------------------------------
     # Post-training export / quantization
@@ -1301,9 +1328,10 @@ class TrainingService:
 
         return best_uri
 
-    def _commit_outputs(self, params: TrainingParams) -> None:
+    def _commit_outputs(self, params: TrainingParams) -> str:
         """Merge the run branch into ``main`` of ``outputs-<app>``: ONE commit per step per run,
         carrying the dataset ref/commit and the MLflow run id; the branch is deleted.
+        Returns the merge commit on main.
 
         A failure is fatal: results that never reached main must not look like success.
         """
@@ -1318,6 +1346,7 @@ class TrainingService:
             raise TrainingError(
                 f"merging results into {params.checkpoint_bucket} failed: {exc}") from exc
         self._logger.info("Results merged into %s main: %s", params.checkpoint_bucket, commit)
+        return commit
 
     def _open_run_writer(self, params: TrainingParams, tmp_path: Path) -> Optional[Path]:
         """Open the run's writer on ``outputs-<app>`` and return the last checkpoint it already holds.

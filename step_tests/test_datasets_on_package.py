@@ -365,7 +365,8 @@ def test_training_provenance_logs_dataset_repo_version_and_commit():
 
 def test_step_images_install_the_package_and_not_the_vendored_engine():
     shas = set()
-    for step in ("dataset_loading", "config_validation", "model_training", "qat_finetune", "model_quantization"):
+    for step in ("dataset_loading", "config_validation", "model_training", "qat_finetune", "model_quantization",
+                 "model_registration"):
         text = (ROOT / "steps" / step / "Dockerfile").read_text()
         assert "subdirectory=packages/kubecore" in text, step
         assert "COPY kubecore" not in text, step

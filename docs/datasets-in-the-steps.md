@@ -32,6 +32,12 @@ Training, QAT and quantization write through the package's run writer (`lakefs_i
 3. `finish` merges the branch into `main`: **one commit**, `checkpoints: <experiment>/<run>`, with
    `dataset_ref`, `dataset_commit` and `mlflow_run_id` in its details, and deletes the branch.
 4. QAT and quantization do the same with `kind="quantization"` for the INT8 `.tflite`.
+5. Training then tags its MLflow run with `kaos.outputs_repo`, `kaos.outputs_commit` (the merge
+   commit), `kaos.outputs_path` and `kaos.workflow`. `model-registration` reads them back, creates
+   the lakeFS tag `model-<slug(name)>-v<N>` on that commit for the `best.pt` version it registers
+   (an existing tag on the same commit is fine; on another commit the step fails), and sets
+   `kaos.outputs_repo`, `kaos.outputs_commit`, `kaos.lakefs_tag` and `kaos.workflow` on the
+   model version.
 
 If a step raises, the branch stays, nothing reaches `main`, and the retry continues from the branch.
 `training-result` carries `best_checkpoint_s3` (`s3://outputs-<app>/main/checkpoints/<experiment>/<run>/best.pt`),

@@ -110,6 +110,16 @@ saved checkpoint instead of starting over. The merge commit records the app, exp
 the dataset (`dataset_ref`, `dataset_commit`) and the MLflow run id. Metrics, plots and the
 registered model are in MLflow ([docs/results.md](docs/results.md)).
 
+**The model is linked both ways.** The model is the `outputs-<app>` repository at the training
+merge commit. Training sets these tags on its MLflow run (named after the workflow):
+`kaos.outputs_repo` (`outputs-<app>`), `kaos.outputs_commit` (the merge commit on `main`),
+`kaos.outputs_path` (`checkpoints/<experiment>/<run>/`) and `kaos.workflow`. When
+`model-registration` registers version N of `best.pt` as `<name>`, it tags that commit in lakeFS
+as **`model-<name>-v<N>`** (characters other than `A-Za-z0-9_-` become `-`) and sets
+`kaos.outputs_repo`, `kaos.outputs_commit`, `kaos.lakefs_tag` and `kaos.workflow` on the model
+version. `last.pt` is registered too, without a tag. A run with no `kaos.outputs_commit` (older
+runs) is registered without a lakeFS tag.
+
 ## The `kubecore` package
 
 The steps use the `kubecore` Python package (`packages/kubecore` of

@@ -14,7 +14,7 @@ This page has no tasks. It is a short read so the run form makes sense later. Ea
 
 **5. Make a smaller model.** Also optional. It runs if you choose `ptq` or `qat`. It produces a smaller, faster INT8 version of the model, then checks that it still behaves like the full one. If the two drift too far apart, it fails on purpose, so you never ship a bad small model by accident.
 
-**6. Save and register the model.** The final step. It saves the trained model and registers it so it has a name and a version. If you asked for it, it can also promote the model to Staging or Production.
+**6. Save and register the model.** The final step. It saves the trained model and registers it so it has a name and a version. If you asked for it, it can also promote the model as `champion` or `challenger`.
 
 ## The short version
 
