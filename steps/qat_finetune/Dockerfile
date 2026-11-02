@@ -42,7 +42,7 @@ RUN pip install --no-cache-dir -r requirements-qat.txt
 # The kubecore PACKAGE (datasets, run outputs), pinned to a commit of hera-pipeline-template.
 # It shares the import name `kubecore` with the vendored engine at the repo root, which is
 # NOT in this image: only app/ is copied. Bump the commit to take a newer package.
-ARG KUBECORE_PKG_COMMIT=819920b6d73e0fe48db1cbd5643636cb07b57209
+ARG KUBECORE_PKG_COMMIT=0136a205a82fbe4ed4a82037329e048f58e7e740
 RUN pip install --no-cache-dir \
     "https://github.com/novelcore/hera-pipeline-template/archive/${KUBECORE_PKG_COMMIT}.zip#subdirectory=packages/kubecore"
 
