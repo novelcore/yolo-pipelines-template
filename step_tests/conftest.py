@@ -5,6 +5,7 @@ Every step names its package `app`, so a step is imported with `step_app(<dir>)`
 """
 import contextlib
 import importlib
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -15,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # fake_lakefs.py
 
 import kubecore  # noqa: E402
 
-if not (Path(kubecore.__path__[0]) / "datasets.py").is_file():
+if importlib.util.find_spec("kubecore.datasets") is None:   # the package (or kaos-lib's kubecore shim) has it
     raise pytest.UsageError(
         "`kubecore` resolved to the vendored engine, not the package. Run `pytest step_tests` "
         "(not `python -m pytest`) with the package installed (see step_tests/README.md).")

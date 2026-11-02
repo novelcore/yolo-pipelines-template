@@ -38,22 +38,20 @@ def _output_bucket(platform: dict) -> str:
 
 
 def _setup_mlflow_auth() -> bool:
-    """Mint a Zitadel bearer token for MLflow directly — no entry-point plugin, no
-    root install. #868 mounts the machine key at ZITADEL_MACHINE_KEY_FILE; we reuse the
-    vendored token source and set MLFLOW_TRACKING_TOKEN, bypassing the request_auth
-    plugin (which would need a build-breaking root install). Returns True on success."""
-    key = os.environ.get("ZITADEL_MACHINE_KEY_FILE")
-    if not key or not os.path.exists(key):
-        return False
+    """MLflow auth through kaos-lib (kaos-lib[mlflow]). ``mlflow()`` sets the tracking URI and
+    MLFLOW_TRACKING_AUTH=zitadel; that request-auth provider ships with kaos-lib and takes the
+    bearer from one chain: the platform's MLFLOW_TRACKING_TOKEN (MeluXina), else a token minted
+    from the machine key at ZITADEL_MACHINE_KEY_FILE with the org project's audience and minted
+    again before it expires. Returns True when MLflow is usable; otherwise MLflow is disabled
+    (non-fatal)."""
     try:
-        from app.mlflow_zitadel_auth import _ZitadelTokenSource
-        os.environ["MLFLOW_TRACKING_TOKEN"] = _ZitadelTokenSource().token()
-        os.environ.pop("MLFLOW_TRACKING_AUTH", None)  # use bearer token, not the plugin
-        print("[mlflow] Zitadel bearer token minted -> MLflow ENABLED.", flush=True)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        print(f"[mlflow] token mint failed: {exc} -> MLflow disabled (non-fatal).", flush=True)
+        from kaos_lib.mlflow import mlflow
+        mlflow()
+    except Exception as exc:  # noqa: BLE001 - MLflow is optional for this step
+        print(f"[mlflow] {exc} -> MLflow disabled (non-fatal).", flush=True)
         return False
+    print("[mlflow] kaos-lib auth (MLFLOW_TRACKING_AUTH=zitadel) -> MLflow ENABLED.", flush=True)
+    return True
 
 
 def main() -> None:
