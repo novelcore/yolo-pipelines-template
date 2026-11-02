@@ -113,12 +113,26 @@ registered model are in MLflow ([docs/results.md](docs/results.md)).
 **The model is linked both ways.** The model is the `outputs-<app>` repository at the training
 merge commit. Training sets these tags on its MLflow run (named after the workflow):
 `kaos.outputs_repo` (`outputs-<app>`), `kaos.outputs_commit` (the merge commit on `main`),
-`kaos.outputs_path` (`checkpoints/<experiment>/<run>/`) and `kaos.workflow`. When
-`model-registration` registers version N of `best.pt` as `<name>`, it tags that commit in lakeFS
-as **`model-<name>-v<N>`** (characters other than `A-Za-z0-9_-` become `-`) and sets
-`kaos.outputs_repo`, `kaos.outputs_commit`, `kaos.lakefs_tag` and `kaos.workflow` on the model
-version. `last.pt` is registered too, without a tag. A run with no `kaos.outputs_commit` (older
-runs) is registered without a lakeFS tag.
+`kaos.outputs_path` (`checkpoints/<experiment>/<run>/`) and `kaos.workflow`.
+
+Training also logs `best.pt` as an MLflow 3 **logged model** `<experiment>-best` (the
+experiment's **Models** tab) with `mlflow.create_external_model`: the weights stay in lakeFS,
+MLflow holds only a metadata `MLmodel`. Its source run is the training run; its params are
+`epochs`, `imgsz` and `model_variant`; its tags are the four `kaos.*` above plus
+`kaos.dataset_ref`; the final val metrics (`val/*`, from Ultralytics' last validation of
+`best.pt`) are logged against it. The run gets `kaos.logged_model_id`. A retried step reuses the
+run's logged model instead of making a second one, and a failure only warns: the results are
+already in lakeFS and registration falls back to the lakeFS path.
+
+When `model-registration` registers version N of `best.pt` as `<name>`, it registers it **from
+the logged model** (`models:/<model_id>`), so the version links to the training run and to the
+logged model; it tags the commit in lakeFS as **`model-<name>-v<N>`** (characters other than
+`A-Za-z0-9_-` become `-`) and sets `kaos.outputs_repo`, `kaos.outputs_commit`, `kaos.lakefs_tag`
+and `kaos.workflow` on the model version. A run with no `kaos.logged_model_id` (older runs, or
+training could not log it) is registered from the `s3://` lakeFS path of `best.pt`, with a
+warning. `last.pt` is registered from its lakeFS path, without a tag. A run with no
+`kaos.outputs_commit` (older runs) is registered without a lakeFS tag. The INT8 models of
+`model-quantization` and `qat-finetune` are not logged models.
 
 ## The `kubecore` package
 
