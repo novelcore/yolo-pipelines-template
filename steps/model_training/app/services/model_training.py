@@ -44,6 +44,17 @@ def checkpoint_base(params: "TrainingParams") -> str:
     run = os.environ.get("KUBECORE_RUN_ID", "").strip()
     return f"{base}/{run}" if run else base
 
+
+def logged_model_name(experiment: str) -> str:
+    """``<experiment>-best``: the name of a run's best.pt in the experiment's Models tab."""
+    return f"{experiment}-best"
+
+
+def _dataset_ref(params: "TrainingParams") -> str:
+    """``<dataset repo>@<version>`` the run trained on ("" when it names no dataset repo)."""
+    return f"{params.dataset_repo}@{params.dataset_version}" if params.dataset_repo else ""
+
+
 _logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -367,6 +378,8 @@ class TrainingService:
         raw_epoch = getattr(trainer, "epoch", None)
         epochs_completed: int = raw_epoch + 1 if raw_epoch is not None else params.epochs
 
+        self._log_model(mlflow_run_id, outputs_commit, params, epoch_metrics, epochs_completed)
+
         return TrainingResult(
             experiment_name=params.experiment_name,
             model_variant=params.model_variant,
@@ -630,12 +643,7 @@ class TrainingService:
         if not run_id:
             return
         w = self._run_writer
-        tags = {
-            "kaos.outputs_repo": w.repo,
-            "kaos.outputs_commit": commit,
-            "kaos.outputs_path": w.prefix,
-            "kaos.workflow": os.environ.get("KUBECORE_WORKFLOW_NAME") or w.run,
-        }
+        tags = self._outputs_tags(commit)
         try:
             from mlflow.tracking import MlflowClient  # noqa: PLC0415
 
@@ -646,6 +654,70 @@ class TrainingService:
         except Exception:  # noqa: BLE001
             _logger.warning("Failed to tag MLflow run %s with its outputs; model-registration "
                             "will register without a lakeFS tag", run_id)
+
+    def _outputs_tags(self, commit: str) -> dict[str, str]:
+        """``kaos.*`` tags naming where a run's results are in lakeFS."""
+        w = self._run_writer
+        return {
+            "kaos.outputs_repo": w.repo,
+            "kaos.outputs_commit": commit,
+            "kaos.outputs_path": w.prefix,
+            "kaos.workflow": os.environ.get("KUBECORE_WORKFLOW_NAME") or w.run,
+        }
+
+    def _log_model(self, run_id: str, commit: str, params: TrainingParams,
+                   epoch_metrics: dict[str, float], last_epoch: int) -> None:
+        """Show best.pt in the experiment's Models tab: an MLflow 3 logged model
+        ``<experiment>-best`` whose weights stay in lakeFS (``mlflow.create_external_model``),
+        with the training run as its source, the training settings as params, the ``kaos.*``
+        lakeFS tags and the final val metrics (Ultralytics validates best.pt last). The run gets
+        ``kaos.logged_model_id`` so model-registration registers the version from this model.
+
+        A retried step reuses the model this run already has instead of creating a second one.
+        A failure only warns: the results are already in lakeFS and on the run, and
+        model-registration then registers best.pt from its lakeFS path as before.
+        """
+        if not run_id:
+            return
+        name = logged_model_name(params.experiment_name)
+        tags = self._outputs_tags(commit)
+        dataset_ref = _dataset_ref(params)
+        if dataset_ref:
+            tags["kaos.dataset_ref"] = dataset_ref
+        try:
+            import mlflow  # noqa: PLC0415
+            from mlflow.tracking import MlflowClient  # noqa: PLC0415
+
+            client = MlflowClient()
+            experiment_id = client.get_run(run_id).info.experiment_id
+            existing = client.search_logged_models(
+                experiment_ids=[experiment_id],
+                filter_string=f"source_run_id = '{run_id}' AND name = '{name}'",
+                max_results=1,
+            )
+            if existing:
+                model_id = existing[0].model_id
+                client.set_logged_model_tags(model_id, tags)
+                _logger.info("Run %s already has logged model %s (%s)", run_id, name, model_id)
+            else:
+                model_id = mlflow.create_external_model(
+                    name=name,
+                    source_run_id=run_id,
+                    experiment_id=experiment_id,
+                    params={"epochs": str(params.epochs), "imgsz": str(params.image_size),
+                            "model_variant": params.model_variant},
+                    tags=tags,
+                ).model_id
+                _logger.info("Logged model %s (%s) for run %s", name, model_id, run_id)
+            # step = the last epoch, where the run already has these values: the run's charts
+            # get no stray point.
+            for key, value in epoch_metrics.items():
+                if key.startswith("val/"):
+                    client.log_metric(run_id, key, value, step=last_epoch, model_id=model_id)
+            client.set_tag(run_id, "kaos.logged_model_id", model_id)
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("Failed to log model %s for run %s (%s); model-registration will "
+                            "register best.pt from its lakeFS path", name, run_id, exc)
 
     # ------------------------------------------------------------------
     # Post-training export / quantization
@@ -1337,8 +1409,7 @@ class TrainingService:
         """
         try:
             commit = self._run_writer.finish({
-                "dataset_ref": (f"{params.dataset_repo}@{params.dataset_version}"
-                                if params.dataset_repo else ""),
+                "dataset_ref": _dataset_ref(params),
                 "dataset_commit": params.lakefs_commit or "",
                 "mlflow_run_id": self._get_mlflow_run_id() or "",
             })

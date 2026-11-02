@@ -42,7 +42,9 @@ class ModelRegistrationService:
         """Execute the full registration pipeline.
 
         1. Connect to MLflow.
-        2. Register best.pt under params.registered_model_name.
+        2. Register best.pt under params.registered_model_name: from the training run's logged
+           model when it has one (the version links to the run and the logged model), else
+           from best.pt's lakeFS path.
         3. Set lineage tags on the best.pt version.
         3b. Tag the training run's outputs commit in lakeFS and record the tag on the version.
         4. Optionally register last.pt and tag it.
@@ -61,7 +63,7 @@ class ModelRegistrationService:
         )
         best_version = self._register_checkpoint(
             client=client,
-            model_uri=params.best_checkpoint_path,
+            model_uri=self._best_model_uri(client, params),
             registered_model_name=params.registered_model_name,
         )
         self._logger.info("Registered best.pt as version %s", best_version)
@@ -135,6 +137,23 @@ class ModelRegistrationService:
             params.best_checkpoint_path,
         )
         return None
+
+    def _best_model_uri(self, client: MlflowClient, params: RegistrationParams) -> str:
+        """``models:/<id>`` of the logged model training made for best.pt (the run's
+        ``kaos.logged_model_id``); best.pt's lakeFS path for a run without one (older runs, or
+        training could not log it)."""
+        run = self._with_retry(lambda: client.get_run(params.mlflow_run_id))
+        model_id = run.data.tags.get("kaos.logged_model_id")
+        if model_id:
+            self._logger.info("Registering best.pt from logged model %s", model_id)
+            return f"models:/{model_id}"
+        self._logger.warning(
+            "Training run %s has no kaos.logged_model_id (a run from before logged models, or "
+            "training could not log it): registering best.pt from %s, not linked to the run",
+            params.mlflow_run_id,
+            params.best_checkpoint_path,
+        )
+        return params.best_checkpoint_path
 
     def _register_checkpoint(
         self,
