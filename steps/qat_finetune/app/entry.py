@@ -16,6 +16,8 @@ once MLflow auth lands.
 import argparse
 import json
 import os
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 import yaml
@@ -28,6 +30,15 @@ OUTPUT_DIR = Path("/work/output")
 DATASET_DIR = "/work/dataset"
 RUNS_DIR = "/work/runs"
 
+
+def kaos_lib_version() -> str:
+    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
+    for dist in ("kaos-lib", "kubecore"):
+        try:
+            return package_version(dist)
+        except PackageNotFoundError:
+            pass
+    return "unknown"
 
 
 def _output_bucket(platform: dict) -> str:
@@ -57,6 +68,7 @@ def _setup_mlflow_auth() -> bool:
 
 
 def main() -> None:
+    print(f"kaos-lib {kaos_lib_version()}", flush=True)  # the package this image runs
     parser = argparse.ArgumentParser()
     parser.add_argument("--params", required=True)
     parser.add_argument("--training-result", default="")

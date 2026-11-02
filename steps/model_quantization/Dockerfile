@@ -32,13 +32,6 @@ RUN /opt/poetry/bin/poetry export --only=main -f requirements.txt --output /tmp/
  && rm -rf /opt/poetry /tmp/requirements.txt \
  && python -c "from charset_normalizer import md; import requests"
 
-# The kubecore PACKAGE (datasets, run outputs), pinned to a commit of hera-pipeline-template.
-# It shares the import name `kubecore` with the vendored engine at the repo root, which is
-# NOT in this image: only app/ is copied. Bump the commit to take a newer package.
-ARG KUBECORE_PKG_COMMIT=0136a205a82fbe4ed4a82037329e048f58e7e740
-RUN pip install --no-cache-dir \
-    "https://github.com/novelcore/hera-pipeline-template/archive/${KUBECORE_PKG_COMMIT}.zip#subdirectory=packages/kubecore"
-
 COPY app/ ./app/
 
 # Ultralytics TFLite INT8 export toolchain (PTQ path). Baked at build time so the
@@ -65,5 +58,16 @@ RUN python -c "\
 import tensorflow, tf_keras, onnx, onnx2tf, onnxslim, onnxruntime, sng4onnx, onnx_graphsurgeon; \
 from ultralytics import YOLO; \
 print('tensorflow', tensorflow.__version__, '| export toolchain import OK')"
+
+# kaos-lib, formerly the kubecore package (datasets, run outputs). The PLATFORM picks its
+# version: the CI passes --build-arg KAOS_LIB_PACKAGE=<spec> on every build, inside the
+# range in .kaos/compat.yaml (docs/kaos-lib-versions.md). This default is only for a build
+# on your computer. Until kaos-lib's first release the default is a commit of
+# hera-pipeline-template, whose package is still named `kubecore`, hence the name below.
+# It shares the import name `kubecore` with the vendored engine at the repo root, which is
+# NOT in this image: only app/ is copied. Installed last, so a new version reuses the
+# cached TensorFlow layers above.
+ARG KAOS_LIB_PACKAGE="@ https://github.com/novelcore/hera-pipeline-template/archive/0136a205a82fbe4ed4a82037329e048f58e7e740.zip#subdirectory=packages/kubecore"
+RUN pip install --no-cache-dir "kubecore ${KAOS_LIB_PACKAGE}"
 
 ENTRYPOINT ["python", "-m", "app.entry"]

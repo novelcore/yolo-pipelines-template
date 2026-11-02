@@ -4,6 +4,7 @@ A run picks `<dataset-repo>@<version>`; dataset-loading resolves it to ONE commi
 quantization read that commit (consumer) and write to `outputs-<app>` (write_run).
 """
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -370,8 +371,9 @@ def test_step_images_install_the_package_and_not_the_vendored_engine():
         text = (ROOT / "steps" / step / "Dockerfile").read_text()
         assert "subdirectory=packages/kubecore" in text, step
         assert "COPY kubecore" not in text, step
-        shas.add(next(l.split("=")[1] for l in text.splitlines() if l.startswith("ARG KUBECORE_PKG_COMMIT")))
-    assert len(shas) == 1 and len(next(iter(shas))) == 40, "one pinned package commit, a full sha"
+        spec = next(l for l in text.splitlines() if l.startswith("ARG KAOS_LIB_PACKAGE="))
+        shas.add(re.search(r"/archive/([0-9a-f]+)\.zip#", spec).group(1))
+    assert len(shas) == 1 and len(next(iter(shas))) == 40, "one default package commit, a full sha"
 
 
 def test_should_pin_a_branch_pick_to_its_commit_too(client, fake):

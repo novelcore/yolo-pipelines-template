@@ -13,6 +13,8 @@ endpoint was not injected self-skip.
 """
 
 import argparse
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 
 import yaml
 
@@ -24,7 +26,18 @@ from app.manager import Manager
 READS = ["data", "dataset", "model"]
 
 
+def kaos_lib_version() -> str:
+    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
+    for dist in ("kaos-lib", "kubecore"):
+        try:
+            return package_version(dist)
+        except PackageNotFoundError:
+            pass
+    return "unknown"
+
+
 def main() -> None:
+    print(f"kaos-lib {kaos_lib_version()}", flush=True)  # the package this image runs
     parser = argparse.ArgumentParser()
     parser.add_argument("--params", required=True,
                         help="Resolved params.yaml content (from compose-and-validate).")

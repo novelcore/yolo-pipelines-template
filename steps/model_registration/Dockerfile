@@ -24,12 +24,16 @@ RUN /opt/poetry/bin/poetry export --only=main -f requirements.txt --output /tmp/
  && rm -rf /opt/poetry /tmp/requirements.txt \
  && python -c "from charset_normalizer import md; import requests"
 
-# The kubecore PACKAGE (its lakeFS client tags the registered model's commit in outputs-<app>),
-# pinned to a commit of hera-pipeline-template, the same commit as the other steps.
-# Bump the commit to take a newer package.
-ARG KUBECORE_PKG_COMMIT=0136a205a82fbe4ed4a82037329e048f58e7e740
-RUN pip install --no-cache-dir \
-    "https://github.com/novelcore/hera-pipeline-template/archive/${KUBECORE_PKG_COMMIT}.zip#subdirectory=packages/kubecore"
+# kaos-lib, formerly the kubecore package (its lakeFS client tags the registered model's
+# commit in # outputs-<app>). The PLATFORM picks its version: the CI passes --build-arg
+# KAOS_LIB_PACKAGE=<spec> on every build, inside the range in .kaos/compat.yaml
+# (docs/kaos-lib-versions.md). This default is only for a build on your computer. Until
+# kaos-lib's first release the default is a commit of hera-pipeline-template, whose
+# package is still named `kubecore`, hence the name below. It shares the import name
+# `kubecore` with the vendored engine at the repo root, which is NOT in this image: only
+# app/ is copied.
+ARG KAOS_LIB_PACKAGE="@ https://github.com/novelcore/hera-pipeline-template/archive/0136a205a82fbe4ed4a82037329e048f58e7e740.zip#subdirectory=packages/kubecore"
+RUN pip install --no-cache-dir "kubecore ${KAOS_LIB_PACKAGE}"
 
 COPY app/ ./app/
 
