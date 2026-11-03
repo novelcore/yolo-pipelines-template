@@ -70,13 +70,24 @@ runs: Argo UI / agents (workflowTemplateRef); the submit form IS the config tree
 - **Credential split**: untrusted `pipeline.py` runs tokenless (no GitHub token, a
   locked-down executor SA); only the platform-owned commit step holds the token.
 
+## Datasets and outputs
+
+A dataset is its own lakeFS repository, `dataset-<name>` (default
+`dataset-default`), with `data.yaml`, `images/` and `labels/` at its root. The
+submit parameter `dataset` is `<dataset-repo>@<version>` (`vN` tag or `latest` =
+head of `main`; default `dataset-default@latest`); a trusted platform step may
+fill its `enum` from a catalog. `dataset-loading` pins the commit (CON-04) and
+later steps read it. Outputs go to the app's `outputs-<app>` repository (the app
+name comes from the pipeline-context) on `main`. Datasets are managed outside
+this repo; there is no migration of the earlier branch-per-dataset layout.
+
 ## No Crossplane MR reverts
 
 The WFT is a Crossplane `RepositoryFile` MR with
 `managementPolicies: [Observe, Create, Delete]` + `overwriteOnCreate: false`:
 Crossplane seeds a one-task placeholder **once** and never Updates, so CI's git
 commit of the real WFT is never reverted. ArgoCD `selfHeal` then keeps the live
-WFT equal to what CI committed (direct `kubectl` edits are reverted — everything
+WFT equal to what CI committed (manual changes made on the cluster are reverted — everything
 goes through git, by design).
 
 ## Platform operations

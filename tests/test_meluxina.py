@@ -211,7 +211,7 @@ def test_meluxina_run_carries_wallet_plumbing():
     endpoints, and dataset coordinates — never the key into Slurm env."""
     raw = _raw()
     raw["spec"]["arguments"]["parameters"] = [
-        {"name": "lakefs-repo", "value": "r"}, {"name": "data-ref", "value": "dev"}]
+        {"name": "dataset", "value": "dataset-default@latest"}]
     out = enhance(copy.deepcopy(raw), _ctx())
     mr = next(t for t in out["spec"]["templates"] if t["name"] == "meluxina-run")
     vols = {v["name"]: v for v in mr["volumes"]}
@@ -224,21 +224,23 @@ def test_meluxina_run_carries_wallet_plumbing():
     assert env["ZITADEL_DOMAIN"] == "oidc.internal.invalid"
     assert env["MLFLOW_EXTERNAL_URL"] == "https://mlflow.internal.invalid"
     assert env["LAKEFS_EXTERNAL_URL"] == "https://lakefs.internal.invalid"
-    # dataset coordinates prefer the pipeline's own workflow params
-    assert env["DATASET_REPO"] == "{{workflow.parameters.lakefs-repo}}"
-    assert env["DATASET_REF"] == "{{workflow.parameters.data-ref}}"
+    # the run's dataset pick rides in as-is; the submit code parses it
+    assert env["DATASET"] == "{{workflow.parameters.dataset}}"
+    # outputs go to the app's own outputs repository, on main
+    assert env["OUTPUTS_REPO"] == "outputs-PLACEHOLDER-app" and env["OUTPUTS_REF"] == "main"
+    assert env["CHECKPOINT_BUCKET"] == "outputs-PLACEHOLDER-app"
+    assert env["CHECKPOINT_PREFIX"] == "main/checkpoints"
+    # the run's id and name follow the job to the HPC site (MLflow run named after the workflow, kaos#1283)
+    assert env["KUBECORE_RUN_ID"] == env["KUBECORE_WORKFLOW_NAME"] == "{{workflow.name}}"
 
 
-def test_dataset_coordinates_fall_back_to_context():
-    """enhance() itself injects the lakefs-repo workflow param (earlier
-    pass), so repo always resolves via the param; data-ref comes only from
-    the app's own authoring — absent, ref stays empty (stage-in disabled,
-    not broken)."""
+def test_dataset_coordinates_are_empty_without_a_dataset_param():
+    """No `dataset` workflow param (an app's own authoring dropped it): the
+    coordinates stay empty (stage-in disabled, not broken)."""
     out = enhance(copy.deepcopy(_raw()), _ctx())
     mr = next(t for t in out["spec"]["templates"] if t["name"] == "meluxina-run")
     env = {e["name"]: e.get("value") for e in mr["container"]["env"]}
-    assert env["DATASET_REPO"] == "{{workflow.parameters.lakefs-repo}}"
-    assert env["DATASET_REF"] == ""
+    assert env["DATASET"] == ""
 
 
 def test_submit_code_stagein_and_wallet_invariants():
@@ -567,7 +569,8 @@ def test_wait_survives_pod_loss_and_wallet_expiry():
     is about to expire is resubmitted with a fresh one."""
     out = enhance(_raw(), _ctx())
     run = next(t for t in out["spec"]["templates"] if t["name"] == "meluxina-run")
-    assert run["retryStrategy"] == {"limit": "2", "retryPolicy": "OnError"}
+    # (the retry policy itself is pinned in tests/test_meluxina_retry.py)
+    assert run["retryStrategy"]["limit"] == "2"
     from kubecore.meluxina import MELUXINA_SUBMIT_CODE as code
     ns = {}
     exec(code.split("\nWALLET = None", 1)[0], ns)
@@ -578,3 +581,11 @@ def test_wait_survives_pod_loss_and_wallet_expiry():
     assert ns["wallet_exp"]("garbage") == 0.0
     assert "WALLET_EXP - WALLET_MARGIN_S" in code and "resubmitting with a" in code
     assert "PULL_RESUBMITS = 3" in code and "resubmits < PULL_RESUBMITS" in code
+
+
+def test_submit_forwards_the_run_id_and_workflow_name_to_the_job():
+    """The Slurm job sees the same KUBECORE_RUN_ID / KUBECORE_WORKFLOW_NAME as an in-cluster step,
+    so outputs land under the run's folder and the MLflow run is named after the workflow."""
+    from kubecore.meluxina import MELUXINA_SUBMIT_CODE
+    forwarded = MELUXINA_SUBMIT_CODE.split("('CHECKPOINT_BUCKET'", 1)[1].split(")", 1)[0]
+    assert "'KUBECORE_RUN_ID'" in forwarded and "'KUBECORE_WORKFLOW_NAME'" in forwarded

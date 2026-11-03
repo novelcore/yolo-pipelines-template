@@ -8,15 +8,20 @@ WORKDIR /app
 
 # Step runtime dependencies:
 #   boto3            — S3 / lakeFS (S3-compatible) object access
-#   requests         — lakeFS commit-hash HTTP API (dataset lineage)
 #   pydantic*        — the service's typed config + domain models
 #   PyYAML           — params.yaml + data.yaml parsing
 RUN pip install --no-cache-dir \
     "boto3>=1.34,<2" \
-    "requests>=2.31,<3" \
     "pydantic>=2,<3" \
     "pydantic-settings>=2,<3" \
     "PyYAML>=6,<7"
+
+# (requests, the lakeFS client's dependency, comes with kaos-lib below.)
+# kaos-lib, the platform library (datasets, run outputs; formerly the kubecore package), from
+# github.com/kaos-io/kaos-lib. The platform's CI passes KAOS_LIB_PACKAGE, the WHOLE pip requirement (the
+# platform registry's wheel); the default is this template's pin. Only app/ is copied into the image.
+ARG KAOS_LIB_PACKAGE="kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/0f22d38ec3dbb00fb1b0dfc71e970c76987fb68d.zip"
+RUN pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"
 
 COPY app/ ./app/
 

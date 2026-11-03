@@ -23,15 +23,28 @@ import json
 import logging
 import os
 import re
+import shutil
 import tempfile
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import yaml
 
 from app.models.training import TrainingParams, TrainingResult
-from app.services import lakefs_objects
+from app.services import lakefs_io
 from app.services.resource_monitor import ResourceMonitor
+
+
+def kaos_lib_version() -> str:
+    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
+    for dist in ("kaos-lib", "kubecore"):
+        try:
+            return package_version(dist)
+        except PackageNotFoundError:
+            pass
+    return "unknown"
 
 
 def checkpoint_base(params: "TrainingParams") -> str:
@@ -42,6 +55,17 @@ def checkpoint_base(params: "TrainingParams") -> str:
     base = f"{params.checkpoint_prefix.rstrip('/')}/{params.experiment_name}"
     run = os.environ.get("KUBECORE_RUN_ID", "").strip()
     return f"{base}/{run}" if run else base
+
+
+def logged_model_name(experiment: str) -> str:
+    """``<experiment>-best``: the name of a run's best.pt in the experiment's Models tab."""
+    return f"{experiment}-best"
+
+
+def _dataset_ref(params: "TrainingParams") -> str:
+    """``<dataset repo>@<version>`` the run trained on ("" when it names no dataset repo)."""
+    return f"{params.dataset_repo}@{params.dataset_version}" if params.dataset_repo else ""
+
 
 _logger = logging.getLogger(__name__)
 
@@ -99,6 +123,8 @@ class TrainingService:
         mlflow_tracking_uri: str,
     ) -> None:
         self._s3 = s3_client
+        self._outputs_stage: Optional[Path] = None  # scratch copies for the run writer (set in _run_training)
+        self._run_writer = None  # the open kaos-lib run writer (set in _run_training)
         self._mlflow_tracking_uri = mlflow_tracking_uri
         self._logger = logging.getLogger(__name__)
 
@@ -241,6 +267,13 @@ class TrainingService:
 
         with tempfile.TemporaryDirectory(prefix="io-model-training-") as tmp_dir:
             tmp_path = Path(tmp_dir)
+            # Results are copied here, saved on the run branch as they appear and merged to
+            # main once at the end (see _upload_to_s3 / _commit_outputs).
+            self._outputs_stage = tmp_path / "outputs"
+            self._outputs_stage.mkdir()
+            resume_pt = self._open_run_writer(params, tmp_path)
+            if resume_pt is not None and not params.resume_from:
+                params = params.model_copy(update={"resume_from": str(resume_pt)})
 
             # 1. Resolve model path (download from S3 if needed)
             model_path = self._resolve_model_path(params, tmp_path)
@@ -314,6 +347,8 @@ class TrainingService:
                     params.disk_cache_bytes // (1024 * 1024),
                 )
 
+            # An exception here leaves the run branch (every checkpoint saved so far) in place:
+            # the retried step finds it and resumes (see _open_run_writer).
             trainer = model.train(**train_kwargs)
 
             # 6. Determine save directory
@@ -331,7 +366,7 @@ class TrainingService:
                     save_dir=save_dir,
                     data_yaml_path=str(data_yaml_path),
                 )
-            self._commit_outputs(params)
+            outputs_commit = self._commit_outputs(params)
 
             # 9. Post-training evaluation on the test split (reporting only)
             self._evaluate_on_test_set(
@@ -347,12 +382,15 @@ class TrainingService:
 
         # Tag the completed MLflow run with Kubeline platform metadata
         self._tag_kubecore_metadata(mlflow_run_id)
+        self._tag_outputs(mlflow_run_id, outputs_commit)
 
         final_map50 = float(epoch_metrics.get("val/mAP50", 0.0))
         final_map50_95 = float(epoch_metrics.get("val/mAP50_95", 0.0))
 
         raw_epoch = getattr(trainer, "epoch", None)
         epochs_completed: int = raw_epoch + 1 if raw_epoch is not None else params.epochs
+
+        self._log_model(mlflow_run_id, outputs_commit, params, epoch_metrics, epochs_completed)
 
         return TrainingResult(
             experiment_name=params.experiment_name,
@@ -395,8 +433,8 @@ class TrainingService:
                     return
 
                 param_map = {
+                    "dataset.repo": params.dataset_repo,
                     "dataset.version": params.dataset_version,
-                    "dataset.lakefs_branch": params.lakefs_branch,
                     "dataset.lakefs_commit": params.lakefs_commit,
                     "pipeline.config_hash": params.config_hash,
                 }
@@ -573,7 +611,7 @@ class TrainingService:
             _logger.warning(
                 "mlflow.last_active_run() returned None — "
                 "the downstream model_registration step will not be able to "
-                "link this training run. Check that the Ultralytics MLflow "
+                "link this training run. Check that the trainer's MLflow "
                 "callback is enabled."
             )
         except Exception:  # noqa: BLE001
@@ -585,7 +623,8 @@ class TrainingService:
 
     @staticmethod
     def _tag_kubecore_metadata(run_id: str) -> None:
-        """Tag the MLflow run with KUBECORE_* environment variables.
+        """Tag the MLflow run with KUBECORE_* environment variables and ``kaos_lib.version``
+        (the kaos-lib package this image runs; novelcore/kaos#1147).
 
         Uses MlflowClient (not the fluent API) so it works on an already-ended
         run without triggering a new ghost run via mlflow.autolog().
@@ -600,6 +639,7 @@ class TrainingService:
                 for k, v in os.environ.items()
                 if k.startswith("KUBECORE_") and v
             }
+            kubecore_tags["kaos_lib.version"] = kaos_lib_version()
             if kubecore_tags:
                 client = MlflowClient()
                 for key, value in kubecore_tags.items():
@@ -607,6 +647,91 @@ class TrainingService:
                 _logger.info("Tagged MLflow run with %d kubecore tags", len(kubecore_tags))
         except Exception:  # noqa: BLE001
             _logger.warning("Failed to tag MLflow run with kubecore metadata")
+
+    def _tag_outputs(self, run_id: str, commit: str) -> None:
+        """Link the MLflow run to its results in lakeFS (kaos#1283): the ``outputs-<app>``
+        repository, the merge commit on main, the run's path and the workflow.
+
+        model-registration reads ``kaos.outputs_commit`` back to tag that commit in lakeFS.
+        """
+        if not run_id:
+            return
+        w = self._run_writer
+        tags = self._outputs_tags(commit)
+        try:
+            from mlflow.tracking import MlflowClient  # noqa: PLC0415
+
+            client = MlflowClient()
+            for key, value in tags.items():
+                client.set_tag(run_id, key, value)
+            _logger.info("Tagged MLflow run %s with its outputs: %s@%s", run_id, w.repo, commit)
+        except Exception:  # noqa: BLE001
+            _logger.warning("Failed to tag MLflow run %s with its outputs; model-registration "
+                            "will register without a lakeFS tag", run_id)
+
+    def _outputs_tags(self, commit: str) -> dict[str, str]:
+        """``kaos.*`` tags naming where a run's results are in lakeFS."""
+        w = self._run_writer
+        return {
+            "kaos.outputs_repo": w.repo,
+            "kaos.outputs_commit": commit,
+            "kaos.outputs_path": w.prefix,
+            "kaos.workflow": os.environ.get("KUBECORE_WORKFLOW_NAME") or w.run,
+        }
+
+    def _log_model(self, run_id: str, commit: str, params: TrainingParams,
+                   epoch_metrics: dict[str, float], last_epoch: int) -> None:
+        """Show best.pt in the experiment's Models tab: an MLflow 3 logged model
+        ``<experiment>-best`` whose weights stay in lakeFS (``mlflow.create_external_model``),
+        with the training run as its source, the training settings as params, the ``kaos.*``
+        lakeFS tags and the final val metrics (Ultralytics validates best.pt last). The run gets
+        ``kaos.logged_model_id`` so model-registration registers the version from this model.
+
+        A retried step reuses the model this run already has instead of creating a second one.
+        A failure only warns: the results are already in lakeFS and on the run, and
+        model-registration then registers best.pt from its lakeFS path as before.
+        """
+        if not run_id:
+            return
+        name = logged_model_name(params.experiment_name)
+        tags = self._outputs_tags(commit)
+        dataset_ref = _dataset_ref(params)
+        if dataset_ref:
+            tags["kaos.dataset_ref"] = dataset_ref
+        try:
+            import mlflow  # noqa: PLC0415
+            from mlflow.tracking import MlflowClient  # noqa: PLC0415
+
+            client = MlflowClient()
+            experiment_id = client.get_run(run_id).info.experiment_id
+            existing = client.search_logged_models(
+                experiment_ids=[experiment_id],
+                filter_string=f"source_run_id = '{run_id}' AND name = '{name}'",
+                max_results=1,
+            )
+            if existing:
+                model_id = existing[0].model_id
+                client.set_logged_model_tags(model_id, tags)
+                _logger.info("Run %s already has logged model %s (%s)", run_id, name, model_id)
+            else:
+                model_id = mlflow.create_external_model(
+                    name=name,
+                    source_run_id=run_id,
+                    experiment_id=experiment_id,
+                    params={"epochs": str(params.epochs), "imgsz": str(params.image_size),
+                            "model_variant": params.model_variant},
+                    tags=tags,
+                ).model_id
+                _logger.info("Logged model %s (%s) for run %s", name, model_id, run_id)
+            # step = the last epoch, where the run already has these values: the run's charts
+            # get no stray point.
+            for key, value in epoch_metrics.items():
+                if key.startswith("val/"):
+                    client.log_metric(run_id, key, value, step=last_epoch, model_id=model_id)
+            client.set_tag(run_id, "kaos.logged_model_id", model_id)
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("Failed to log model %s for run %s (%s); model-registration will "
+                            "register best.pt from its lakeFS path", name, run_id, exc)
 
     # ------------------------------------------------------------------
     # Post-training export / quantization
@@ -642,7 +767,7 @@ class TrainingService:
                     self._logger.warning(
                         "Skipping %s — ONNX INT8 requires a separate "
                         "onnxruntime quantization pass, not supported by "
-                        "Ultralytics export. Use TensorRT for INT8.",
+                        "the yolo export. Use TensorRT for INT8.",
                         label,
                     )
                     continue
@@ -1070,10 +1195,11 @@ class TrainingService:
                 key,
                 local_pt,
             )
-            if lakefs_objects.bearer_available():
-                lakefs_objects.download(bucket, key, local_pt)
-            else:
-                self._s3.download_file(bucket, key, str(local_pt))
+            if bucket.startswith(("outputs-", "dataset-")):
+                # a lakeFS repository (our naming rule): read with the kubecore client,
+                # which works with the app's keys in-cluster and the bearer on MeluXina
+                return Path(lakefs_io.download_object(uri_or_path, str(tmp_path)))
+            self._s3.download_file(bucket, key, str(local_pt))
             return local_pt
 
         # Local path
@@ -1161,7 +1287,7 @@ class TrainingService:
             if torch.cuda.is_available():
                 self._logger.info(
                     "device unset and CUDA available — selecting GPU 0 "
-                    "(Ultralytics device=None would otherwise train on CPU)"
+                    "(the trainer's device=None would otherwise train on CPU)"
                 )
                 return "0"
         except Exception as exc:  # torch import / CUDA probe failure → CPU
@@ -1288,77 +1414,56 @@ class TrainingService:
 
         return best_uri
 
-    def _commit_outputs(self, params: TrainingParams) -> None:
-        """S3-gateway writes only STAGE objects on the lakeFS branch — commit so
-        the checkpoints are a versioned artifact (one commit captures the
-        best/last/epoch files and exports staged during this run), not dangling
-        changes. Runs after the exports so they are in this run's commit."""
-        branch = params.checkpoint_prefix.split("/", 1)[0] or "main"
-        run = os.environ.get("KUBECORE_RUN_ID", "").strip()
-        self._lakefs_commit(
-            params.checkpoint_bucket,
-            branch,
-            f"model-training: {params.experiment_name} {run}".rstrip(),
-            {
-                "run": run,
-                "step": "model-training",
-                "experiment": params.experiment_name,
-                "dataset_ref": params.lakefs_branch or "",
+    def _commit_outputs(self, params: TrainingParams) -> str:
+        """Merge the run branch into ``main`` of ``outputs-<app>``: ONE commit per step per run,
+        carrying the dataset ref/commit and the MLflow run id; the branch is deleted.
+        Returns the merge commit on main.
+
+        A failure is fatal: results that never reached main must not look like success.
+        """
+        try:
+            commit = self._run_writer.finish({
+                "dataset_ref": _dataset_ref(params),
                 "dataset_commit": params.lakefs_commit or "",
                 "mlflow_run_id": self._get_mlflow_run_id() or "",
-            },
-        )
+            })
+        except Exception as exc:  # noqa: BLE001 - re-raised with the repository named
+            raise TrainingError(
+                f"merging results into {params.checkpoint_bucket} failed: {exc}") from exc
+        self._logger.info("Results merged into %s main: %s", params.checkpoint_bucket, commit)
+        return commit
 
-    def _lakefs_commit(self, repo: str, branch: str, message: str,
-                       metadata: dict | None = None) -> None:
-        """Commit staged lakeFS changes on ``branch`` (S3-gateway only stages).
+    def _open_run_writer(self, params: TrainingParams, tmp_path: Path) -> Optional[Path]:
+        """Open the run's writer on ``outputs-<app>`` and return the last checkpoint it already holds.
 
-        Best-effort: a failure (including 'nothing to commit') never fails the
-        step — the objects are already uploaded. Uses the lakeFS REST API on the
-        same endpoint as the S3 gateway with the injected lakeFS credentials, or
-        off-cluster the objects API with the run's bearer token.
+        The branch ``run-<run>-checkpoints`` is created, or reused when this step is a retry or was
+        preempted: then ``last.pt`` is downloaded so training resumes from it instead of starting over.
         """
-        import base64
-        import urllib.request
-
-        metadata = {k: str(v) for k, v in (metadata or {}).items() if v}
-        if lakefs_objects.bearer_available():
-            try:
-                cid = lakefs_objects.commit(repo, branch, message, metadata)
-                self._logger.info("lakeFS commit %s @ %s/%s", cid[:12], repo, branch)
-            except Exception as exc:  # noqa: BLE001
-                self._logger.warning("lakeFS commit failed (non-fatal): %s", exc)
-            return
-        endpoint = os.environ.get("LAKEFS_ENDPOINT", "").rstrip("/")
-        access = os.environ.get("LAKEFS_ACCESS_KEY", "")
-        secret = os.environ.get("LAKEFS_SECRET_KEY", "")
-        if not (endpoint and access and secret):
-            self._logger.warning("lakeFS commit skipped — endpoint/creds unset.")
-            return
-        url = f"{endpoint}/api/v1/repositories/{repo}/branches/{branch}/commits"
-        auth = base64.b64encode(f"{access}:{secret}".encode()).decode()
-        req = urllib.request.Request(
-            url, data=json.dumps({"message": message, "metadata": metadata}).encode(),
-            method="POST",
-        )
-        req.add_header("Content-Type", "application/json")
-        req.add_header("Authorization", f"Basic {auth}")
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                cid = str(json.loads(resp.read().decode()).get("id", "?"))
-            self._logger.info("lakeFS commit %s @ %s/%s", cid[:12], repo, branch)
-        except Exception as exc:  # noqa: BLE001
-            self._logger.warning("lakeFS commit failed (non-fatal): %s", exc)
+        self._run_writer = lakefs_io.run_writer(params.checkpoint_bucket, params.experiment_name)
+        resume = self._run_writer.latest("last.pt", dest=tmp_path / "resume")
+        if resume is not None:
+            self._logger.info("Found %s on the run branch: resuming", resume.name)
+        return resume
 
     def _upload_to_s3(self, local_path: Path, bucket: str, key: str) -> None:
-        """Upload a single file to S3 (or, off-cluster, via the lakeFS objects
-        API with the run's bearer token — see services/lakefs_objects.py)."""
+        """Save one result file on the run branch (a durable commit on ``run-<run>-checkpoints``).
+
+        ``bucket``/``key`` keep the ``{branch}/{path}`` vocabulary of the URIs we hand to later
+        steps; only the file name is used, the location comes from the run writer
+        (``checkpoints/<experiment>/<run>/<name>``). A checkpoint also becomes ``last.pt`` there,
+        which is what a resumed step starts from.
+        """
+        if self._outputs_stage is None or self._run_writer is None:
+            raise TrainingError("no run writer: _upload_to_s3 outside a training run")
+        name = Path(key).name
         try:
-            if lakefs_objects.bearer_available():
-                lakefs_objects.upload(local_path, bucket, key)
-                return
-            self._s3.upload_file(str(local_path), bucket, key)
-        except Exception as exc:
-            raise TrainingError(
-                f"S3 upload failed for s3://{bucket}/{key}: {exc}"
-            ) from exc
+            staged = self._outputs_stage / name
+            shutil.copy(local_path, staged)
+            files = [staged]
+            if name.startswith("epoch_"):
+                last = self._outputs_stage / "last.pt"
+                shutil.copy(local_path, last)
+                files.append(last)
+            self._run_writer.save(files, f"checkpoints: {name}")
+        except Exception as exc:  # noqa: BLE001
+            raise TrainingError(f"saving {key} for {bucket} failed: {exc}") from exc

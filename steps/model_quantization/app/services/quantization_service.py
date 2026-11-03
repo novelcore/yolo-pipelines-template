@@ -26,7 +26,7 @@ from ultralytics import YOLO
 
 from app.models.quantization import ParityReport, QuantizationParams, QuantizationResult
 from app.services.parity_test import ParityTestService
-from app.services import lakefs_objects
+from app.services import lakefs_io
 from app.services.resource_monitor import ResourceMonitor
 
 # Interval (seconds) between system-metric samples during the export.
@@ -49,8 +49,7 @@ class QuantizationError(Exception):
 class QuantizationService:
     """Runs PTQ (Ultralytics) or QAT passthrough and logs to MLflow."""
 
-    def __init__(self, s3_client: Any, mlflow_tracking_uri: str) -> None:
-        self._s3 = s3_client
+    def __init__(self, mlflow_tracking_uri: str) -> None:
         self._mlflow_uri = mlflow_tracking_uri
         self._logger = logging.getLogger(__name__)
         self._parity = ParityTestService()
@@ -255,11 +254,8 @@ class QuantizationService:
         """Return a local path to the checkpoint, downloading from S3 if needed."""
         if not path.startswith("s3://"):
             return path
-        without_scheme = path[len("s3://") :]
-        bucket, _, key = without_scheme.partition("/")
-        local_path = os.path.join(output_dir, Path(key).name)
-        self._logger.info("Downloading checkpoint: %s → %s", path, local_path)
-        self._s3.download_file(bucket, key, local_path)
+        self._logger.info("Downloading checkpoint: %s -> %s", path, output_dir)
+        local_path = lakefs_io.download_object(path, output_dir)
         return local_path
 
     def _find_data_yaml(self, dataset_dir: str) -> str:
@@ -278,80 +274,24 @@ class QuantizationService:
             f"No YOLO data YAML found in {dataset_dir!r}. " f"Searched: {candidates}"
         )
 
-    def _upload_tflite(self, local_path: str, params: QuantizationParams) -> str:
-        """Upload TFLite artifact to S3 and return the s3:// URI."""
-        key = f"{params.output_prefix}/{Path(local_path).name}"
-        self._logger.info("Uploading TFLite to s3://%s/%s", params.output_bucket, key)
-        self._s3.upload_file(local_path, params.output_bucket, key)
-        # S3-gateway writes only STAGE objects on the lakeFS branch — without a
-        # commit they are dangling uncommitted changes, not a versioned artifact.
-        branch = params.output_prefix.split("/", 1)[0] or "main"
-        self._lakefs_commit(
-            params.output_bucket,
-            branch,
-            f"model-quantization: {params.mode} INT8 tflite "
-            f"{Path(local_path).name}",
-            {"step": "model-quantization", "experiment": params.experiment_name},
-        )
-        return f"s3://{params.output_bucket}/{key}"
+    def _upload_tflite(self, local_path: str, params) -> str:
+        """Write the INT8 TFLite to ``outputs-<app>`` (one commit on main) and return its s3:// URI.
 
-    def _lakefs_commit(self, repo: str, branch: str, message: str,
-                       metadata: Optional[dict] = None) -> None:
-        """Commit staged lakeFS changes on ``branch`` (S3-gateway only stages).
-
-        Best-effort: a failure (including 'nothing to commit') never fails the
-        step — the object is already uploaded. Uses the lakeFS REST API on the
-        same endpoint as the S3 gateway with the injected lakeFS credentials, or
-        off-cluster the objects API with the run's bearer token. The commit
-        records the run and the dataset it was computed from (set by entry.py).
+        The commit is kaos-lib's ``write_run``: ``quantization/<experiment>/<run>/``
+        saved on the run branch ``run-<run>-quantization`` and merged into main; the merge commit
+        records the dataset ref and commit.
         """
-        import base64
-        import json
-        import urllib.request
-
-        metadata = dict(metadata or {})
-        metadata.update({
-            "run": os.environ.get("KUBECORE_RUN_ID", ""),
-            "dataset_ref": os.environ.get("KUBECORE_DATASET_REF", ""),
-            "dataset_commit": os.environ.get("KUBECORE_DATASET_COMMIT", ""),
-        })
-        metadata = {k: str(v) for k, v in metadata.items() if v}
-        if lakefs_objects.bearer_available():
-            try:
-                cid = lakefs_objects.commit(repo, branch, message, metadata)
-                self._logger.info("lakeFS commit %s @ %s/%s", cid[:12], repo, branch)
-            except Exception as exc:  # noqa: BLE001
-                self._logger.warning("lakeFS commit failed (non-fatal): %s", exc)
-            return
-
-        endpoint = os.environ.get("LAKEFS_ENDPOINT", "").rstrip("/")
-        access = os.environ.get("LAKEFS_ACCESS_KEY", "")
-        secret = os.environ.get("LAKEFS_SECRET_KEY", "")
-        if not (endpoint and access and secret):
-            self._logger.warning("lakeFS commit skipped — endpoint/creds unset.")
-            return
-        url = f"{endpoint}/api/v1/repositories/{repo}/branches/{branch}/commits"
-        auth = base64.b64encode(f"{access}:{secret}".encode()).decode()
-        req = urllib.request.Request(
-            url, data=json.dumps({"message": message, "metadata": metadata}).encode(),
-            method="POST",
-        )
-        req.add_header("Content-Type", "application/json")
-        req.add_header("Authorization", f"Basic {auth}")
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                cid = str(json.loads(resp.read().decode()).get("id", "?"))
-            self._logger.info("lakeFS commit %s @ %s/%s", cid[:12], repo, branch)
-        except Exception as exc:  # noqa: BLE001
-            self._logger.warning("lakeFS commit failed (non-fatal): %s", exc)
+        prefix = lakefs_io.write_outputs(params.output_bucket, params.experiment_name,
+                                         [local_path], kind="quantization",
+                                         metadata={"dataset_ref": os.environ.get("KUBECORE_DATASET_REF", ""),
+                                                   "dataset_commit": os.environ.get("KUBECORE_DATASET_COMMIT", "")})
+        self._logger.info("model-quantization: INT8 tflite written to %s", prefix)
+        return prefix + Path(local_path).name
 
     def _download_tflite(self, s3_uri: str, output_dir: str) -> str:
         """Download TFLite from an s3:// URI. Returns local path."""
-        without_scheme = s3_uri[len("s3://") :]
-        bucket, _, key = without_scheme.partition("/")
-        local_path = os.path.join(output_dir, Path(key).name)
-        self._logger.info("Downloading TFLite: %s → %s", s3_uri, local_path)
-        self._s3.download_file(bucket, key, local_path)
+        self._logger.info("Downloading TFLite: %s -> %s", s3_uri, output_dir)
+        local_path = lakefs_io.download_object(s3_uri, output_dir)
         return local_path
 
     def _seed_torch(self, seed: int) -> None:

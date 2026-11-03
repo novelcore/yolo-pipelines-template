@@ -9,8 +9,10 @@ Hydra structured-config layer). Re-implementing a parallel schema here would
 just be a second source of truth to drift. So this step reads the already-
 resolved params.yaml and checks that the world it references actually exists:
 
-  - dataset path      : the dataset folder holds a data.yaml in lakeFS/S3 (on a
-                        miss, the error lists the datasets that do exist);
+  - dataset           : `dataset` is `<dataset-repo>@<version>` (malformed ->
+                        clear error) and that version of the dataset repository
+                        holds a data.yaml at its root (on a miss, the error
+                        lists the dataset repositories that do exist);
   - MLflow tracking   : the tracking server answers /health;
   - pretrained weights: an s3:// weights override actually exists;
   - checkpoint resume : when the config resumes, the checkpoint is present.
@@ -26,6 +28,9 @@ fast convenience, and compose-time schema validation is the hard contract.
 import logging
 import os
 from urllib.parse import urlparse
+
+from kaos_lib import datasets
+from kaos_lib.errors import KaosLibError
 
 # Same canonical S3 layout the dataset-loading service uses when no explicit
 # path is given — kept in sync so the check probes exactly where the loader
@@ -55,6 +60,11 @@ class ConfigValidationService:
         data = resolved.get("data") or {}
         model = resolved.get("model") or {}
         platform = resolved.get("platform") or {}
+        # Pure format check: runs even when no object store is reachable.
+        try:
+            dataset = datasets.DatasetRef.parse(resolved.get("dataset"))
+        except KaosLibError as exc:
+            raise ConfigValidationError(str(exc)) from exc
 
         self._check_mlflow()
 
@@ -66,7 +76,10 @@ class ConfigValidationService:
             )
             return
 
-        self._check_dataset_path(s3, data, platform)
+        if str(data.get("source") or "lakefs") == "lakefs" and not str(data.get("path_override") or "").strip():
+            self._check_dataset(dataset)
+        else:
+            self._check_dataset_path(s3, data, dataset)
         self._check_pretrained_weights(s3, model)
         self._check_checkpoint_resume(s3, data, platform)
         self._log.info("config-validation: all liveness checks passed")
@@ -112,25 +125,35 @@ class ConfigValidationService:
             config=cfg,
         )
 
-    def _dataset_uris(self, data: dict, platform: dict) -> list:
-        """The s3:// URIs the dataset-loading step may read, preferred first
-        (mirrors that step's _resolve_source), so the check probes exactly what
-        it uses."""
+    def _check_dataset(self, dataset, client=None) -> None:
+        """The picked ``<dataset-repo>@<version>`` exists and holds data.yaml (kaos-lib).
+
+        ``datasets.resolve`` says what is wrong: no such dataset, or no such version and
+        which versions exist.
+        """
+        try:
+            commit = datasets.resolve(dataset, client)
+            c = client or self._lakefs()
+            has_yaml = any(True for _ in c.list_objects(dataset.repo, commit, "data.yaml"))
+        except KaosLibError as exc:
+            raise ConfigValidationError(f"dataset {dataset}: {exc}") from exc
+        if not has_yaml:
+            raise ConfigValidationError(
+                f"dataset {dataset} (commit {commit[:12]}) has no data.yaml at the root of its "
+                "repository - a valid yolo dataset has data.yaml, images/ and labels/.")
+        self._log.info("dataset OK (%s -> commit %s, data.yaml present)", dataset, commit[:12])
+
+    @staticmethod
+    def _lakefs():
+        from kaos_lib.lakefs import LakeFS
+        return LakeFS.connect()
+
+    def _dataset_uri(self, data: dict, dataset) -> str:
+        """The s3:// URI of a dataset given as an explicit override (the only S3 probe left)."""
         override = str(data.get("path_override") or "").strip()
         if override:
-            return [override]
-
-        source = str(data.get("source") or "lakefs")
-        ref = str(data.get("ref") or "main")
-
-        if source == "lakefs":
-            # PLATFORM STANDARD (same as dataset-loading._resolve_source, the
-            # dataset CLI and hera-mlops-template): {ref}/dataset/. A dataset
-            # uploaded before the version folder was dropped sits at
-            # {ref}/dataset/{ref}/.
-            repo = str((platform.get("lakefs") or {}).get("repository") or "")
-            return [f"s3://{repo}/{ref}/dataset/", f"s3://{repo}/{ref}/dataset/{ref}/"]
-        return [f"s3://{_DEFAULT_BUCKET}/upload-initial/dataset/{ref}/"]
+            return override
+        return f"s3://{_DEFAULT_BUCKET}/upload-initial/dataset/{dataset.version}/"
 
     @staticmethod
     def _has_key(s3, bucket: str, key: str) -> bool:
@@ -140,91 +163,38 @@ class ConfigValidationService:
         except Exception:  # noqa: BLE001 — absent or unreadable: not there
             return False
 
-    def _version_folders(self, s3, repo: str, ref: str) -> list:
-        """Old-layout version folders, s3://{repo}/{ref}/dataset/<version>/ holding
-        a data.yaml (uploaded with an explicit --data-version before the version
-        folder was dropped). Same rule as dataset-loading. Best-effort: [] when the
-        listing fails."""
-        try:
-            resp = s3.list_objects_v2(Bucket=repo, Prefix=f"{ref}/dataset/", Delimiter="/",
-                                      MaxKeys=1000)
-        except Exception:  # noqa: BLE001
-            return []
-        return [f"s3://{repo}/{cp['Prefix']}" for cp in resp.get("CommonPrefixes") or []
-                if self._has_key(s3, repo, cp["Prefix"] + "data.yaml")]
-
-    def _available_datasets(self, s3, repo: str, limit: int = 50) -> list:
-        """Branches of the lakeFS repo that hold a dataset (either layout), for
-        the error message. Best-effort: [] when the listing fails."""
-        try:
-            resp = s3.list_objects_v2(Bucket=repo, Delimiter="/", MaxKeys=limit)
-        except Exception:  # noqa: BLE001
-            return []
-        names = []
-        for cp in resp.get("CommonPrefixes") or []:
-            ref = cp.get("Prefix", "").rstrip("/")
-            if ref and ref != "outputs" and (
-                self._has_key(s3, repo, f"{ref}/dataset/data.yaml")
-                or self._has_key(s3, repo, f"{ref}/dataset/{ref}/data.yaml")):
-                names.append(ref)
-        return names
-
-    def _check_dataset_path(self, s3, data: dict, platform: dict) -> None:
-        uris = self._dataset_uris(data, platform)
-        for uri in uris:
-            parsed = urlparse(uri)
-            if self._has_key(s3, parsed.netloc, parsed.path.lstrip("/") + "data.yaml"):
-                if uri != uris[0]:
-                    self._log.warning(
-                        "dataset is in the old layout (%s) — re-upload it with the "
-                        "dataset CLI to move it to %s", uri, uris[0])
-                self._log.info("dataset path OK (%s, data.yaml present)", uri)
-                return
-        if str(data.get("source") or "lakefs") == "lakefs" and not data.get("path_override"):
-            parsed = urlparse(uris[0])
-            ref = str(data.get("ref") or "main")
-            folders = self._version_folders(s3, parsed.netloc, ref)
-            if len(folders) == 1:
-                self._log.warning(
-                    "dataset is in the old layout (%s) — re-upload it with the "
-                    "dataset CLI to move it to %s", folders[0], uris[0])
-                self._log.info("dataset path OK (%s, data.yaml present)", folders[0])
-                return
-            if folders:
-                raise ConfigValidationError(
-                    f"no dataset at {uris[0]}, and {len(folders)} old-layout versions under it: "
-                    f"{', '.join(folders)} — pick one with data.path_override=<one of them>, "
-                    "or re-upload it with the dataset CLI.")
-
-        # No candidate has a data.yaml: explain what is wrong with the standard
-        # location, and name the datasets that do exist.
-        uri = uris[0]
+    def _check_dataset_path(self, s3, data: dict, dataset) -> None:
+        uri = self._dataset_uri(data, dataset)
         parsed = urlparse(uri)
         bucket, prefix = parsed.netloc, parsed.path.lstrip("/")
+        if self._has_key(s3, bucket, prefix + "data.yaml"):
+            self._log.info("dataset OK (%s@%s -> %s, data.yaml present)",
+                           dataset.repo, dataset.version, uri)
+            return
+
+        # No data.yaml: explain what is wrong with the picked dataset, and name
+        # the dataset repositories that do exist.
         hint = ""
-        if str(data.get("source") or "lakefs") == "lakefs" and not data.get("path_override"):
-            found = self._available_datasets(s3, bucket)
-            hint = (f" Datasets in this repository: {', '.join(found)}." if found
-                    else " `kubecore-dataset list` shows the datasets that exist.")
         self._log.info("checking dataset path %s", uri)
         try:
             resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=1)
-        except Exception as exc:  # NoSuchBucket etc. — a repo/branch typo
+        except Exception as exc:  # NoSuchBucket etc. — a repo/version typo
             raise ConfigValidationError(
-                f"dataset path unreachable: {uri} — the repository/branch may not "
-                f"exist ({exc}).{hint}"
+                f"dataset unreachable: {uri} — the repository or version "
+                f"({dataset.repo}@{dataset.version}) may not exist ({exc}).{hint}"
             ) from exc
         if resp.get("KeyCount", 0) == 0:
             raise ConfigValidationError(
-                f"dataset path not found or empty: {uri} — check data-ref and that "
-                f"the dataset was uploaded.{hint}"
+                f"dataset not found or empty: {uri} — check the dataset parameter "
+                f"({dataset.repo}@{dataset.version}) and that the dataset was uploaded.{hint}"
             )
         # A non-empty prefix isn't enough: require data.yaml at the root so a run
         # doesn't pass config-validation and then fail in dataset-loading on a
         # missing/misplaced data.yaml.
         raise ConfigValidationError(
             f"dataset at {uri} has no data.yaml at its root — a valid "
-            f"Ultralytics YOLO dataset must include data.yaml.{hint}"
+            f"yolo dataset must include data.yaml, images/ and labels/ "
+            f"at the root of its repository.{hint}"
         )
 
     def _check_pretrained_weights(self, s3, model: dict) -> None:

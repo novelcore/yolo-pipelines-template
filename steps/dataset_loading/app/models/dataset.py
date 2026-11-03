@@ -4,22 +4,23 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-
 class YoloDatasetParams(BaseModel):
     """Parameters passed into the dataset loading step from the CLI / orchestrator."""
 
-    version: str = Field(description="Dataset version tag (e.g. 'v1').")
+    version: str = Field(description="Dataset selection, '<dataset-repo>@<version>'.")
     source: str = Field(
         pattern=r"^(s3|lakefs)$",
         description="Storage backend: 's3' or 'lakefs'.",
     )
     lakefs_repo: Optional[str] = Field(
         default=None,
-        description="LakeFS repository name. Used to construct the S3-compatible path.",
+        description="The dataset's own lakeFS repository (dataset-<name>).",
     )
-    lakefs_branch: Optional[str] = Field(
+    lakefs_ref: Optional[str] = Field(
         default=None,
-        description="LakeFS branch name. Used to construct the S3-compatible path.",
+        description="The COMMIT of that repository this run reads: the caller resolved the run's "
+        "<dataset-repo>@<version> choice with kaos_lib.datasets.resolve, so every step of the "
+        "run reads the same snapshot.",
     )
     path_override: Optional[str] = Field(
         default=None,
@@ -81,7 +82,7 @@ class DatasetManifest(BaseModel):
     lakefs_commit: Optional[str] = Field(
         default=None,
         description=(
-            "LakeFS branch-tip commit hash at fetch time. "
+            "LakeFS commit the dataset version resolved to at fetch time. "
             "Null when source=s3 or the lakeFS API was unreachable."
         ),
     )
@@ -119,7 +120,7 @@ class YoloDatasetStats(BaseModel):
     lakefs_commit: Optional[str] = Field(
         default=None,
         description=(
-            "LakeFS branch-tip commit hash at fetch time. "
+            "LakeFS commit the dataset version resolved to at fetch time. "
             "Null when source=s3 or the lakeFS API was unreachable."
         ),
     )

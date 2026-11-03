@@ -1,137 +1,70 @@
 # yolo-pipelines-template
 
-**The official YOLO pipelines KubeApp template.** Scaffolding a KubeApp with
-`kubeAppTemplateRef: yolo-pipelines` gives you a complete, working YOLO pose
-pipeline: dataset loading (lakeFS S3 streaming), real YOLOv8 training with
-authenticated MLflow tracking, optional QAT fine-tune (GPU or CPU-routed),
-INT8 TFLite export (PTQ or QAT) committed to the environment's lakeFS, and
-model registration.
+**The yolo pipelines KubeApp template.** A KubeApp with `kubeAppTemplateRef: yolo-pipelines` gets
+a complete YOLO pose pipeline: dataset loading, YOLOv8/YOLOv11 training with authenticated MLflow
+tracking, optional QAT fine-tuning, INT8 TFLite export (PTQ or QAT), and model registration.
+Results go to the app's own `outputs-<app>` lakeFS repository.
 
-Lineage: `hera-mlops-template` (generic Hera+Hydra scaffold, Petros) →
-`yolo-hera-yolo` (real YOLO implementation, Alexandra) → promoted to the
-official template 2026-08-18 with full history preserved. Battle-tested
-fixes baked in: isolated-poetry Dockerfiles (charset-normalizer class),
-per-step disk requests (#892), lakeFS branch-prefixed artifact paths
-(#896), retag-all-safe image pinning (#1008).
+It is built on the scaffold [`hera-pipeline-template`](https://github.com/novelcore/hera-pipeline-template)
+and is the worked use case of its guide, *the engineer's cookbook*. Start from the scaffold to
+write your own pipeline, and read this one to see a real one. The platform injects the
+environment's MLflow, lakeFS and compute context at render time. Nothing environment-specific
+lives in this repository.
 
-Targets PRD-858 `ml`-type environments: each app binds to one environment
-via `environmentSelector`; the platform injects that environment's MLflow,
-lakeFS and compute context at render time — nothing environment-specific
-lives in this repo.
+**The guide: [novelcore.github.io/yolo-pipelines-template](https://novelcore.github.io/yolo-pipelines-template/)**.
+Its [day with yolo](https://novelcore.github.io/yolo-pipelines-template/worked-day/) takes you
+from a new app to two trained models compared in MLflow.
 
----
+## The pipeline
 
-# hera-mlops-template
-
-A KubeCore ML pipeline you author in **Python** ([Hera](https://github.com/argoproj-labs/hera))
-with parameters in a **[Hydra](https://github.com/facebookresearch/hydra) config tree**.
-Clone it, add your steps and parameters, push — the platform builds your images
-and releases a runnable pipeline. You never touch Kubernetes.
-
-This template is the source new ML KubeApps are seeded from (`spec.type:
-ml-pipeline`). It replaces the old `kubeline.yaml` DSL.
-
-## Why this exists
-
-The whole DAG is **one 38-line `pipeline.py`** and a tree of small YAML files —
-the same YOLO training pipeline that used to be a **1551-line `kubeline.yaml`**.
-
-```python
-# pipeline.py — the ENTIRE pipeline definition
-from kubecore.authoring import pipeline, step
-
-with pipeline("ml-pipeline") as p:  # platform renames to {app}-pipeline at release
-    load = step("dataset-loading", reads=["data"],
-                outputs=["data-yaml", "manifest-summary"])
-    train = step("model-training", gpu=True, needs=[load],
-                 reads=["experiment", "data", "model", "train", "image_processing", "logging"],
-                 outputs=["training-result"])
-    qat = step("qat-finetune", gpu=True, needs=[train],
-               reads=["experiment", "train", "quantization"],
-               when="{{workflow.parameters.quantization-mode}} == qat",
-               outputs=["qat-result"])
-    quant = step("model-quantization", needs=[train, qat],
-                 reads=["experiment", "quantization"],
-                 when="{{workflow.parameters.quantization-mode}} != none",
-                 outputs=["quantization-result"])
-    register = step("model-registration", needs=[train, quant],
-                    reads=["data", "model", "registration"])
-```
-
-**One rule: the `config/` tree IS the submit form.** Every scalar in `config/`
-becomes a form field; every group directory becomes a dropdown. Add a leaf → a
-field appears. No parameter wiring anywhere.
-
-## Layout
+Seven steps; `qat-finetune` and `model-quantization` run only when `quantization-mode` is not
+`none`:
 
 ```
-pipeline.py            the DAG (steps, reads=, gpu=, needs=, when=)
-config/                THE experiment config tree — all your parameters
-  config.yaml            the defaults list (which group options are default)
-  data.yaml train.yaml … sections of scalar leaves
-  train/optimizer/*.yaml a config GROUP → a dropdown
-steps/<name>/          your step code + Dockerfile (one dir per step)
-kubecore/              platform-owned helpers — SEEDED, DO NOT EDIT
-pyproject.toml         PEP 621, pinned render deps
+config-validation → dataset-loading → data-summary
+                                    → model-training → qat-finetune → model-quantization → model-registration
 ```
 
-## Two core moves (full guide: [DEVELOPER.md](DEVELOPER.md))
+The whole pipeline is `pipeline.py`. **The `config/` tree is the submit form**: every plain value in
+`config/` becomes a field, and every group folder (`config/model/`, `config/train/optimizer/`, …)
+becomes a dropdown.
 
-- **Add a parameter** → add a leaf to `config/…`. Push. The form has it.
-- **Add a step** → `mkdir steps/<name>` + a Dockerfile + an entry that reads its
-  config slice, then one `step("<name>", reads=[…], needs=[…])` line in
-  `pipeline.py`. Push.
+```
+pipeline.py            the steps (reads=, gpu=, needs=, when=, hpc_time_limit=)
+config/                every setting: a field or a dropdown on the run form
+steps/<name>/          one folder per step: app/ and a Dockerfile
+kubecore/              the platform's engine: seeded, do not edit
+tests/, step_tests/    engine tests; step-code tests (DEVELOPER.md §15)
+docs/                  the guide (mkdocs)
+```
 
-## Local iteration (no cluster)
+## Quick start
 
 ```bash
-./run.sh                                              # venv + render + enhance + compose
-python -m kubecore.compose train.epochs=5 train/optimizer=adamw   # try overrides locally
+python3 -m venv ~/.venvs/kaos && . ~/.venvs/kaos/bin/activate
+pip install --index-url https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib-rc/simple/ \
+    --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel,mlflow]>=0.4.0rc5"
+kaosctl login                                              # inside the app folder
+kaosctl dataset create spacecraft --layout yolo --classes spacecraft   # yolo layout; add kpt_shape to data.yaml
+kaosctl dataset push ./dataset-spacecraft dataset-spacecraft -m "first images"
+kaosctl dataset release dataset-spacecraft                 # after merging the pull request
+./run.sh                                                   # render the pipeline locally, no cluster
 ```
 
-`out/params.yaml` is exactly what your steps receive at run time; a typo or a
-bad `reads=` fails locally with the same message the cluster gives you.
+`kaosctl` needs kaos-lib **0.4.0rc5** or newer. The library is documented in
+[the kaos-lib reference](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/index.html).
 
-## What the platform does for you (you never write this)
+## Where to read next
 
-Image supply-chain (Zot registry), MLflow/lakeFS/checkpoint env + secrets,
-per-step compute-class selection + node scheduling from your KubePool's classes,
-per-run sizing knobs, `/dev/shm`, GitOps release, and the Argo submit form —
-all injected at release time. Your `pipeline.py` stays pure structure.
-
-**Adding your first step?** Start with **[ADD-A-STEP.md](ADD-A-STEP.md)** — a
-complete copy-paste walkthrough for newcomers (every command, every gotcha).
-
-See **[DEVELOPER.md](DEVELOPER.md)** for the complete operating manual, and
-**[MECHANISMS.md](MECHANISMS.md)** for how the platform works internally
-(add/remove steps, enhancement, runtime config flow, multi-tenant safety).
-re-render: pick up MLflow auth injection + override-lexing fix (kubecore-operator#867 #868)
-## Running steps on MeluXina (HPC)
-
-When the project's pool is HPC-enabled, every step's `{step}-class` dropdown on the
-Argo submit form also offers the MeluXina classes:
-
-| class | what it is | typical use |
-|---|---|---|
-| `meluxina-gpu` | 4× A100-40GB, 2× EPYC 7452, 512 GB | training, QAT fine-tune |
-| `meluxina-cpu` | 2× EPYC 7452 (128 cores), 512 GB | heavy preprocessing, PTQ export |
-| `meluxina-largemem` | 4 TB RAM | datasets that do not fit a node |
-
-Pick one for a step and only that step runs as a Slurm job on MeluXina; every other
-step keeps its in-cluster class — mixing (training on `meluxina-gpu`, quantization on
-`gpu-small`, registration in-cluster) is the normal case. Nothing in this repository
-changes: the platform stages the dataset ref to Lustre, pulls the step image into an
-Apptainer SIF, runs the same command the pod would run, and brings the step's declared
-outputs back so the next step consumes them as usual. MLflow and lakeFS are reached
-through the public endpoints with a short-lived token minted per job.
-
-- Queue time is real (minutes to hours) — the pipeline waits for you; the
-  `pipeline-info` field on the form lists the classes and the account.
-- Give long steps a wall-clock limit in `pipeline.py`: `step(..., hpc_time_limit="12h")`
-  (default 4 h). See [DEVELOPER.md §8.1](DEVELOPER.md).
-- The node stages the same dataset commit the in-cluster steps read: only
-  `{ref}/dataset/` of that commit, cached on Lustre by commit.
-- Steps pinned with a `compute-class` annotation stay in-cluster.
+| you want to | read |
+|---|---|
+| train for the first time | [first dataset to a trained model](https://novelcore.github.io/yolo-pipelines-template/first-run/) |
+| compare two trainings and pick the weights | [a day with yolo](https://novelcore.github.io/yolo-pipelines-template/worked-day/) |
+| how the steps read data, write results and log models | [docs/datasets-in-the-steps.md](docs/datasets-in-the-steps.md) |
+| access, apps, tools, and everything the templates share | [the engineer's cookbook](https://novelcore.github.io/hera-pipeline-template/) |
+| add your first step | [ADD-A-STEP.md](ADD-A-STEP.md) |
+| the operating manual: config, tests, HPC | [DEVELOPER.md](DEVELOPER.md) |
+| how the platform works inside | [MECHANISMS.md](MECHANISMS.md), [PLATFORM.md](PLATFORM.md) |
 
 ## License
 

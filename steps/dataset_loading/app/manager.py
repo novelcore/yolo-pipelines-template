@@ -36,9 +36,6 @@ class Manager:
         self._service = DatasetLoadingService(
             s3_client=self._s3_client,
             max_retries=self._config.max_retries,
-            lakefs_endpoint=self._config.lakefs_endpoint,
-            lakefs_access_key=self._config.lakefs_access_key,
-            lakefs_secret_key=self._config.lakefs_secret_key,
         )
 
     # ------------------------------------------------------------------
@@ -95,7 +92,7 @@ class Manager:
         source: str,
         output_dir: str,
         lakefs_repo: Optional[str] = None,
-        lakefs_branch: Optional[str] = None,
+        lakefs_ref: Optional[str] = None,
         path_override: Optional[str] = None,
         labels_only: bool = False,
         manifest_only: bool = False,
@@ -107,15 +104,15 @@ class Manager:
         Parameters
         ----------
         version:
-            Dataset version tag (e.g. ``"v1"``).
+            Dataset selection (``"<dataset-repo>@<version>"``).
         source:
             Storage backend: ``"s3"`` or ``"lakefs"``.
         output_dir:
             Local directory where the YOLO dataset tree will be written.
         lakefs_repo:
             LakeFS repository name (used when source is ``"lakefs"``).
-        lakefs_branch:
-            LakeFS branch name (used when source is ``"lakefs"``).
+        lakefs_ref:
+            Version ref of the dataset repository (``main`` or a ``vN`` tag).
         path_override:
             Optional full S3 URI that overrides the default location.
         sample_size:
@@ -132,7 +129,7 @@ class Manager:
             source=source,
             output_dir=output_dir,
             lakefs_repo=lakefs_repo,
-            lakefs_branch=lakefs_branch,
+            lakefs_ref=lakefs_ref,
             path_override=path_override or None,
             labels_only=labels_only,
             manifest_only=manifest_only,

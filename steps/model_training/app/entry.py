@@ -10,8 +10,9 @@ automatically (field names match).
 Dataset: the cluster is manifest-only (no shared FS between step pods), so we use
 the kubeline S3-streaming mode — the trainer streams images/labels straight from
 the lakeFS S3 gateway at the bucket/prefix dataset-loading resolved
-(``--manifest-summary``): ``{commit}/dataset/``, pinned to the commit the ref
-pointed at when the run started.
+(``--manifest-summary``): ``{commit}/`` of the dataset repository (the layout
+sits at the repository root), pinned to the commit the picked
+``<dataset-repo>@<version>`` pointed at when the run started.
 
 MLflow auth (Zitadel machine JWT) is NOT injected by the platform yet, so MLflow
 logging is made NON-FATAL: with no auth present we disable Ultralytics' built-in
@@ -22,16 +23,30 @@ fully functional. It re-enables automatically once auth is wired.
 import argparse
 import json
 import os
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 import yaml
 
+from app.services import lakefs_io
+
 # Config sections this step consumes (declared in pipeline.py reads=).
-READS = ["experiment", "data", "model", "train", "image_processing", "logging"]
+READS = ["experiment", "dataset", "data", "model", "train", "image_processing", "logging"]
 
 OUTPUT_DIR = Path("/work/output")   # where the platform collects declared outputs
 DATASET_DIR = "/work/dataset"       # streaming cache/root on this pod's volume
 RUNS_DIR = "/work/runs"             # ultralytics runs/ output
+
+
+def kaos_lib_version() -> str:
+    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
+    for dist in ("kaos-lib", "kubecore"):
+        try:
+            return package_version(dist)
+        except PackageNotFoundError:
+            pass
+    return "unknown"
 
 
 def _mlflow_auth_present() -> bool:
@@ -42,68 +57,43 @@ def _mlflow_auth_present() -> bool:
     )
 
 
-def _dataset_location(summary: dict, repo: str, ref: str) -> tuple[str, str, str]:
+def _dataset_location(summary: dict) -> tuple[str, str, str]:
     """(bucket, prefix, commit) of this run's dataset: what dataset-loading
-    resolved (its manifest-summary), else the standard ``{ref}/dataset/``."""
-    bucket = str(summary.get("bucket") or "") or repo
-    prefix = str(summary.get("prefix") or "") or f"{ref}/dataset/"
-    return bucket, prefix if prefix.endswith("/") else prefix + "/", str(summary.get("commit") or "")
+    resolved and pinned (its manifest-summary). Without it there is no pinned
+    commit to read, so the step stops rather than guess a location."""
+    bucket, prefix = str(summary.get("bucket") or ""), str(summary.get("prefix") or "")
+    if not (bucket and prefix):
+        raise SystemExit("[model-training] no dataset location: --manifest-summary from "
+                         "dataset-loading is empty, so there is no pinned dataset commit to read.")
+    return bucket, prefix if prefix.endswith("/") else prefix + "/", str(summary.get("dataset_commit") or "")
 
 
-def _staged_dataset_dir(prefix: str, ref: str) -> str | None:
-    """Off-cluster (MeluXina) the platform stages the dataset commit onto the
-    node and bind-mounts it read-only at KUBECORE_DATASET_DIR (PRD-1016 F-04).
-    Return the directory holding data.yaml for this run, or None when nothing
-    is staged (in-cluster: stream from the lakeFS S3 gateway). The mount is the
-    commit root, so the dataset sits where dataset-loading found it (the prefix
-    without its leading ref)."""
-    root = os.environ.get("KUBECORE_DATASET_DIR")
-    if not root or not os.path.isdir(root):
-        return None
-    resolved = prefix.split("/", 1)[1].strip("/") if "/" in prefix else ""
-    if resolved not in ("dataset", f"dataset/{ref}") and not os.path.exists(
-            os.path.join(root, resolved, "data.yaml")):
-        # A path_override outside the platform layout: the stage-in staged the
-        # ref's dataset/, not this folder, so reading anything else here would
-        # train on a different dataset than the in-cluster copy of the run.
-        raise SystemExit(
-            f"[model-training] the dataset at "
-            f"{prefix} (data.path_override) is not staged off-cluster; run this step in-cluster "
-            "or upload the dataset with the dataset CLI.")
-    # What dataset-loading resolved first, then the standard dataset/, the old
-    # dataset/{ref}/ layout, and a ref whose root IS the dataset (legacy CLI).
-    for candidate in (os.path.join(root, resolved), os.path.join(root, "dataset"),
-                      os.path.join(root, "dataset", ref), root):
-        if os.path.exists(os.path.join(candidate, "data.yaml")):
-            return candidate
-    # Off-cluster there is no S3 gateway to fall back to (live job 5149139:
-    # a silent fallback ended in boto3 "Unable to locate credentials").
-    raise SystemExit(
-        f"[model-training] KUBECORE_DATASET_DIR={root} is mounted but holds no "
-        "data.yaml under dataset/ or its root — the staged ref does not carry a "
-        "dataset in the platform layout.")
+def _staged() -> bool:
+    """True on MeluXina: the platform staged the pinned dataset commit onto the node
+    (bind-mounted read-only, announced as KUBECORE_STAGED_DIR, PRD-1016 F-04 / PRD-1541).
+    There is no S3 gateway off-cluster, so the dataset is read as local files through the
+    kaos-lib consumer; in-cluster the trainer streams from the lakeFS S3 gateway."""
+    return bool(os.environ.get("KUBECORE_STAGED_DIR"))
 
 
 def _guard_mlflow() -> bool:
-    """Force-disable Ultralytics' MLflow callback (it is fatal on error).
+    """Force-disable Ultralytics' MLflow callback (it is fatal on error) when MLflow
+    auth is not usable.
 
-    #868 injects MLflow Zitadel auth, BUT the `mlflow.request_auth_provider`
-    'zitadel' plugin only registers via a root package install — which broke the
-    image build (reverted in #17). Enabling the callback would therefore 401 and
-    KILL training (Ultralytics' MLflow callback opens the run and is fatal). Until
-    MLflow auth is wired without the entry-point plugin (bearer-token approach —
-    follow-up), disable it: training + lakeFS checkpoint upload still work; MLflow
-    logging + registration are a deliberate follow-up.
+    The `zitadel` request-auth provider comes with kaos-lib[mlflow], installed as a
+    package so its entry point registers. Without a usable credential the callback
+    would 401 and KILL training (it opens the run and is fatal), so it is disabled:
+    training + lakeFS checkpoint upload still work.
     """
     if _setup_mlflow_auth():
         return True
     try:
         from ultralytics import settings
         settings.update({"mlflow": False})
-        print("[model-training] MLflow logging DISABLED (zitadel auth-plugin not "
-              "wired without root-install; follow-up). Training + lakeFS proceed.")
+        print("[model-training] MLflow logging DISABLED (no usable MLflow auth). "
+              "Training + lakeFS proceed.")
     except Exception as exc:  # noqa: BLE001 - best-effort, never fatal
-        print(f"[model-training] WARN: could not disable ultralytics mlflow: {exc}")
+        print(f"[model-training] WARN: could not disable the trainer's built-in MLflow logging: {exc}")
     return False
 
 
@@ -112,30 +102,45 @@ def _as_csv(value):
 
 
 def _setup_mlflow_auth() -> bool:
-    """Mint a Zitadel bearer token for MLflow directly — no entry-point plugin, no
-    root install. #868 mounts the machine key at ZITADEL_MACHINE_KEY_FILE; we reuse the
-    vendored token source and set MLFLOW_TRACKING_TOKEN, bypassing the request_auth
-    plugin (which would need a build-breaking root install). Returns True on success."""
-    if os.environ.get("MLFLOW_TRACKING_TOKEN"):
-        # Off-cluster (MeluXina) the submit pod minted the wallet already.
-        os.environ.pop("MLFLOW_TRACKING_AUTH", None)
-        print("[mlflow] bearer token supplied by the platform -> MLflow ENABLED.", flush=True)
-        return True
-    key = os.environ.get("ZITADEL_MACHINE_KEY_FILE")
-    if not key or not os.path.exists(key):
+    """MLflow auth through kaos-lib (kaos-lib[mlflow]). ``mlflow()`` sets the tracking URI and
+    MLFLOW_TRACKING_AUTH=zitadel; that request-auth provider ships with kaos-lib and takes the
+    bearer from one chain: the platform's MLFLOW_TRACKING_TOKEN (MeluXina), else a token minted
+    from the machine key at ZITADEL_MACHINE_KEY_FILE with the org project's audience and minted
+    again before it expires. Returns True when MLflow is usable; otherwise MLflow is disabled
+    (non-fatal)."""
+    try:
+        from kaos_lib.mlflow import mlflow
+        mlflow()
+    except Exception as exc:  # noqa: BLE001 - MLflow is optional for this step
+        print(f"[mlflow] {exc} -> MLflow disabled (non-fatal).", flush=True)
+        return False
+    print("[mlflow] kaos-lib auth (MLFLOW_TRACKING_AUTH=zitadel) -> MLflow ENABLED.", flush=True)
+    return True
+
+
+def _write_data_lock(mlflow_run_id: str, ds_ref: str, commit: str) -> bool:
+    """Record the dataset commit this run trained on in its MLflow run: the data lock
+    (kaos#1147 F-18), tags ``kaos_lib.data.<repo>.commit`` and ``data.lock.json``.
+    In-cluster the trainer streams from the lakeFS S3 gateway, past kaos-lib, so the
+    read is recorded here; a staged read (MeluXina) went through kaos-lib and is
+    recorded already. Non-fatal, like the rest of the MLflow logging."""
+    if not (mlflow_run_id and ds_ref and commit):
+        print("[model-training] data lock not written: no MLflow run or no pinned dataset commit.")
         return False
     try:
-        from app.mlflow_zitadel_auth import _ZitadelTokenSource
-        os.environ["MLFLOW_TRACKING_TOKEN"] = _ZitadelTokenSource().token()
-        os.environ.pop("MLFLOW_TRACKING_AUTH", None)  # use bearer token, not the plugin
-        print("[mlflow] Zitadel bearer token minted -> MLflow ENABLED.", flush=True)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        print(f"[mlflow] token mint failed: {exc} -> MLflow disabled (non-fatal).", flush=True)
+        from kaos_lib import datasets, lock
+        ref = datasets.DatasetRef.parse(ds_ref)
+        lock.record(ref.repo, ref.version, commit, ref.owner)
+        lock.write(mlflow_run_id)
+    except Exception as exc:  # noqa: BLE001 - lineage is logged best-effort, never kills a trained run
+        print(f"[model-training] WARN: data lock not written: {exc}", flush=True)
         return False
+    print(f"[model-training] data lock: {ds_ref} @ {commit} -> MLflow run {mlflow_run_id}", flush=True)
+    return True
 
 
 def main() -> None:
+    print(f"kaos-lib {kaos_lib_version()}", flush=True)  # the package this image runs
     parser = argparse.ArgumentParser()
     parser.add_argument("--params", required=True,
                         help="Resolved params.yaml content (from compose-and-validate).")
@@ -149,7 +154,6 @@ def main() -> None:
     cfg = yaml.safe_load(args.params)
 
     experiment = cfg["experiment"]
-    data = cfg["data"]
     model = cfg["model"]
     train = cfg["train"]
     aug = cfg["image_processing"]
@@ -161,14 +165,16 @@ def main() -> None:
     ckpt = train.get("checkpointing", {})
     export = train.get("export", {})
 
-    repo = platform["lakefs"]["repository"]
-    ref = data.get("ref", "main")
     try:
         summary = json.loads(args.manifest_summary or "{}") or {}
     except ValueError:
         summary = {}
-    bucket, prefix, commit = _dataset_location(summary, repo, ref)
-    print(f"[model-training] dataset s3://{bucket}/{prefix} (ref={ref} "
+    bucket, prefix, commit = _dataset_location(summary)
+    # What the run picked (`<dataset-repo>@<version>`), as dataset-loading recorded it.
+    ds_repo = str(summary.get("repo") or bucket)
+    ds_version = str(summary.get("version") or "")
+    ds_ref = str(summary.get("ref") or cfg.get("dataset") or "")
+    print(f"[model-training] dataset s3://{bucket}/{prefix} (dataset={ds_ref} "
           f"commit={commit or 'unresolved'})", flush=True)
 
     freeze = train.get("freeze")
@@ -180,11 +186,13 @@ def main() -> None:
     # (No data.yaml needed: the service generates the correct pose default when
     # dataset_dir has none — kpt_shape [11,3], names {0: spacecraft}.)
     os.makedirs(RUNS_DIR, exist_ok=True)
-    staged = _staged_dataset_dir(prefix, ref)
-    if staged:
-        # Local mode: the staged ref is on the node (read-only bind mount).
-        dataset_dir, source = staged, "local"
-        print(f"[model-training] dataset staged at {staged} -> local mode", flush=True)
+    if _staged():
+        # Local mode: the pinned commit is on the node. The kaos-lib consumer finds the
+        # staged copy (it checks the commit), nothing is downloaded, and returns a data.yaml
+        # whose path: points at it.
+        data_yaml = lakefs_io.materialize(ds_ref, commit, DATASET_DIR)
+        dataset_dir, source = str(data_yaml.parent), "local"
+        print(f"[model-training] dataset {ds_ref} @ {commit} staged -> {data_yaml} (local mode)", flush=True)
     else:
         dataset_dir, source = DATASET_DIR, "s3"
         os.makedirs(os.path.join(DATASET_DIR, "labels"), exist_ok=True)
@@ -260,10 +268,15 @@ def main() -> None:
         dfl=float(loss.get("dfl", 1.5)),
         # ---- early stopping ----
         patience=int(cb.get("patience", 50)),
-        # ---- checkpointing (platform injects CHECKPOINT_BUCKET/PREFIX; else derive) ----
+        # ---- checkpointing: the app's own outputs repository, `main`, under
+        # checkpoints/<experiment>/<run>/ (the platform injects CHECKPOINT_BUCKET =
+        # outputs-<app> and CHECKPOINT_PREFIX = main/checkpoints; platform.checkpoints
+        # carries the same values) ----
         checkpoint_interval=int(ckpt.get("interval_epochs", 10)),
-        checkpoint_bucket=os.environ.get("CHECKPOINT_BUCKET") or repo,
-        checkpoint_prefix=os.environ.get("CHECKPOINT_PREFIX") or f"{ref}/checkpoints",
+        checkpoint_bucket=(os.environ.get("CHECKPOINT_BUCKET")
+                           or platform["checkpoints"]["bucket"]),
+        checkpoint_prefix=(os.environ.get("CHECKPOINT_PREFIX")
+                           or platform["checkpoints"]["prefix"]),
         # ---- augmentation ----
         hsv_h=float(aug.get("hsv_h", 0.015)),
         hsv_s=float(aug.get("hsv_s", 0.7)),
@@ -285,10 +298,12 @@ def main() -> None:
         export_formats=_as_csv(export.get("formats")),
         export_precisions=_as_csv(export.get("precisions")),
         # ---- provenance ----
-        dataset_version=ref,
-        lakefs_branch=ref,
+        dataset_repo=ds_repo,
+        dataset_version=ds_version or None,
         lakefs_commit=(commit or None),
     )
+    if mlflow_on:
+        _write_data_lock(getattr(result, "mlflow_run_id", "") or "", ds_ref, commit)
 
     # Emit the declared step output (Hera convention: /work/output/<name>.json).
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -302,8 +317,8 @@ def main() -> None:
             payload = getattr(result, "__dict__", {"result": str(result)})
     payload["_mlflow_logging_enabled"] = mlflow_on
     # The dataset this run trained on, for the steps after it (registration).
-    payload.update(dataset_ref=ref, dataset_commit=commit, dataset_bucket=bucket,
-                   dataset_prefix=prefix)
+    payload.update(dataset_ref=ds_ref, dataset_repo=ds_repo, dataset_version=ds_version,
+                   dataset_commit=commit, dataset_bucket=bucket, dataset_prefix=prefix)
     (OUTPUT_DIR / "training-result.json").write_text(
         json.dumps(payload, default=str, indent=2)
     )

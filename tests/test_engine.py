@@ -55,7 +55,7 @@ def test_form_surface_covers_yolo():
     names = {p.name for p in form.parameters}
     # spot-check the real yolo parameter surface reached the form
     for expected in ["train-epochs", "train-optimizer-lr", "image_processing-hsv_h",
-                     "data-ref", "quantization-mode", "train-optimizer", "model"]:
+                     "dataset", "quantization-mode", "train-optimizer", "model"]:
         assert expected in names, f"missing derived form param {expected}"
     assert "config" in names  # ADVANCED
     print(f"  derive: {len(form.parameters)} form params, {len(form.sections)} sections")
@@ -283,13 +283,14 @@ def test_unknown_annotation_fails():
         assert "bogus" in str(e)
 
 
-def test_data_ref_is_free_text():
-    """Datasets are lakeFS branches/tags (listed by `kubecore-dataset list`);
-    there is no version folder, so no data-version parameter either."""
+def test_dataset_param_defaults_to_the_default_dataset_latest():
+    """A dataset is its own lakeFS repository; the run picks `<repo>@<version>`.
+    The platform fills the parameter's enum from its catalog later; the
+    template only declares it. There is no data-ref / data-version any more."""
     wft = _enhanced()
     by_name = {p["name"]: p for p in wft["spec"]["arguments"]["parameters"]}
-    assert "data-ref" in by_name and "enum" not in by_name["data-ref"]
-    assert "data-version" not in by_name
+    assert by_name["dataset"]["value"] == "dataset-default@latest"
+    assert "data-ref" not in by_name and "data-version" not in by_name
 
 
 def test_step_name_guards():

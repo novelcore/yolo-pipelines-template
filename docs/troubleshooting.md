@@ -13,19 +13,23 @@ That first step checks your settings. If it stops there, one of your form values
 
 This is the safety net working. It stopped before spending any training time. Fix the field it named and submit again.
 
+## The first step says the dataset has no data.yaml
+
+`config-validation` stops with "has no data.yaml at the root of its repository". You ran on a dataset without data, usually the form's default `dataset-default@latest`, which is empty in a new project. Pick your own released version in `dataset`. To make one, see [Upload images and labels](guide-upload-images.md).
+
 ## The dataset step cannot find my data
 
-Check the `data-ref` you typed on the form. It must match the name you uploaded with. If you uploaded to the default, that is `main`. A typo here means the pipeline looks in the wrong place and finds nothing. The error message lists the datasets that do exist, and `kubecore-dataset list` shows them too.
+Check the `dataset` you picked. It looks like `dataset-spacecraft@v1`: the name of a dataset repository (it starts with `dataset-`), an `@`, and a version (`v1`, `v2`, ... or `latest`). A dataset another project shares with you looks like `team-a/dataset-spacecraft@v1`. If the pick is wrong, the error message lists the dataset repositories that do exist.
 
-Also open lakeFS and confirm your dataset is really there, with `data.yaml`, `images`, and `labels`. If the upload did not finish, run it again. See [Upload your dataset](upload-dataset.md).
+Also open lakeFS and confirm your dataset repository has `data.yaml`, `images` and `labels` at its root, that its pull request was merged, and that the version exists (`kaosctl dataset versions <repo>`). A version you just released can take a few minutes to appear in the dropdown.
 
 ## The upload cannot sign in
 
-The tool opens your browser to sign in and waits about three minutes. If the browser did not open, copy the link the tool printed into your browser yourself. If signing in keeps failing, sign in the guided way with `kubecore-dataset login --paste` and follow the steps it shows, then run the upload again. It remembers that you signed in.
+The tool opens your browser to sign in and waits about three minutes. If the browser did not open, copy the link the tool printed into your browser yourself. If signing in keeps failing, run `kaosctl login` again. It remembers that you signed in.
 
 ## The upload says `externally-managed-environment`
 
-Your computer does not let `pip` change its own Python. Install inside a virtual environment, as shown in [Upload your dataset](upload-dataset.md), step 2.
+Your computer does not let `pip` change its own Python. Install inside a virtual environment, as shown in [cookbook 4](https://novelcore.github.io/hera-pipeline-template/cookbook/4-install-kaosctl/).
 
 ## A step is stuck and never starts
 
@@ -49,13 +53,17 @@ If you turned quantization on, the pipeline makes a smaller INT8 model and then 
 
 Look for the name you set in `experiment-name`. If you left it default, several runs may share that name, so sort by time and take the latest. Setting a clear name each time makes runs easy to find later.
 
+## Everything else
+
+Access, app creation, `kaosctl`, pull request checks, runs and MLflow are the same as for every hera pipeline: see [cookbook 10: When things go wrong](https://novelcore.github.io/hera-pipeline-template/cookbook/10-when-things-go-wrong/), organised by symptom.
+
 ## I am stuck and the message does not help
 
 That happens. Copy the message, note what you were doing, and send it to your platform contact. A clear description and the exact message is all they need to help fast.
 
 ## A quick checklist before you submit
 
-- [ ] `data-ref` matches the name I uploaded with, usually `main`.
-- [ ] My dataset shows up in lakeFS with data.yaml, images, and labels.
+- [ ] `dataset` is my own `<dataset-repository>@<version>` and that version exists (not the empty `dataset-default`).
+- [ ] My dataset repository shows up in lakeFS with data.yaml, images, and labels at its root.
 - [ ] For a first test: small model, low epochs, quantization off.
 - [ ] `experiment-name` is something I will recognize later.

@@ -40,9 +40,19 @@ def test_untyped_string_leaf_stays_string(value):
 
 @pytest.mark.parametrize("value", STRING_LOOKALIKES)
 def test_schema_str_leaf_stays_string(value):
-    # data.ref is `str` in the DataConfig structured schema
-    _, out = resolved([f"data.ref={value}"])
-    assert out["data"]["ref"] == value
+    # data.path_override is `str` in the DataConfig structured schema
+    _, out = resolved([f"data.path_override={value}"])
+    assert out["data"]["path_override"] == value
+
+
+def test_dataset_param_round_trips_repo_at_version():
+    """The `dataset` pick (`<dataset-repo>@<version>`) survives Hydra's override
+    grammar (`@` is its package separator) as a plain string."""
+    _, out = resolved(["dataset=dataset-cats@v2"])
+    assert out["dataset"] == "dataset-cats@v2"
+    _, out = resolved([])
+    assert out["dataset"] == "dataset-default@latest"
+    assert "ref" not in out["data"]
 
 
 def test_reported_case_3e286280_is_not_inf():

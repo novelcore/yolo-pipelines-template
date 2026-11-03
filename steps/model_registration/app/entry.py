@@ -19,13 +19,25 @@ automatically once MLflow auth is wired.
 import argparse
 import json
 import os
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 import yaml
 
-READS = ["data", "model", "registration"]
+READS = ["dataset", "data", "model", "registration"]
 
 OUTPUT_DIR = Path("/work/output")   # durable step output (survives the pod)
+
+
+def kaos_lib_version() -> str:
+    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
+    for dist in ("kaos-lib", "kubecore"):
+        try:
+            return package_version(dist)
+        except PackageNotFoundError:
+            pass
+    return "unknown"
 
 
 def _write_result(payload: dict) -> None:
@@ -58,25 +70,43 @@ def _load_json_arg(value: str) -> dict:
 
 
 def _setup_mlflow_auth() -> bool:
-    """Mint a Zitadel bearer token for MLflow directly — no entry-point plugin, no
-    root install. #868 mounts the machine key at ZITADEL_MACHINE_KEY_FILE; we reuse the
-    vendored token source and set MLFLOW_TRACKING_TOKEN, bypassing the request_auth
-    plugin (which would need a build-breaking root install). Returns True on success."""
-    key = os.environ.get("ZITADEL_MACHINE_KEY_FILE")
-    if not key or not os.path.exists(key):
+    """MLflow auth through kaos-lib (kaos-lib[mlflow]). ``mlflow()`` sets the tracking URI and
+    MLFLOW_TRACKING_AUTH=zitadel; that request-auth provider ships with kaos-lib and takes the
+    bearer from one chain: the platform's MLFLOW_TRACKING_TOKEN (MeluXina), else a token minted
+    from the machine key at ZITADEL_MACHINE_KEY_FILE with the org project's audience and minted
+    again before it expires. Returns True when MLflow is usable; otherwise MLflow is disabled
+    (non-fatal)."""
+    try:
+        from kaos_lib.mlflow import mlflow
+        mlflow()
+    except Exception as exc:  # noqa: BLE001 - MLflow is optional for this step
+        print(f"[mlflow] {exc} -> MLflow disabled (non-fatal).", flush=True)
+        return False
+    print("[mlflow] kaos-lib auth (MLFLOW_TRACKING_AUTH=zitadel) -> MLflow ENABLED.", flush=True)
+    return True
+
+
+def _write_data_lock(mlflow_run_id: str, ds_ref: str, commit: str) -> bool:
+    """Record the dataset commit the registered model was trained on in its MLflow run:
+    the data lock (kaos#1147 F-18), tags ``kaos_lib.data.<repo>.commit`` and
+    ``data.lock.json`` (merged with what training wrote). Non-fatal."""
+    if not (ds_ref and commit):
+        print("[model-registration] data lock not written: training-result has no dataset commit.")
         return False
     try:
-        from app.mlflow_zitadel_auth import _ZitadelTokenSource
-        os.environ["MLFLOW_TRACKING_TOKEN"] = _ZitadelTokenSource().token()
-        os.environ.pop("MLFLOW_TRACKING_AUTH", None)  # use bearer token, not the plugin
-        print("[mlflow] Zitadel bearer token minted -> MLflow ENABLED.", flush=True)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        print(f"[mlflow] token mint failed: {exc} -> MLflow disabled (non-fatal).", flush=True)
+        from kaos_lib import datasets, lock
+        ref = datasets.DatasetRef.parse(ds_ref)
+        lock.record(ref.repo, ref.version, commit, ref.owner)
+        lock.write(mlflow_run_id)
+    except Exception as exc:  # noqa: BLE001 - lineage is logged best-effort, never blocks registration
+        print(f"[model-registration] WARN: data lock not written: {exc}", flush=True)
         return False
+    print(f"[model-registration] data lock: {ds_ref} @ {commit} -> MLflow run {mlflow_run_id}", flush=True)
+    return True
 
 
 def main() -> None:
+    print(f"kaos-lib {kaos_lib_version()}", flush=True)  # the package this image runs
     parser = argparse.ArgumentParser()
     parser.add_argument("--params", required=True)
     parser.add_argument("--training-result", default="")
@@ -155,6 +185,9 @@ def main() -> None:
     except (TypeError, ValueError):
         sample_size = None
 
+    _write_data_lock(mlflow_run_id, str(tr.get("dataset_ref") or cfg.get("dataset") or ""),
+                     str(tr.get("dataset_commit") or ""))
+
     from app.manager import Manager
 
     Manager().run(
@@ -162,9 +195,9 @@ def main() -> None:
         best_checkpoint_path=tr.get("best_checkpoint_s3"),
         registered_model_name=(reg.get("registered_model_name") or None),
         promote_to=(reg.get("promote_to") or None),
-        # The dataset = its lakeFS ref; the commit pins the exact snapshot
-        # model-training read (relayed in training-result).
-        dataset_version=(tr.get("dataset_ref") or data.get("ref") or None),
+        # The dataset = `<dataset-repo>@<version>`; the commit pins the exact
+        # snapshot model-training read (relayed in training-result).
+        dataset_version=(tr.get("dataset_ref") or cfg.get("dataset") or None),
         dataset_commit=(tr.get("dataset_commit") or None),
         dataset_sample_size=sample_size,
         model_variant=(model.get("variant") or tr.get("model_variant")),

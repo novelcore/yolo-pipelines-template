@@ -59,4 +59,13 @@ import tensorflow, tf_keras, onnx, onnx2tf, onnxslim, onnxruntime, sng4onnx, onn
 from ultralytics import YOLO; \
 print('tensorflow', tensorflow.__version__, '| export toolchain import OK')"
 
+# kaos-lib, the platform library (datasets, run outputs; formerly the kubecore package), from
+# github.com/kaos-io/kaos-lib. The PLATFORM picks it: the CI passes --build-arg
+# KAOS_LIB_PACKAGE=<requirement> on every build, inside the range in .kaos/compat.yaml
+# (docs/kaos-lib-versions.md). The value is the whole pip requirement (name, extras, version or
+# URL); this default is only for a build on your computer. Installed last, so a new version
+# reuses the cached TensorFlow layers above.
+ARG KAOS_LIB_PACKAGE="kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/0f22d38ec3dbb00fb1b0dfc71e970c76987fb68d.zip"
+RUN pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"
+
 ENTRYPOINT ["python", "-m", "app.entry"]

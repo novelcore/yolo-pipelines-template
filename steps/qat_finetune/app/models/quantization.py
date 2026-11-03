@@ -33,10 +33,6 @@ class QATParams(BaseModel):
         ...,
         description="S3 bucket for TFLite artifact upload.",
     )
-    output_prefix: str = Field(
-        ...,
-        description="S3 key prefix for TFLite artifact (e.g. 'qat/exp-001').",
-    )
 
     # ── MLflow ────────────────────────────────────────────────────────────────
     experiment_name: str = Field(

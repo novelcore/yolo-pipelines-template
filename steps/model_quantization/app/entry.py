@@ -16,9 +16,13 @@ upload to lakeFS regardless, and the vendored service guards its MLflow calls.
 import argparse
 import json
 import os
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 import yaml
+
+from app.services import lakefs_io
 
 READS = ["experiment", "quantization"]
 
@@ -27,154 +31,47 @@ DATASET_DIR = "/work/dataset"
 RUNS_DIR = "/work/runs"
 
 
+def kaos_lib_version() -> str:
+    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
+    for dist in ("kaos-lib", "kubecore"):
+        try:
+            return package_version(dist)
+        except PackageNotFoundError:
+            pass
+    return "unknown"
+
+
 def _load(arg: str) -> dict:
     return json.loads(arg) if arg and arg.strip() not in ("", "{}", "null") else {}
 
 
 
-def _download_prefix(bucket, prefix, dest):
-    """Materialise the dataset locally under {dest}: qat/quant read images + data.yaml
-    from dataset_dir directly (no S3-streaming path), and this cluster has no shared FS.
-    Downloads data.yaml, images/ and labels/ under s3://{bucket}/{prefix} via the
-    lakeFS S3 gateway."""
-    if not (os.environ.get("LAKEFS_ACCESS_KEY") and os.environ.get("LAKEFS_SECRET_KEY")):
-        # Off-cluster there is no S3 gateway to fall back to (live job 5154708:
-        # a silent fallback ended in boto3 "Unable to locate credentials").
-        raise SystemExit(
-            f"[model-quantization] no lakeFS S3 keys and no staged dataset (KUBECORE_DATASET_DIR) — "
-            "off-cluster runs need the platform stage-in; in-cluster runs need LAKEFS_ACCESS_KEY/SECRET_KEY")
-    import boto3
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=os.environ.get("LAKEFS_ENDPOINT"),
-        aws_access_key_id=os.environ.get("LAKEFS_ACCESS_KEY"),
-        aws_secret_access_key=os.environ.get("LAKEFS_SECRET_KEY"),
-    )
-    n = 0
-    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            rel = key[len(prefix):]
-            if not rel or key.endswith("/"):
-                continue
-            # Only the dataset itself: the prefix may also hold an old-layout
-            # copy (dataset/<ref>/) kept for older step code.
-            if rel != "data.yaml" and rel.split("/", 1)[0] not in ("images", "labels"):
-                continue
-            local = os.path.join(dest, rel)
-            os.makedirs(os.path.dirname(local) or dest, exist_ok=True)
-            s3.download_file(bucket, key, local)
-            n += 1
-    print(f"[dataset] downloaded {n} objects from s3://{bucket}/{prefix} -> {dest}", flush=True)
-
-
-def _dataset_prefix(tr: dict, ref: str) -> str:
-    """Where this run's dataset lives: the commit-pinned prefix model-training
-    trained on (relayed in training-result), else the standard {ref}/dataset/."""
-    prefix = str(tr.get("dataset_prefix") or "") or f"{ref}/dataset/"
-    return prefix if prefix.endswith("/") else prefix + "/"
-
-
-def _staged_dataset_dir(prefix: str, ref: str):
-    """Off-cluster (MeluXina) the platform stages the dataset commit onto the
-    node and bind-mounts it read-only at KUBECORE_DATASET_DIR (PRD-1016 F-04).
-    Return the directory holding data.yaml — where training found it (the
-    prefix without its leading ref), the standard dataset/, the old
-    dataset/{ref}/ layout, then a ref whose root IS the dataset — or None when
-    nothing is staged (in-cluster: download from the S3 gateway)."""
-    root = os.environ.get("KUBECORE_DATASET_DIR")
-    if not root or not os.path.isdir(root):
-        return None
-    resolved = prefix.split("/", 1)[1].strip("/") if "/" in prefix else ""
-    if resolved not in ("dataset", f"dataset/{ref}") and not os.path.exists(
-            os.path.join(root, resolved, "data.yaml")):
-        # A path_override outside the platform layout: the stage-in staged the
-        # ref's dataset/, not this folder, so reading anything else here would
-        # train on a different dataset than the in-cluster copy of the run.
-        raise SystemExit(
-            f"[model-quantization] the dataset at "
-            f"{prefix} (data.path_override) is not staged off-cluster; run this step in-cluster "
-            "or upload the dataset with the dataset CLI.")
-    for candidate in (os.path.join(root, resolved), os.path.join(root, "dataset"),
-                      os.path.join(root, "dataset", ref), root):
-        if os.path.exists(os.path.join(candidate, "data.yaml")):
-            return candidate
-    raise SystemExit(
-        f"[model-quantization] KUBECORE_DATASET_DIR={root} is mounted but holds no data.yaml under "
-        "dataset/ or its root — the staged ref does not carry a dataset in the platform layout.")
-
-
-def _output_prefix(q: dict, platform: dict, experiment: str) -> str:
-    """lakeFS {branch}/{path} for the INT8 artifacts. The first segment is the
-    branch the service commits on (#896). Default: the branch pipeline outputs
-    go to (the checkpoint prefix's first segment — `outputs` once the project
-    has it), under quantization/{experiment}/{run} so runs never overwrite each
-    other. An explicit quantization.output_prefix is used as given."""
-    explicit = str(q.get("output_prefix") or "").strip("/")
-    if explicit:
-        return explicit
-    ckpt = os.environ.get("CHECKPOINT_PREFIX") or str(
-        (platform.get("checkpoints") or {}).get("prefix") or "")
-    branch = ckpt.split("/", 1)[0] or "main"
-    run = os.environ.get("KUBECORE_RUN_ID", "").strip()
-    return "/".join(p for p in (branch, "quantization", experiment, run) if p)
-
-
-def _link_staged(staged, dest):
-    """Expose the read-only staged dataset under {dest}: symlink every entry,
-    copy data.yaml so _fix_data_yaml can repoint it."""
-    import shutil
-    for name in os.listdir(staged):
-        target = os.path.join(dest, name)
-        if os.path.lexists(target):
-            continue
-        if name == "data.yaml":
-            shutil.copyfile(os.path.join(staged, name), target)
-        else:
-            os.symlink(os.path.join(staged, name), target)
-    print(f"[dataset] staged at {staged} -> linked under {dest} (local mode)", flush=True)
-
-
-def _fix_data_yaml(dataset_dir):
-    """The uploaded data.yaml carries an absolute ``path:`` baked in at dataset-
-    creation time (the uploader's machine, e.g. /home/.../speedplus_yolo_101), so
-    Ultralytics' calibration/parity loaders resolve images to a path that does not
-    exist in-pod. Repoint it at the locally-downloaded tree."""
-    p = os.path.join(dataset_dir, "data.yaml")
-    if not os.path.exists(p):
-        return
-    with open(p) as f:
-        dy = yaml.safe_load(f) or {}
-    dy["path"] = dataset_dir
-    for split in ("train", "val", "test"):
-        if os.path.isdir(os.path.join(dataset_dir, "images", split)):
-            dy[split] = f"images/{split}"
-    with open(p, "w") as f:
-        yaml.safe_dump(dy, f, sort_keys=False)
-    print(f"[dataset] repointed {p} -> path={dataset_dir} "
-          f"splits={[s for s in ('train','val','test') if s in dy]}", flush=True)
+def _output_bucket(platform: dict) -> str:
+    """The app's own outputs repository (`outputs-<app>`): the platform injects
+    it as CHECKPOINT_BUCKET and mirrors it in platform.checkpoints.bucket."""
+    return os.environ.get("CHECKPOINT_BUCKET") or str(
+        (platform.get("checkpoints") or {}).get("bucket") or "")
 
 
 def _setup_mlflow_auth() -> bool:
-    """Mint a Zitadel bearer token for MLflow directly — no entry-point plugin, no
-    root install. #868 mounts the machine key at ZITADEL_MACHINE_KEY_FILE; we reuse the
-    vendored token source and set MLFLOW_TRACKING_TOKEN, bypassing the request_auth
-    plugin (which would need a build-breaking root install). Returns True on success."""
-    key = os.environ.get("ZITADEL_MACHINE_KEY_FILE")
-    if not key or not os.path.exists(key):
-        return False
+    """MLflow auth through kaos-lib (kaos-lib[mlflow]). ``mlflow()`` sets the tracking URI and
+    MLFLOW_TRACKING_AUTH=zitadel; that request-auth provider ships with kaos-lib and takes the
+    bearer from one chain: the platform's MLFLOW_TRACKING_TOKEN (MeluXina), else a token minted
+    from the machine key at ZITADEL_MACHINE_KEY_FILE with the org project's audience and minted
+    again before it expires. Returns True when MLflow is usable; otherwise MLflow is disabled
+    (non-fatal)."""
     try:
-        from app.mlflow_zitadel_auth import _ZitadelTokenSource
-        os.environ["MLFLOW_TRACKING_TOKEN"] = _ZitadelTokenSource().token()
-        os.environ.pop("MLFLOW_TRACKING_AUTH", None)  # use bearer token, not the plugin
-        print("[mlflow] Zitadel bearer token minted -> MLflow ENABLED.", flush=True)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        print(f"[mlflow] token mint failed: {exc} -> MLflow disabled (non-fatal).", flush=True)
+        from kaos_lib.mlflow import mlflow
+        mlflow()
+    except Exception as exc:  # noqa: BLE001 - MLflow is optional for this step
+        print(f"[mlflow] {exc} -> MLflow disabled (non-fatal).", flush=True)
         return False
+    print("[mlflow] kaos-lib auth (MLFLOW_TRACKING_AUTH=zitadel) -> MLflow ENABLED.", flush=True)
+    return True
 
 
 def main() -> None:
+    print(f"kaos-lib {kaos_lib_version()}", flush=True)  # the package this image runs
     parser = argparse.ArgumentParser()
     parser.add_argument("--params", required=True)
     parser.add_argument("--training-result", default="")
@@ -190,28 +87,20 @@ def main() -> None:
     qr = _load(args.qat_result)
 
     mode = q.get("mode", "ptq")
-    repo = platform["lakefs"]["repository"]
 
     # qat mode passes through the qat-produced tflite; ptq exports from the FP32 .pt.
     tflite_s3_uri = qr.get("tflite_s3_uri") if mode == "qat" else None
     qat_run_id = qr.get("mlflow_run_id") if mode == "qat" else None
 
-    # Materialise the calibration dataset locally (dirs + download) before the service.
-    data = cfg.get("data", {})
-    # The dataset training used (commit-pinned), so calibration/parity run on
-    # the same snapshot; its ref/commit go into the artifacts' lakeFS commit.
-    _ref = str(tr.get("dataset_ref") or data.get("ref") or "main")
-    _prefix = _dataset_prefix(tr, _ref)
+    # The calibration/parity dataset: the commit training pinned, read through the
+    # kaos-lib consumer (one download, or the copy staged on MeluXina). Its ref/commit
+    # go into the artifacts' lakeFS commit metadata.
+    _ref = str(tr.get("dataset_ref") or "")
     os.environ["KUBECORE_DATASET_REF"] = _ref
     os.environ["KUBECORE_DATASET_COMMIT"] = str(tr.get("dataset_commit") or "")
-    os.makedirs(DATASET_DIR, exist_ok=True)
     os.makedirs(RUNS_DIR, exist_ok=True)
-    staged = _staged_dataset_dir(_prefix, _ref)
-    if staged:
-        _link_staged(staged, DATASET_DIR)
-    else:
-        _download_prefix(str(tr.get("dataset_bucket") or repo), _prefix, DATASET_DIR)
-    _fix_data_yaml(DATASET_DIR)
+    data_yaml = lakefs_io.materialize(_ref, str(tr.get("dataset_commit") or ""), DATASET_DIR)
+    print(f"[dataset] {_ref} @ {tr.get('dataset_commit')} -> {data_yaml}", flush=True)
 
     _setup_mlflow_auth()
 
@@ -220,10 +109,9 @@ def main() -> None:
     result = Manager().run(
         mode=mode,
         source_mlflow_run_id=(tr.get("mlflow_run_id") or ""),
-        dataset_dir=DATASET_DIR,
+        dataset_dir=str(data_yaml.parent),
         output_dir=RUNS_DIR,
-        output_bucket=repo,
-        output_prefix=_output_prefix(q, platform, exp["name"]),
+        output_bucket=_output_bucket(platform),
         experiment_name=exp["name"],
         fp32_checkpoint_path=tr.get("best_checkpoint_s3"),
         tflite_s3_uri=tflite_s3_uri,
