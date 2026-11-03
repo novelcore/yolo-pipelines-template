@@ -45,7 +45,7 @@ python3 -m venv ~/.venvs/kaos && . ~/.venvs/kaos/bin/activate
 pip install --index-url https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib-rc/simple/ \
     --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel,mlflow]>=0.4.0rc5"
 kaosctl login                                              # inside the app folder
-kaosctl dataset create spacecraft --classes spacecraft     # yolo layout; add kpt_shape to data.yaml
+kaosctl dataset create spacecraft --layout yolo --classes spacecraft   # yolo layout; add kpt_shape to data.yaml
 kaosctl dataset push ./dataset-spacecraft dataset-spacecraft -m "first images"
 kaosctl dataset release dataset-spacecraft                 # after merging the pull request
 ./run.sh                                                   # render the pipeline locally, no cluster

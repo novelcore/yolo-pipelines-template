@@ -14,7 +14,7 @@ links to the page with the details.
 ## 1. Your dataset
 
 ```bash
-kaosctl dataset create spacecraft --classes spacecraft
+kaosctl dataset create spacecraft --layout yolo --classes spacecraft
 kaosctl dataset pull dataset-spacecraft@latest ./dataset-spacecraft
 # add kpt_shape and flip_idx to data.yaml; copy in images/ and one labels/ .txt per image
 kaosctl dataset validate ./dataset-spacecraft
