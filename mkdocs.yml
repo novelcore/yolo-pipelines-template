@@ -88,6 +88,7 @@ nav:
       - First dataset to results: first-run.md
       - Datasets: datasets.md
       - How the steps use datasets: datasets-in-the-steps.md
+      - Package versions and upgrades: kaos-lib-versions.md
   - Run it:
       - Run the pipeline: run-it.md
       - Where it trains: where-it-trains.md
