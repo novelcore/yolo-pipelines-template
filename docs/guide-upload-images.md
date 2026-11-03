@@ -12,7 +12,7 @@ is `dev`, `ops` or `admin`.
 List your classes in label-id order. The first one is id `0`.
 
 ```bash
-kaosctl dataset create spacecraft --classes spacecraft
+kaosctl dataset create spacecraft --layout yolo --classes spacecraft
 ```
 
 In the browser: lakeFS → **Datasets** → **New dataset** → layout **yolo**, one class per line.

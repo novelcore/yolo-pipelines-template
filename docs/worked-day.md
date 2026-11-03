@@ -35,7 +35,7 @@ Each part below is short and links to the full page.
 
 ## Late morning: your labelled images
 
-6. **Create, label, upload**: `kaosctl dataset create spacecraft --classes spacecraft`, add
+6. **Create, label, upload**: `kaosctl dataset create spacecraft --layout yolo --classes spacecraft`, add
    `kpt_shape` and `flip_idx` to `data.yaml`, copy in images and one label file per image,
    `kaosctl dataset validate`, then `kaosctl dataset push`
    ([Upload images and labels](guide-upload-images.md)).

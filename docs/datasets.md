@@ -29,10 +29,11 @@ This pipeline trains **pose**, so `data.yaml` also needs `kpt_shape` and `flip_i
 
 ## Layouts are optional
 
-`kaosctl dataset create <name>` starts a repository with the `yolo` layout: the starter files
-above, plus the checks that `validate` and `push` run. You can do without it:
+`kaosctl dataset create <name> --layout yolo --classes a,b` starts a repository with the `yolo`
+layout: the starter files above, plus the checks that `validate` and `push` run. A layout is never
+assumed, so name it for this pipeline. You can do without it:
 
-- `kaosctl dataset create <name> --layout none` makes an empty `dataset-<name>`.
+- `kaosctl dataset create <name>` (or `--layout none`) makes an empty `dataset-<name>`.
 - A repository named `dataset-<something>` created by hand in lakeFS becomes a dataset after its
   first commit.
 - A repository with **no layout validates nothing**; `push` takes the files as they are.
@@ -46,7 +47,7 @@ above, plus the checks that `validate` and `push` run. You can do without it:
 
 ```bash
 kaosctl login
-kaosctl dataset create <name> [--classes a,b] [--layout yolo|none] [--description "..."]
+kaosctl dataset create <name> [--layout yolo|none] [--classes a,b] [--description "..."]   # --classes needs --layout yolo
 kaosctl dataset list [--shared]
 kaosctl dataset versions <repo>
 kaosctl dataset pull <repo>@<ref> [dir] [--prefix folder/]
