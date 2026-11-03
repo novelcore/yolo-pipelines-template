@@ -26,10 +26,10 @@ at the **root** of the repository. Anything else in the repository (a README, no
 
 ## Templates are optional
 
-`kubecore dataset create <name>` starts a repository from the `ultralytics` template: the starter
+`kaosctl dataset create <name>` starts a repository from the `ultralytics` template: the starter
 layout above plus the checks that `validate` and `push` run. You can do without it:
 
-- `kubecore dataset create <name> --template none` makes an empty `dataset-<name>`.
+- `kaosctl dataset create <name> --template none` makes an empty `dataset-<name>`.
 - A repository named `dataset-<something>` created by hand in lakeFS becomes a dataset after its
   first commit.
 - A repository with **no template label validates nothing**; `push` takes the files as they are.
@@ -40,14 +40,14 @@ layout above plus the checks that `validate` and `push` run. You can do without 
 ## The commands
 
 ```bash
-kubecore login
-kubecore dataset create <name> [--classes a,b] [--template ultralytics|none]
-kubecore dataset list
-kubecore dataset versions <repo>
-kubecore dataset pull <repo>@<ref> [dir] [--prefix folder/]
-kubecore dataset validate <dir> --format ultralytics
-kubecore dataset push <dir> <repo> -m "message" [--format ultralytics]
-kubecore dataset release <repo>
+kaosctl login
+kaosctl dataset create <name> [--classes a,b] [--template ultralytics|none]
+kaosctl dataset list
+kaosctl dataset versions <repo>
+kaosctl dataset pull <repo>@<ref> [dir] [--prefix folder/]
+kaosctl dataset validate <dir> --format ultralytics
+kaosctl dataset push <dir> <repo> -m "message" [--format ultralytics]
+kaosctl dataset release <repo>
 ```
 
 Every command prints the next step and the link to what it made. Exit codes: 0 ok, 1 something for

@@ -155,7 +155,7 @@ class DatasetLoadingService:
         output_path.mkdir(parents=True, exist_ok=True)
 
         # CON-04: read the commit the caller pinned (entry.py resolved the run's
-        # dataset choice with the kubecore package): every later step reads the same
+        # dataset choice with kaos-lib): every later step reads the same
         # prefix (manifest-summary), so a run sees one immutable snapshot even if
         # `main` moves mid-run.
         lakefs_commit: Optional[str] = None
