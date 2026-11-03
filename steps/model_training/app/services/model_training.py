@@ -1268,6 +1268,31 @@ class TrainingService:
     # train() kwargs
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _cap_workers(workers: int) -> int:
+        """DataLoader workers within this step's cores, one left for the training process.
+
+        On a shared Slurm node (kubecore-operator PRD-HPC-1609) the step owns one slot's cores,
+        but ``os.cpu_count()``, which Ultralytics sizes by, still counts every core of the node.
+        kaos-lib's ``runtime.usable_cpus()`` is the slot's cores, else the CPU binding; an older
+        kaos-lib without it falls back to the CPU binding here. 0 (single-process loading) stays 0.
+        """
+        if workers <= 0:
+            return workers
+        try:
+            from kaos_lib import runtime
+
+            usable = runtime.usable_cpus()
+        except (ImportError, AttributeError):
+            try:
+                usable = len(os.sched_getaffinity(0))
+            except (AttributeError, OSError):
+                usable = os.cpu_count() or 1
+        capped = max(1, min(workers, usable - 1))
+        if capped != workers:
+            _logger.info("DataLoader workers %d -> %d: this step may use %d cores", workers, capped, usable)
+        return capped
+
     def _resolve_device(self, device: "str | None") -> "str | int | None":
         """Resolve the training device, defaulting to GPU when one is present.
 
@@ -1327,7 +1352,7 @@ class TrainingService:
             "nbs": params.nbs,
             "amp": params.amp,
             "close_mosaic": params.close_mosaic,
-            "workers": params.workers,
+            "workers": self._cap_workers(params.workers),
             "seed": params.seed,
             "deterministic": params.deterministic,
             "patience": params.patience,
