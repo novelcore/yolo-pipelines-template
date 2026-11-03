@@ -584,7 +584,7 @@ class DatasetLoadingService:
         if data_yaml_key is None:
             raise DatasetLoadingError(
                 f"data.yaml not found on S3 at s3://{bucket}/{prefix}. "
-                "A valid Ultralytics YOLO dataset must include data.yaml at the prefix root."
+                "A valid yolo dataset must include data.yaml at the prefix root."
             )
 
         # --- Count per split -----------------------------------------------

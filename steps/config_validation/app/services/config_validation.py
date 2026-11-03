@@ -140,7 +140,7 @@ class ConfigValidationService:
         if not has_yaml:
             raise ConfigValidationError(
                 f"dataset {dataset} (commit {commit[:12]}) has no data.yaml at the root of its "
-                "repository - a valid Ultralytics YOLO dataset has data.yaml, images/ and labels/.")
+                "repository - a valid yolo dataset has data.yaml, images/ and labels/.")
         self._log.info("dataset OK (%s -> commit %s, data.yaml present)", dataset, commit[:12])
 
     @staticmethod
@@ -193,7 +193,7 @@ class ConfigValidationService:
         # missing/misplaced data.yaml.
         raise ConfigValidationError(
             f"dataset at {uri} has no data.yaml at its root — a valid "
-            f"Ultralytics YOLO dataset must include data.yaml, images/ and labels/ "
+            f"yolo dataset must include data.yaml, images/ and labels/ "
             f"at the root of its repository.{hint}"
         )
 
