@@ -1,120 +1,60 @@
-# First dataset, first run, your results
+# Guide: first dataset to a trained model
 
-This page takes you from nothing to a trained model and its files, with every command.
+**Goal:** from a new yolo app to a trained model and its files, as quickly as possible. Each step
+links to the page with the details.
 
-!!! warning "First, you need an app"
-    This page assumes you have **already created an app from this template** and cloned it
-    ([What you need](what-you-need.md)). Your app carries `.kubecore/dataset-config.yaml`, the
-    small file that tells the tool where your project's lakeFS is. You never need a link or a password.
+**You need:** a yolo app cloned on your computer, and `kaosctl` signed in inside its folder
+([A day with yolo](worked-day.md), morning).
 
-## 1. Install the tool and sign in
+!!! note "Not on `dataset-default`"
+    A new project's `dataset-default` is empty. The yolo pipeline needs a `data.yaml`, so a run on
+    `dataset-default@latest` (the form's default) stops at `config-validation` with
+    "has no data.yaml at the root of its repository". Upload your data first.
 
-The `kaosctl` tool comes with kaos-lib, a Python package. Install it once, inside a small private Python space
-for this project (a "virtual environment"), in your app folder.
-
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install --index-url https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib/simple/ \
-    --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel]==0.4.0"
-kaosctl login
-```
-
-kaos-lib comes from the platform's public package index (the second line takes its dependencies from PyPI); your
-platform contact can tell you the version your project's steps use. On Windows, the second line is `.venv\Scripts\activate`.
-Your browser opens once and asks you to sign in. Log in, close the tab, and go back to the
-Terminal. The tool remembers you.
-
-!!! tip "Why the virtual environment?"
-    Many computers no longer let `pip install` change the system's own Python (a message that
-    mentions `externally-managed-environment`). The virtual environment avoids that.
-
-## 2. Create a dataset
+## 1. Your dataset
 
 ```bash
 kaosctl dataset create spacecraft --classes spacecraft
-```
-
-This makes the lakeFS repository `dataset-spacecraft` with the YOLO starter layout:
-`data.yaml`, `images/{train,val,test}/` and `labels/{train,val,test}/`, and prints a link to it.
-
-This pipeline trains **pose**, so after the first step open `data.yaml` and add the keypoints
-of your dataset (`kpt_shape: [4, 3]`, `flip_idx: [0, 3, 2, 1]`, for four keypoints with
-visibility): the next step shows how.
-
-!!! note "Templates are optional"
-    `kaosctl dataset create spacecraft --template none` makes an empty `dataset-spacecraft`,
-    and a `dataset-*` repository you create by hand in lakeFS becomes a dataset after its first
-    commit. Everything below works the same.
-
-## 3. Put your files in
-
-```bash
 kaosctl dataset pull dataset-spacecraft@latest ./dataset-spacecraft
-# edit ./dataset-spacecraft/data.yaml (kpt_shape, flip_idx, names)
-# copy your images into images/train, images/val, images/test
-# and one label file per image into labels/train, labels/val, labels/test
-kaosctl dataset validate ./dataset-spacecraft --format ultralytics
+# add kpt_shape and flip_idx to data.yaml; copy in images/ and one labels/ .txt per image
+kaosctl dataset validate ./dataset-spacecraft
 kaosctl dataset push ./dataset-spacecraft dataset-spacecraft -m "first 200 images"
 ```
 
-- `validate` lists every problem it finds in one go: a label for no image, a class number
-  outside `names`, a keypoint count that does not match `kpt_shape`. Fix them and run it again.
-- `push` uploads your folder to a draft and opens a **pull request**; it prints the link.
-
-## 4. Merge the pull request and release a version
-
-Open the pull request link, look at the change, and merge it. Nothing changes on `main` until
-you do. Then tag the new state as a version:
+Merge the pull request in lakeFS, then release `v1`:
 
 ```bash
-kaosctl dataset release dataset-spacecraft      # prints v1
-kaosctl dataset versions dataset-spacecraft
+kaosctl dataset release dataset-spacecraft
 ```
 
-A run reads a version, not "whatever is there now", so a result always points back to its data.
+Details: [Upload images and labels](guide-upload-images.md).
 
-## 5. Run the pipeline on it
+## 2. Train
 
-Open the pipeline in the Argo UI ([Run the pipeline](run-it.md)). The form's **`dataset`** field is a
-dropdown of `<dataset>@<version>` choices:
+Console → **Pipelines** → your app → **Run**. Set `dataset` = `dataset-spacecraft@v1`,
+`experiment-name` = `my-first-run`, `model` = `yolov8n` and `train-epochs` = `10`, then **Submit**.
+If `v1` is not in the dropdown yet, wait a few minutes and reopen the form
+([Run the pipeline](run-it.md)).
 
-```
-dataset-spacecraft@v1
-dataset-spacecraft@latest
-dataset-default@latest
-```
+To train on MeluXina, set `model-training-class` to `meluxina-gpu` on the same form
+([Where it trains](where-it-trains.md)).
 
-Pick `dataset-spacecraft@v1`, set `experiment-name` (for example `my-first-run`), and Submit. If the
-new version is not in the list yet, wait a few minutes: the list is refreshed when a dataset or a
-version changes.
-
-The checking step confirms the dataset and version exist and have a `data.yaml`; `dataset-loading`
-turns your pick into one commit; training reads that commit, even if someone merges a change
-to the dataset during the run.
-
-To train on MeluXina, choose a `meluxina-gpu` class for `model-training` on the same form: the dataset
-is staged there for you and the results come back to the same place.
-
-## 6. Find your results
+## 3. Your results
 
 - **Numbers, charts and the registered model** are in MLflow ([Read your results](results.md)).
-- **Your files** are in the app's repository `outputs-<app>` in lakeFS, branch `main`. Every step
-  that wrote files added **one commit**, named after the run:
+- **Weights** are in `outputs-<app>` in lakeFS, one commit per step per run:
 
     | folder | what |
     |---|---|
     | `checkpoints/<experiment>/<run>/` | `best.pt`, `last.pt`, `epoch_NNNN.pt`, exports |
     | `quantization/<experiment>/<run>/` | the INT8 `.tflite` (when quantization is on) |
 
-  `<experiment>` is your `experiment-name`; `<run>` is the name of the Argo run. To get them on
-  your computer:
-
 ```bash
-kaosctl dataset pull outputs-<app>@main ./results --prefix checkpoints/<experiment>/<run>/
+kaosctl dataset pull outputs-<app>@main ./results --prefix checkpoints/my-first-run/<run>/
 ```
 
-The commit's details say which dataset and which commit the run trained on, and the MLflow run id.
+The commit's details name the dataset, the commit it trained on, and the MLflow run id. If the
+training step is retried (for example, its machine was reclaimed), it resumes from its last saved
+checkpoint.
 
-If a training step is retried (its machine was reclaimed), it resumes from the last checkpoint it
-saved instead of starting over.
+**Next:** [Train on a version and find the model](guide-train-and-find-the-model.md).

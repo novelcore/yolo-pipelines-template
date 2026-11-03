@@ -2,19 +2,19 @@
 
 Plain meanings for the words in this guide. One sentence each. Come back any time.
 
-**Argo Workflows.** The tool that runs your pipeline on real machines and shows each step. Your contact gives you the link to yours.
+**Argo Workflows.** The tool that runs your pipeline on real machines and shows each step. The console's **Pipelines** page links to it.
 
 **Artifact.** A file a run produces, such as the trained model or an example output.
 
-**Data ref.** The name of the dataset version you train on. Usually `main`. You type it into the form.
+**Dataset.** Your images and their labels, in the yolo layout, stored in lakeFS as the repository `dataset-<name>`. Its versions are tags (`v1`, `v2`, ...); you pick one in the form's `dataset` field, for example `dataset-spacecraft@v1`.
 
-**Dataset.** Your images and their labels, in the YOLO shape, stored in lakeFS.
+**kaosctl.** The command-line tool that comes with kaos-lib (0.4.0rc5 or newer): create, push, validate, release and pull datasets, and replay a run's data.
 
 **Epoch.** One full pass over your dataset during training. More epochs means more training.
 
 **INT8.** A smaller, faster form of a model. The quantization steps produce it.
 
-**lakeFS.** The storage where your dataset lives, and where the pipeline reads it from.
+**lakeFS.** Your project's data store: your datasets, and the `outputs-<app>` repository where runs write their weights.
 
 **Metric.** A number that says how good a model is, shown as a chart in MLflow.
 
