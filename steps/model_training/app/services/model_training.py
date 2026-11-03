@@ -25,6 +25,8 @@ import os
 import re
 import shutil
 import tempfile
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -33,6 +35,16 @@ import yaml
 from app.models.training import TrainingParams, TrainingResult
 from app.services import lakefs_io
 from app.services.resource_monitor import ResourceMonitor
+
+
+def kaos_lib_version() -> str:
+    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
+    for dist in ("kaos-lib", "kubecore"):
+        try:
+            return package_version(dist)
+        except PackageNotFoundError:
+            pass
+    return "unknown"
 
 
 def checkpoint_base(params: "TrainingParams") -> str:
@@ -611,7 +623,8 @@ class TrainingService:
 
     @staticmethod
     def _tag_kubecore_metadata(run_id: str) -> None:
-        """Tag the MLflow run with KUBECORE_* environment variables.
+        """Tag the MLflow run with KUBECORE_* environment variables and ``kaos_lib.version``
+        (the kaos-lib package this image runs; novelcore/kaos#1147).
 
         Uses MlflowClient (not the fluent API) so it works on an already-ended
         run without triggering a new ghost run via mlflow.autolog().
@@ -626,6 +639,7 @@ class TrainingService:
                 for k, v in os.environ.items()
                 if k.startswith("KUBECORE_") and v
             }
+            kubecore_tags["kaos_lib.version"] = kaos_lib_version()
             if kubecore_tags:
                 client = MlflowClient()
                 for key, value in kubecore_tags.items():

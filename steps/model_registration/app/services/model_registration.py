@@ -3,12 +3,24 @@ import re
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from typing import Any, Optional
 
 import mlflow
 from mlflow.tracking import MlflowClient
 
 from app.models.registration import RegistrationParams, RegistrationResult
+
+
+def kaos_lib_version() -> str:
+    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
+    for dist in ("kaos-lib", "kubecore"):
+        try:
+            return package_version(dist)
+        except PackageNotFoundError:
+            pass
+    return "unknown"
 
 
 class ModelRegistrationError(Exception):
@@ -179,7 +191,8 @@ class ModelRegistrationService:
         checkpoint_type: str,
     ) -> None:
         """Apply lineage and checkpoint-type tags to a registered model version."""
-        tags: dict[str, str] = {"checkpoint_type": checkpoint_type}
+        # kaos_lib.version: the kaos-lib package this image runs (novelcore/kaos#1147).
+        tags: dict[str, str] = {"checkpoint_type": checkpoint_type, "kaos_lib.version": kaos_lib_version()}
 
         if params.mlflow_run_id:
             tags["training_run_id"] = params.mlflow_run_id

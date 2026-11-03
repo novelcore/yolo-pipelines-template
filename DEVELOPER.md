@@ -568,8 +568,8 @@ pytest step_tests                                  # step code that imports the 
 
 **Why two.** The repository holds two things that are both imported as `kubecore`: the platform's
 engine in `kubecore/` (render, compose, enhance; it runs in CI and is never in a step image) and the
-Python package (datasets, run outputs; it is installed in the step images from a pinned commit,
-`KUBECORE_PKG_COMMIT`). Python can import only one of them in a process, whichever comes first on
+Python package (datasets, run outputs; it is installed in the step images at the version the
+platform passes as `KAOS_LIB_PACKAGE`, see docs/kaos-lib-versions.md). Python can import only one of them in a process, whichever comes first on
 `sys.path`. So:
 
 - the engine tests put the repository root on the path, and run with `python -m pytest tests`;

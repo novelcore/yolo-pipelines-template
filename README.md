@@ -137,14 +137,18 @@ warning. `last.pt` is registered from its lakeFS path, without a tag. A run with
 ## The `kubecore` package
 
 The steps use the `kubecore` Python package (`packages/kubecore` of
-[`hera-pipeline-template`](https://github.com/novelcore/hera-pipeline-template), pinned by
-commit in every step Dockerfile as `KUBECORE_PKG_COMMIT`): dataset refs and their commits,
-the local or MeluXina-staged copy of a dataset, the run writer for results, and the
-`kubecore` command. Install it on your computer inside a virtual environment:
+[`hera-pipeline-template`](https://github.com/novelcore/hera-pipeline-template)): dataset
+refs and their commits, the local or MeluXina-staged copy of a dataset, the run writer for
+results, and the `kubecore` command. The platform picks the version your step images install,
+inside the range in `.kaos/compat.yaml`, and passes it to every step Dockerfile as
+`KAOS_LIB_PACKAGE`; a version outside the range arrives as a pull request on
+`kaos-lib/bump-<version>` (see [docs/kaos-lib-versions.md](docs/kaos-lib-versions.md)).
+Install it on your computer inside a virtual environment, with the requirement in
+`KAOS_LIB_PACKAGE` of `steps/model_training/Dockerfile`:
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
-pip install "git+https://github.com/novelcore/hera-pipeline-template@<commit>#subdirectory=packages/kubecore"
+pip install "kubecore @ https://github.com/novelcore/hera-pipeline-template/archive/<commit>.zip#subdirectory=packages/kubecore"
 kubecore login                    # opens your browser once
 ```
 
