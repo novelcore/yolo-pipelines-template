@@ -58,7 +58,7 @@ run can be reproduced exactly.
 # config/train.yaml (excerpt — a SECTION with scalar leaves)
 train:
   epochs: 100        # total training epochs
-  batch_size: 16     # -1 for Ultralytics auto-batch
+  batch_size: 16     # -1 for auto-batch
   cos_lr: true       # plain booleans are fine
   loss:
     pose: 12.0       # nested scalars work too

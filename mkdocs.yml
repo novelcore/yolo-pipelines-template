@@ -1,5 +1,5 @@
-site_name: Hera ML Pipeline Guide
-site_description: A friendly, step by step guide to running the YOLO training pipeline
+site_name: yolo Pipeline Guide
+site_description: Train, compare and pick YOLO pose models on KAOS - the worked use case of the engineer's cookbook
 site_author: Novelcore
 site_url: https://novelcore.github.io/yolo-pipelines-template/
 
@@ -81,20 +81,26 @@ extra:
 
 nav:
   - Home: index.md
-  - Getting ready:
-      - What you need: what-you-need.md
+  - A day with yolo: worked-day.md
+  - Guides:
+      - First dataset to a trained model: first-run.md
+      - Upload images and labels: guide-upload-images.md
+      - Train on a version and find the model: guide-train-and-find-the-model.md
+  - The pipeline:
       - What the pipeline does: the-pipeline.md
-  - Your data:
-      - First dataset to results: first-run.md
-      - Datasets: datasets.md
-      - How the steps use datasets: datasets-in-the-steps.md
-      - Package versions and upgrades: kaos-lib-versions.md
-  - Run it:
       - Run the pipeline: run-it.md
       - Where it trains: where-it-trains.md
       - Watch it train: watch-it.md
+  - Results:
       - Read your results: results.md
       - Promote a model: promote.md
+  - Datasets:
+      - Datasets: datasets.md
+      - How the steps use datasets: datasets-in-the-steps.md
+  - kaos-lib:
+      - Versions and upgrades: kaos-lib-versions.md
+      - kaos-lib reference: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/index.html
+  - Cookbook (hera): https://novelcore.github.io/hera-pipeline-template/
   - Help:
       - When something breaks: troubleshooting.md
       - Word list: glossary.md

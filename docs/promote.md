@@ -6,10 +6,7 @@ When a run finishes, the last step saves the model and gives it a name and a ver
 
 **At run time, on the form.** When you submit a run, there is a field called `registration-promote_to`. Leave it empty and the model is just saved, not promoted. Set it to `champion` or `challenger` and the pipeline gives the model that label as soon as it finishes.
 
-**Later, in MLflow.** If you left it empty and decide later that a model is good, you can promote it by hand in MLflow. Open the model in the registry, pick the version, and add the alias.
-
-!!! info "Screenshot"
-    A picture of the registration-promote_to field on the form will go here.
+**Later, in MLflow.** If you left it empty and decide later that a model is good, you can promote it by hand in MLflow. Open the model in the registry, pick the version, and add the alias. This needs rights to manage the model in MLflow; a project `admin` has them (verify for other roles). The form way works whoever submits, because the pipeline registers with the project's own MLflow account.
 
 ## Which should you use
 
@@ -34,9 +31,6 @@ So from any of the three you reach the other two:
 | the lakeFS tag `model-<name>-v<version>` | the commit's details name the MLflow run |
 
 Runs trained before the Models tab was used are registered straight from the `best.pt` file in lakeFS. Those versions have no model in the Models tab and no source run link; their lakeFS tag and `kaos.*` tags work the same way.
-
-!!! info "Screenshot"
-    A picture of the model in the MLflow registry, showing its alias, will go here.
 
 ## What promotion means
 

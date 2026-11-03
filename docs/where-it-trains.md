@@ -10,7 +10,7 @@ By default, training runs in your cluster, on a graphics card. You do not choose
 
 Each step on the form has its own dropdown called `<step>-class`, for example `model-training-class`. This picks which kind of machine that step runs on. The options are the machine classes your project was set up with. Your platform contact decides what is in that list.
 
-So the placement is per step. You could put the heavy training step on a big machine and leave the quick steps on small ones. Most of the time the defaults are already sensible, so you can ignore this.
+So the placement is per step. You could put the heavy training step on a big machine and leave the quick steps on small ones. Most of the time the defaults are already sensible, so you can ignore this. The read-only `pipeline-info` field at the top of the form lists the classes your project has.
 
 ![The model-training-class dropdown open, showing cluster and MeluXina options](img/training-class.png)
 
@@ -22,6 +22,10 @@ Two things to know about MeluXina.
 
 - There can be a wait. MeluXina is shared, so your step may sit in a queue for a while before it starts. That is normal.
 - It only appears if your project is set up for it. If you do not see `meluxina` options, your project is not connected, and that is fine. The cluster GPU works the same way.
+- Training has a 12-hour limit there (`hpc_time_limit="12h"` on `model-training` in `pipeline.py`). Raise it in `pipeline.py` for longer trainings.
+- The dataset is staged on MeluXina before the job starts, and the weights come back to `outputs-<app>` exactly as for a cluster run.
+
+The hera guide's [MeluXina page](https://novelcore.github.io/hera-pipeline-template/meluxina/) has the details: the classes, staging, time limits, and what to do when a job waits or stops.
 
 ## What about GCP
 
@@ -29,6 +33,6 @@ You do not choose GCP. GCP is simply what the cluster runs on underneath. It is 
 
 ## The short version
 
-Leave the class dropdowns alone and training runs on a cluster GPU. That is the normal path. Only touch them if your contact tells you to use a specific class, or if you want to send the training step to MeluXina.
+Leave the class dropdowns alone and training runs on a cluster GPU. That is the normal path. Only touch them if you need a specific class, or if you want to send the training step to MeluXina.
 
 Next, watch it run. Go to [Watch it train](watch-it.md).

@@ -4,15 +4,15 @@ This is the moment it all pays off. You open a web page, set a few fields, and p
 
 ## Step 1. Open the run page
 
-Your platform contact gives you the link to the run page. It is run by a tool called Argo Workflows. You do not need to learn it. Open the link in your browser.
+In the console, open **Pipelines**, find your app, and click **Run**. That opens the run page in Argo Workflows. From Argo itself: **Workflow Templates** → `<app>-pipeline` → **Submit**.
 
-Find your pipeline in the list. It is named after your project, with `-pipeline` on the end. Click it, then look for the **Submit** button.
+**Who can do it:** `dev`, `ops` or `admin` on the project ([cookbook 1](https://novelcore.github.io/hera-pipeline-template/cookbook/1-youre-in/)).
 
 ![The pipeline template page, with the Submit button](img/argo-submit.png)
 
 ## Step 2. The form
 
-When you click Submit, a form opens. It has a lot of fields. Do not let that scare you. **Every field already has a sensible default.** You can press Submit right now and get a normal training run.
+When you click Submit, a form opens. It has a lot of fields. **Every field has a default, except that you must pick your own `dataset`.** The default, `dataset-default@latest`, is empty in a new project, so a run on it stops at `config-validation`.
 
 So the trick is simple. Change only the few fields you care about, and leave the rest alone.
 
@@ -25,12 +25,14 @@ Here are the handful worth setting. Everything else can stay as it is.
 | Field | What it does | A good first value |
 |---|---|---|
 | `experiment-name` | Names your run so you can find it later | something like `my-first-run` |
-| `dataset` | Which dataset to train on: `<dataset-repository>@<version>` | `dataset-default@latest`. A version is `v1`, `v2`, ... or `latest` |
+| `dataset` | Which dataset to train on: `<dataset-repository>@<version>`, or `<owner>/<dataset>@<version>` for one another project shares | your released version, for example `dataset-spacecraft@v1` |
 | `model` | Which model size to train | `yolov8n` to start. It is the small, fast one |
 | `train-epochs` | How many rounds of training | a small number like `10` for your first test |
 | `quantization-mode` | Whether to also make a smaller INT8 model | `none` for now |
 
 That is enough for a first run. A small model, a few epochs, no quantization. It finishes quickly and proves the whole thing works end to end.
+
+Every other field is one setting from `config/`, named by its path with dashes: `train.batch_size` is `train-batch_size`, `data.sample_size` is `data-sample_size`. The `<step>-class` fields choose the machine for each step ([Where it trains](where-it-trains.md)); the `<step>-cpu`, `<step>-mem` and `<step>-disk` fields ask for less of it. The read-only `pipeline-info` field at the top lists the classes.
 
 ![The key fields set: experiment-name, dataset, model, sample size](img/form-fields.png)
 

@@ -3,7 +3,7 @@
 Quantization step of the Kubeline YOLO MLOps pipeline (PRD-174).
 
 Produces an INT8 model from the trained FP32 YOLOv8-pose checkpoint. Supports:
-- **PTQ** — post-training INT8 quantization (Ultralytics TFLite int8 export with a
+- **PTQ** — post-training INT8 quantization (the YOLO TFLite int8 export with a
   calibration set), and
 - **QAT pass-through** — packages/validates the INT8 TFLite produced by `qat-finetune`.
 
