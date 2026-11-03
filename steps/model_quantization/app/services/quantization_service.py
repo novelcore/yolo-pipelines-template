@@ -277,7 +277,7 @@ class QuantizationService:
     def _upload_tflite(self, local_path: str, params) -> str:
         """Write the INT8 TFLite to ``outputs-<app>`` (one commit on main) and return its s3:// URI.
 
-        The commit is the kubecore package's ``write_run``: ``quantization/<experiment>/<run>/``
+        The commit is kaos-lib's ``write_run``: ``quantization/<experiment>/<run>/``
         saved on the run branch ``run-<run>-quantization`` and merged into main; the merge commit
         records the dataset ref and commit.
         """

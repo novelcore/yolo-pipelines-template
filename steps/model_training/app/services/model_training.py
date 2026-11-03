@@ -124,7 +124,7 @@ class TrainingService:
     ) -> None:
         self._s3 = s3_client
         self._outputs_stage: Optional[Path] = None  # scratch copies for the run writer (set in _run_training)
-        self._run_writer = None  # the open kubecore run writer (set in _run_training)
+        self._run_writer = None  # the open kaos-lib run writer (set in _run_training)
         self._mlflow_tracking_uri = mlflow_tracking_uri
         self._logger = logging.getLogger(__name__)
 

@@ -253,8 +253,8 @@ class ModelRegistrationService:
             )
             return
 
-        from kubecore.errors import NotFoundError  # noqa: PLC0415
-        from kubecore.lakefs import LakeFS  # noqa: PLC0415
+        from kaos_lib.errors import NotFoundError  # noqa: PLC0415
+        from kaos_lib.lakefs import LakeFS  # noqa: PLC0415
 
         tag = lakefs_tag_id(registered_model_name, version)
         lake = LakeFS.connect()

@@ -39,7 +39,7 @@ from pathlib import Path
 import yaml
 
 from app.manager import Manager
-from kubecore import datasets
+from kaos_lib import datasets
 
 # The config sections this step reads from params.yaml. The compose-and-validate
 # release gate fails the render if the config tree has no `data` section, so a
