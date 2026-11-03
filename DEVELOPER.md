@@ -418,7 +418,7 @@ with mlflow.start_run():
     mlflow.log_metric("mAP50", 0.87)
 ```
 
-Datasets and results go through the `kubecore` package (see `docs/datasets-in-the-steps.md`):
+Datasets and results go through kaos-lib (`kaos_lib`; see `docs/datasets-in-the-steps.md`):
 `datasets.materialize("<repo>@<ref>", prefix="folder/")` reads any repository at a pinned ref,
 `outputs.run(...)` writes results. You write no endpoint and no credential: the step's environment has
 them.
@@ -561,22 +561,18 @@ There are two test commands, on purpose:
 
 ```bash
 python -m pytest tests                             # the engine: the vendored kubecore/
-pip install "https://github.com/novelcore/hera-pipeline-template/archive/<commit>.zip#subdirectory=packages/kubecore" \
+pip install "$(sed -n 's/^ARG KAOS_LIB_PACKAGE="\(.*\)"$/\1/p' steps/*/Dockerfile | head -1)" \
     pytest boto3 psutil pydantic pydantic-settings    # once, in a virtual environment
-pytest step_tests                                  # step code that imports the kubecore package
+pytest step_tests                                  # step code that imports kaos_lib
 ```
 
-**Why two.** The repository holds two things that are both imported as `kubecore`: the platform's
-engine in `kubecore/` (render, compose, enhance; it runs in CI and is never in a step image) and the
-Python package (datasets, run outputs; it is installed in the step images from a pinned commit,
-`KUBECORE_PKG_COMMIT`). Python can import only one of them in a process, whichever comes first on
-`sys.path`. So:
+That installs exactly the requirement in `KAOS_LIB_PACKAGE` in the step Dockerfiles (run it from the repo root).
 
-- the engine tests put the repository root on the path, and run with `python -m pytest tests`;
-- the step tests need the *package*: run them with the `pytest` command (not `python -m pytest`, which
-  adds the repository root and loads the engine instead). `step_tests/conftest.py` stops with an
-  explanation if it sees the engine;
-- a step image copies only its `app/` folder.
+**Why two.** The platform's engine in `kubecore/` (render, compose, enhance; it runs in CI and is never
+in a step image) is imported as `kubecore`; the step code imports kaos-lib as `kaos_lib`, installed in
+the step images at the pinned `KAOS_LIB_PACKAGE`. For one release kaos-lib also ships a deprecated
+`kubecore` import shim, so the engine tests keep their own command with the repository root first on
+the path (`python -m pytest tests`). A step image copies only its `app/` folder.
 
-The step tests use the package's in-memory lakeFS (`step_tests/fake_lakefs.py`, copied from the package),
+The step tests use kaos-lib's in-memory lakeFS (`step_tests/fake_lakefs.py`, vendored at the same pin),
 so no network or cluster is needed.

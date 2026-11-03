@@ -16,7 +16,7 @@ You also need access to your app's code on GitHub, because you copy it to your c
 
 ## A computer with Python
 
-To make and send in a dataset you run the `kubecore` tool on your own computer. It needs Python.
+To make and send in a dataset you run the `kaosctl` tool on your own computer. It needs Python.
 
 - Most Macs and Linux machines already have Python. To check, open your Terminal and type `python3 --version`. If you see a number, you are set.
 - If not, download it from [python.org/downloads](https://www.python.org/downloads/) and install it with the default options.

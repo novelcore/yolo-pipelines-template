@@ -19,6 +19,8 @@ automatically once MLflow auth is wired.
 import argparse
 import json
 import os
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 import yaml
@@ -26,6 +28,16 @@ import yaml
 READS = ["dataset", "data", "model", "registration"]
 
 OUTPUT_DIR = Path("/work/output")   # durable step output (survives the pod)
+
+
+def kaos_lib_version() -> str:
+    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
+    for dist in ("kaos-lib", "kubecore"):
+        try:
+            return package_version(dist)
+        except PackageNotFoundError:
+            pass
+    return "unknown"
 
 
 def _write_result(payload: dict) -> None:
@@ -94,6 +106,7 @@ def _write_data_lock(mlflow_run_id: str, ds_ref: str, commit: str) -> bool:
 
 
 def main() -> None:
+    print(f"kaos-lib {kaos_lib_version()}", flush=True)  # the package this image runs
     parser = argparse.ArgumentParser()
     parser.add_argument("--params", required=True)
     parser.add_argument("--training-result", default="")

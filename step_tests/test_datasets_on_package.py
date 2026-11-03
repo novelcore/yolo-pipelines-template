@@ -1,15 +1,16 @@
-"""PRD novelcore/kaos#1283 F-07 / F-14: the steps read datasets and write results through the kubecore package.
+"""PRD novelcore/kaos#1283 F-07 / F-14: the steps read datasets and write results through kaos-lib (kaos_lib).
 
 A run picks `<dataset-repo>@<version>`; dataset-loading resolves it to ONE commit; training, qat and
 quantization read that commit (consumer) and write to `outputs-<app>` (write_run).
 """
 import json
+import re
 from pathlib import Path
 
 import pytest
 import yaml
 from conftest import DATA_YAML, ROOT, import_in, step_app
-from kubecore.errors import DatasetError
+from kaos_lib.errors import DatasetError
 
 # What the package refuses. Any repository name and any ref (vN, latest, a branch, a tag, a commit id)
 # are valid picks since package round 3; the run still pins whatever it is to one commit.
@@ -124,14 +125,14 @@ def _validation():
 
 def test_should_accept_a_dataset_version_with_data_yaml(client):
     mod, svc = _validation()
-    from kubecore import datasets
+    from kaos_lib import datasets
     svc._check_dataset(datasets.DatasetRef.parse("dataset-cats@v1"), client)
     svc._check_dataset(datasets.DatasetRef.parse("dataset-cats@latest"), client)
 
 
 def test_should_say_which_versions_exist(client):
     mod, svc = _validation()
-    from kubecore import datasets
+    from kaos_lib import datasets
     with pytest.raises(mod.ConfigValidationError, match="no version v9.*Available: v1"):
         svc._check_dataset(datasets.DatasetRef.parse("dataset-cats@v9"), client)
     with pytest.raises(mod.ConfigValidationError, match="does not exist"):
@@ -140,7 +141,7 @@ def test_should_say_which_versions_exist(client):
 
 def test_should_refuse_a_dataset_without_data_yaml(fake, client):
     mod, svc = _validation()
-    from kubecore import datasets
+    from kaos_lib import datasets
     fake.add_repo("dataset-empty", files={"README.md": b"x"})
     fake.tag("dataset-empty", "v1")
     with pytest.raises(mod.ConfigValidationError, match="has no data.yaml"):
@@ -241,7 +242,7 @@ def test_should_read_a_checkpoint_back_from_the_s3_uri_we_return(fake, client, t
 
 def _training_service(mod, tmp_path, client, monkeypatch):
     """A TrainingService with an OPEN run writer on outputs-yolo (what _run_training sets up)."""
-    from kubecore import outputs
+    from kaos_lib import outputs
     monkeypatch.setenv("KUBECORE_RUN_ID", "run-1")
     svc = mod.TrainingService.__new__(mod.TrainingService)
     svc._logger = mod.logging.getLogger("test")
@@ -363,15 +364,17 @@ def test_training_provenance_logs_dataset_repo_version_and_commit():
     assert '"dataset.lakefs_commit": params.lakefs_commit' in src
 
 
-def test_step_images_install_the_package_and_not_the_vendored_engine():
-    shas = set()
+def test_step_images_install_kaos_lib_and_not_the_vendored_engine():
+    specs = set()
     for step in ("dataset_loading", "config_validation", "model_training", "qat_finetune", "model_quantization",
                  "model_registration"):
         text = (ROOT / "steps" / step / "Dockerfile").read_text()
-        assert "subdirectory=packages/kubecore" in text, step
-        assert "COPY kubecore" not in text, step
-        shas.add(next(l.split("=")[1] for l in text.splitlines() if l.startswith("ARG KUBECORE_PKG_COMMIT")))
-    assert len(shas) == 1 and len(next(iter(shas))) == 40, "one pinned package commit, a full sha"
+        assert 'pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"' in text, step   # the WHOLE requirement
+        assert "COPY kubecore" not in text and "hera-pipeline-template" not in text, step
+        specs.add(next(l.split("=", 1)[1] for l in text.splitlines() if l.startswith("ARG KAOS_LIB_PACKAGE=")))
+    assert len(specs) == 1, "one kaos-lib pin for every step"
+    spec = next(iter(specs))
+    assert re.fullmatch(r'"kaos-lib\[zitadel\] @ https://github\.com/kaos-io/kaos-lib/archive/[0-9a-f]{40}\.zip"', spec), spec
 
 
 def test_should_pin_a_branch_pick_to_its_commit_too(client, fake):

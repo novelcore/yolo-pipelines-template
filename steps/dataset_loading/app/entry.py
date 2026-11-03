@@ -32,12 +32,14 @@ The developer writes none of that wiring.
 import argparse
 import json
 import sys
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 import yaml
 
 from app.manager import Manager
-from kubecore import datasets
+from kaos_lib import datasets
 
 # The config sections this step reads from params.yaml. The compose-and-validate
 # release gate fails the render if the config tree has no `data` section, so a
@@ -48,6 +50,16 @@ READS = ["data", "dataset"]
 # where the platform expects this step's declared outputs.
 DATASET_DIR = "/work/dataset"
 OUTPUT_DIR = Path("/work/output")
+
+
+def kaos_lib_version() -> str:
+    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
+    for dist in ("kaos-lib", "kubecore"):
+        try:
+            return package_version(dist)
+        except PackageNotFoundError:
+            pass
+    return "unknown"
 
 
 def _int_field(value, name: str, default: int) -> int:
@@ -161,6 +173,7 @@ def _write_outputs(cfg: dict) -> None:
 
 
 def main() -> None:
+    print(f"kaos-lib {kaos_lib_version()}", flush=True)  # the package this image runs
     parser = argparse.ArgumentParser()
     parser.add_argument("--params", required=True,
                         help="Resolved params.yaml content (from compose-and-validate).")

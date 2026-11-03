@@ -1,4 +1,4 @@
-"""lakeFS I/O of the ML steps, through the kubecore package (datasets and run outputs).
+"""lakeFS I/O of the ML steps, through kaos-lib (datasets and run outputs).
 
 Three jobs, one place, and the file is IDENTICAL in model-training, qat-finetune and
 model-quantization (each step image carries only its own app/):
@@ -17,9 +17,9 @@ import os
 from pathlib import Path
 from typing import Iterable, Optional
 
-from kubecore import datasets, outputs
-from kubecore.formats import get_format
-from kubecore.lakefs import LakeFS
+from kaos_lib import datasets, outputs
+from kaos_lib.formats import get_format
+from kaos_lib.lakefs import LakeFS
 
 OUTPUTS_REF = "main"  # the branch results are merged to; the first segment of the s3:// keys we return
 

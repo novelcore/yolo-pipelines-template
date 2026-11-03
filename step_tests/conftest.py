@@ -14,12 +14,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # fake_lakefs.py
 
-import kubecore  # noqa: E402
-
-if importlib.util.find_spec("kubecore.datasets") is None:   # the package (or kaos-lib's kubecore shim) has it
-    raise pytest.UsageError(
-        "`kubecore` resolved to the vendored engine, not the package. Run `pytest step_tests` "
-        "(not `python -m pytest`) with the package installed (see step_tests/README.md).")
+try:
+    import kaos_lib  # noqa: E402,F401
+except ImportError:
+    raise pytest.UsageError("step tests need kaos-lib: see step_tests/README.md for the pip install line") from None
 
 from fake_lakefs import FakeLakeFS  # noqa: E402
 
@@ -78,6 +76,6 @@ def client(fake):
 @pytest.fixture
 def connected(fake, monkeypatch):
     """LakeFS.connect() returns the fake: for code that connects on its own."""
-    from kubecore.lakefs import LakeFS
+    from kaos_lib.lakefs import LakeFS
     monkeypatch.setattr(LakeFS, "connect", classmethod(lambda cls, *a, **k: fake.client()))
     return fake

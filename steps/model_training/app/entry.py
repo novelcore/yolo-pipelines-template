@@ -23,6 +23,8 @@ fully functional. It re-enables automatically once auth is wired.
 import argparse
 import json
 import os
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 import yaml
@@ -35,6 +37,16 @@ READS = ["experiment", "dataset", "data", "model", "train", "image_processing", 
 OUTPUT_DIR = Path("/work/output")   # where the platform collects declared outputs
 DATASET_DIR = "/work/dataset"       # streaming cache/root on this pod's volume
 RUNS_DIR = "/work/runs"             # ultralytics runs/ output
+
+
+def kaos_lib_version() -> str:
+    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
+    for dist in ("kaos-lib", "kubecore"):
+        try:
+            return package_version(dist)
+        except PackageNotFoundError:
+            pass
+    return "unknown"
 
 
 def _mlflow_auth_present() -> bool:
@@ -60,7 +72,7 @@ def _staged() -> bool:
     """True on MeluXina: the platform staged the pinned dataset commit onto the node
     (bind-mounted read-only, announced as KUBECORE_STAGED_DIR, PRD-1016 F-04 / PRD-1541).
     There is no S3 gateway off-cluster, so the dataset is read as local files through the
-    kubecore consumer; in-cluster the trainer streams from the lakeFS S3 gateway."""
+    kaos-lib consumer; in-cluster the trainer streams from the lakeFS S3 gateway."""
     return bool(os.environ.get("KUBECORE_STAGED_DIR"))
 
 
@@ -128,6 +140,7 @@ def _write_data_lock(mlflow_run_id: str, ds_ref: str, commit: str) -> bool:
 
 
 def main() -> None:
+    print(f"kaos-lib {kaos_lib_version()}", flush=True)  # the package this image runs
     parser = argparse.ArgumentParser()
     parser.add_argument("--params", required=True,
                         help="Resolved params.yaml content (from compose-and-validate).")
@@ -174,7 +187,7 @@ def main() -> None:
     # dataset_dir has none — kpt_shape [11,3], names {0: spacecraft}.)
     os.makedirs(RUNS_DIR, exist_ok=True)
     if _staged():
-        # Local mode: the pinned commit is on the node. The kubecore consumer finds the
+        # Local mode: the pinned commit is on the node. The kaos-lib consumer finds the
         # staged copy (it checks the commit), nothing is downloaded, and returns a data.yaml
         # whose path: points at it.
         data_yaml = lakefs_io.materialize(ds_ref, commit, DATASET_DIR)

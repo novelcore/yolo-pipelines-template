@@ -15,12 +15,11 @@ RUN pip install --no-cache-dir \
     "requests>=2.31,<3" \
     "PyYAML>=6,<7"
 
-# The kubecore PACKAGE (datasets, run outputs), pinned to a commit of hera-pipeline-template.
-# It shares the import name `kubecore` with the vendored engine at the repo root, which is
-# NOT in this image: only app/ is copied. Bump the commit to take a newer package.
-ARG KUBECORE_PKG_COMMIT=0136a205a82fbe4ed4a82037329e048f58e7e740
-RUN pip install --no-cache-dir \
-    "https://github.com/novelcore/hera-pipeline-template/archive/${KUBECORE_PKG_COMMIT}.zip#subdirectory=packages/kubecore"
+# kaos-lib, the platform library (datasets, run outputs; formerly the kubecore package), from
+# github.com/kaos-io/kaos-lib. The platform's CI passes KAOS_LIB_PACKAGE, the WHOLE pip requirement (the
+# platform registry's wheel); the default is this template's pin. Only app/ is copied into the image.
+ARG KAOS_LIB_PACKAGE="kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/0f22d38ec3dbb00fb1b0dfc71e970c76987fb68d.zip"
+RUN pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"
 
 COPY app/ ./app/
 
