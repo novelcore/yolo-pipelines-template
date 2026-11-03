@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Adapts internals of the AGPL-3.0 training library this step depends on; see README.md "License".
 """Custom PyTorch Dataset that streams YOLO images directly from S3.
 
 Ultralytics builds its dataset internally via ``build_yolo_dataset``. To inject

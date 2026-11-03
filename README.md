@@ -225,5 +225,13 @@ all injected at release time. Your `pipeline.py` stays pure structure.
 
 ## License
 
-This project is licensed under the Apache License, Version 2.0. See the
-[LICENSE](LICENSE) file for the full terms.
+This template is licensed under the **GNU Affero General Public License v3.0**
+(`AGPL-3.0-only`). See [LICENSE](LICENSE) for the full terms.
+
+It depends on a training library that is itself AGPL-3.0, and three files adapt that
+library's internals (`steps/model_training/app/services/s3_dataset.py`,
+`s3_pose_trainer.py` and `s3_pose_validator.py`), so the template as a whole carries
+that licence. Releases before this change were published under Apache-2.0, which may
+be redistributed under AGPL-3.0.
+
+An app created from this template inherits these terms for the template's code.
