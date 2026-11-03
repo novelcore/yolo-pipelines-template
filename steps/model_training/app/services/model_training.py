@@ -611,7 +611,7 @@ class TrainingService:
             _logger.warning(
                 "mlflow.last_active_run() returned None — "
                 "the downstream model_registration step will not be able to "
-                "link this training run. Check that the Ultralytics MLflow "
+                "link this training run. Check that the trainer's MLflow "
                 "callback is enabled."
             )
         except Exception:  # noqa: BLE001
@@ -767,7 +767,7 @@ class TrainingService:
                     self._logger.warning(
                         "Skipping %s — ONNX INT8 requires a separate "
                         "onnxruntime quantization pass, not supported by "
-                        "Ultralytics export. Use TensorRT for INT8.",
+                        "the yolo export. Use TensorRT for INT8.",
                         label,
                     )
                     continue
@@ -1287,7 +1287,7 @@ class TrainingService:
             if torch.cuda.is_available():
                 self._logger.info(
                     "device unset and CUDA available — selecting GPU 0 "
-                    "(Ultralytics device=None would otherwise train on CPU)"
+                    "(the trainer's device=None would otherwise train on CPU)"
                 )
                 return "0"
         except Exception as exc:  # torch import / CUDA probe failure → CPU

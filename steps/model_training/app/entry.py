@@ -93,7 +93,7 @@ def _guard_mlflow() -> bool:
         print("[model-training] MLflow logging DISABLED (no usable MLflow auth). "
               "Training + lakeFS proceed.")
     except Exception as exc:  # noqa: BLE001 - best-effort, never fatal
-        print(f"[model-training] WARN: could not disable ultralytics mlflow: {exc}")
+        print(f"[model-training] WARN: could not disable the trainer's built-in MLflow logging: {exc}")
     return False
 
 
