@@ -5,6 +5,7 @@ Every step names its package `app`, so a step is imported with `step_app(<dir>)`
 """
 import contextlib
 import importlib
+import importlib.util
 import sys
 from pathlib import Path
 

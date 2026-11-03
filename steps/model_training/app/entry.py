@@ -77,23 +77,21 @@ def _staged() -> bool:
 
 
 def _guard_mlflow() -> bool:
-    """Force-disable Ultralytics' MLflow callback (it is fatal on error).
+    """Force-disable Ultralytics' MLflow callback (it is fatal on error) when MLflow
+    auth is not usable.
 
-    #868 injects MLflow Zitadel auth, BUT the `mlflow.request_auth_provider`
-    'zitadel' plugin only registers via a root package install — which broke the
-    image build (reverted in #17). Enabling the callback would therefore 401 and
-    KILL training (Ultralytics' MLflow callback opens the run and is fatal). Until
-    MLflow auth is wired without the entry-point plugin (bearer-token approach —
-    follow-up), disable it: training + lakeFS checkpoint upload still work; MLflow
-    logging + registration are a deliberate follow-up.
+    The `zitadel` request-auth provider comes with kaos-lib[mlflow], installed as a
+    package so its entry point registers. Without a usable credential the callback
+    would 401 and KILL training (it opens the run and is fatal), so it is disabled:
+    training + lakeFS checkpoint upload still work.
     """
     if _setup_mlflow_auth():
         return True
     try:
         from ultralytics import settings
         settings.update({"mlflow": False})
-        print("[model-training] MLflow logging DISABLED (zitadel auth-plugin not "
-              "wired without root-install; follow-up). Training + lakeFS proceed.")
+        print("[model-training] MLflow logging DISABLED (no usable MLflow auth). "
+              "Training + lakeFS proceed.")
     except Exception as exc:  # noqa: BLE001 - best-effort, never fatal
         print(f"[model-training] WARN: could not disable ultralytics mlflow: {exc}")
     return False
@@ -104,27 +102,41 @@ def _as_csv(value):
 
 
 def _setup_mlflow_auth() -> bool:
-    """Mint a Zitadel bearer token for MLflow directly — no entry-point plugin, no
-    root install. #868 mounts the machine key at ZITADEL_MACHINE_KEY_FILE; we reuse the
-    vendored token source and set MLFLOW_TRACKING_TOKEN, bypassing the request_auth
-    plugin (which would need a build-breaking root install). Returns True on success."""
-    if os.environ.get("MLFLOW_TRACKING_TOKEN"):
-        # Off-cluster (MeluXina) the submit pod minted the wallet already.
-        os.environ.pop("MLFLOW_TRACKING_AUTH", None)
-        print("[mlflow] bearer token supplied by the platform -> MLflow ENABLED.", flush=True)
-        return True
-    key = os.environ.get("ZITADEL_MACHINE_KEY_FILE")
-    if not key or not os.path.exists(key):
+    """MLflow auth through kaos-lib (kaos-lib[mlflow]). ``mlflow()`` sets the tracking URI and
+    MLFLOW_TRACKING_AUTH=zitadel; that request-auth provider ships with kaos-lib and takes the
+    bearer from one chain: the platform's MLFLOW_TRACKING_TOKEN (MeluXina), else a token minted
+    from the machine key at ZITADEL_MACHINE_KEY_FILE with the org project's audience and minted
+    again before it expires. Returns True when MLflow is usable; otherwise MLflow is disabled
+    (non-fatal)."""
+    try:
+        from kaos_lib.mlflow import mlflow
+        mlflow()
+    except Exception as exc:  # noqa: BLE001 - MLflow is optional for this step
+        print(f"[mlflow] {exc} -> MLflow disabled (non-fatal).", flush=True)
+        return False
+    print("[mlflow] kaos-lib auth (MLFLOW_TRACKING_AUTH=zitadel) -> MLflow ENABLED.", flush=True)
+    return True
+
+
+def _write_data_lock(mlflow_run_id: str, ds_ref: str, commit: str) -> bool:
+    """Record the dataset commit this run trained on in its MLflow run: the data lock
+    (kaos#1147 F-18), tags ``kaos_lib.data.<repo>.commit`` and ``data.lock.json``.
+    In-cluster the trainer streams from the lakeFS S3 gateway, past kaos-lib, so the
+    read is recorded here; a staged read (MeluXina) went through kaos-lib and is
+    recorded already. Non-fatal, like the rest of the MLflow logging."""
+    if not (mlflow_run_id and ds_ref and commit):
+        print("[model-training] data lock not written: no MLflow run or no pinned dataset commit.")
         return False
     try:
-        from app.mlflow_zitadel_auth import _ZitadelTokenSource
-        os.environ["MLFLOW_TRACKING_TOKEN"] = _ZitadelTokenSource().token()
-        os.environ.pop("MLFLOW_TRACKING_AUTH", None)  # use bearer token, not the plugin
-        print("[mlflow] Zitadel bearer token minted -> MLflow ENABLED.", flush=True)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        print(f"[mlflow] token mint failed: {exc} -> MLflow disabled (non-fatal).", flush=True)
+        from kaos_lib import datasets, lock
+        ref = datasets.DatasetRef.parse(ds_ref)
+        lock.record(ref.repo, ref.version, commit, ref.owner)
+        lock.write(mlflow_run_id)
+    except Exception as exc:  # noqa: BLE001 - lineage is logged best-effort, never kills a trained run
+        print(f"[model-training] WARN: data lock not written: {exc}", flush=True)
         return False
+    print(f"[model-training] data lock: {ds_ref} @ {commit} -> MLflow run {mlflow_run_id}", flush=True)
+    return True
 
 
 def main() -> None:
@@ -290,6 +302,8 @@ def main() -> None:
         dataset_version=ds_version or None,
         lakefs_commit=(commit or None),
     )
+    if mlflow_on:
+        _write_data_lock(getattr(result, "mlflow_run_id", "") or "", ds_ref, commit)
 
     # Emit the declared step output (Hera convention: /work/output/<name>.json).
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
