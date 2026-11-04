@@ -7,7 +7,7 @@ configurable threshold.
 The comparison is **mode-aware** (headless flag) so that BOTH sides emit the
 same tensor as the TFLite under test:
 
-* PTQ  (``headless=False``) — Ultralytics ``model.export(int8=True)`` exports
+* PTQ  (``headless=False``) — yolo ``model.export(int8=True)`` exports
   the FULL model (detection head included), emitting the pre-NMS
   ``(1, 38, 8400)`` prediction tensor. BOTH the FP32 ``.pt`` reference and the
   INT8 ``.tflite`` are run through ``ultralytics.nn.autobackend.AutoBackend``
@@ -20,7 +20,7 @@ same tensor as the TFLite under test:
   headless litert TFLite is dequantized by hand (AutoBackend does not apply to
   the headless export — it has no detection head / task metadata).
 
-INT8 I/O (de)quantization on the headless path mirrors Ultralytics'
+INT8 I/O (de)quantization on the headless path mirrors yolo's
 AutoBackend TFLite path (``ultralytics/nn/autobackend.py``,
 ``AutoBackend.forward``, v8.3.x): inputs are quantized with
 ``im / scale + zero_point`` and outputs dequantized with
@@ -191,7 +191,7 @@ class ParityTestService:
         weights_path: str,
         frames: list[np.ndarray],
     ) -> list[np.ndarray]:
-        """Run inference on a ``.pt`` or ``.tflite`` via Ultralytics AutoBackend.
+        """Run inference on a ``.pt`` or ``.tflite`` via yolo AutoBackend.
 
         AutoBackend applies identical preprocessing for both weight types and,
         for the INT8 TFLite, both int8 dequantization (``(x - zp) * scale``)
@@ -206,7 +206,7 @@ class ParityTestService:
         """
         from ultralytics.nn.autobackend import AutoBackend
 
-        # First positional arg (Ultralytics renamed the kwarg ``weights`` → ``model``
+        # First positional arg (yolo renamed the kwarg ``weights`` → ``model``
         # in v8.4.x; passing positionally is robust to either name).
         backend = AutoBackend(
             weights_path, device=torch.device("cpu"), fp16=False
@@ -235,7 +235,7 @@ class ParityTestService:
 
         ``headless=True``  → backbone+neck only (QAT parity, matches CON-03).
         ``headless=False`` → full model forward (PTQ parity, matches the
-        Ultralytics ``export(int8=True)`` full-model TFLite). NOTE: the PTQ path
+        yolo ``export(int8=True)`` full-model TFLite). NOTE: the PTQ path
         normally routes through :meth:`_run_autobackend_inference` instead; this
         branch is retained for direct/unit use.
         """
@@ -294,7 +294,7 @@ class ParityTestService:
         saved: dict[int, Any] = {}
 
         for i, layer in enumerate(layers[:-1]):
-            # Ultralytics layers track their 'f' (from-index) attribute
+            # yolo layers track their 'f' (from-index) attribute
             f = getattr(layer, "f", -1)
             if isinstance(f, int):
                 x_in = saved[f] if f != -1 else x
@@ -316,7 +316,7 @@ class ParityTestService:
     ) -> list[np.ndarray]:
         """Run INT8 TFLite inference via ai-edge-litert (headless/QAT path).
 
-        Mirrors Ultralytics AutoBackend (``nn/autobackend.py``,
+        Mirrors yolo AutoBackend (``nn/autobackend.py``,
         ``AutoBackend.forward``, v8.3.x):
 
         * Input in NHWC float [0, 1]. If the input tensor is int-typed,
@@ -392,7 +392,7 @@ class ParityTestService:
         in_detail = interpreter.get_input_details()[0]
         out_details = interpreter.get_output_details()
         input_is_int = in_detail["dtype"] in (np.int8, np.int16, np.uint8)
-        # litert (torch->tflite) preserves torch NCHW layout; Ultralytics tflites
+        # litert (torch->tflite) preserves torch NCHW layout; yolo tflites
         # are NHWC. Detect from the declared input shape (channels dim == 3).
         in_shape = list(in_detail["shape"])
         input_is_nchw = len(in_shape) == 4 and in_shape[1] == 3

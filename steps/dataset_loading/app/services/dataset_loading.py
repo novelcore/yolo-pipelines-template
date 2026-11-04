@@ -50,7 +50,7 @@ _DOWNLOAD_WORKERS = 8
 # Log a progress message every N files downloaded (or when a 10% milestone is crossed)
 _PROGRESS_LOG_INTERVAL = 500
 
-# Valid keypoint visibility values per Ultralytics: 0=not visible, 1=partially, 2=visible
+# Valid keypoint visibility values per yolo: 0=not visible, 1=partially, 2=visible
 _VALID_VISIBILITY = {0, 1, 2}
 
 # Default S3 bucket and key prefix for the canonical dataset location
@@ -512,7 +512,7 @@ class DatasetLoadingService:
         --------
         - ``data.yaml`` exists at the prefix root.
         - ``images/train/`` and ``images/val/`` directories have at least one file
-          (``images/test/`` is optional per Ultralytics convention).
+          (``images/test/`` is optional per yolo convention).
         - ``labels/train/`` and ``labels/val/`` directories have at least one file.
         - Every image key has a corresponding label key with the same stem in the
           same split (stem matching: ``images/<split>/<stem>.jpg`` ↔
@@ -1342,7 +1342,7 @@ class DatasetLoadingService:
 
         Checks
         ------
-        - ``data.yaml`` exists and contains required Ultralytics keys.
+        - ``data.yaml`` exists and contains required yolo keys.
         - ``train`` and ``val`` split image directories exist and are non-empty.
         - ``test`` is optional — validated only when present.
         - Every image has a corresponding non-empty label file.
@@ -1396,10 +1396,10 @@ class DatasetLoadingService:
         _ = data_cfg
 
     def _validate_data_yaml(self, output_path: Path) -> dict[str, Any]:
-        """Check that ``data.yaml`` exists and conforms to Ultralytics conventions.
+        """Check that ``data.yaml`` exists and conforms to yolo conventions.
 
         Required keys: ``path``, ``train``, ``val``, ``kpt_shape``, ``names``.
-        ``test`` is optional per Ultralytics.
+        ``test`` is optional per yolo.
 
         Returns the parsed YAML dict so callers can use ``kpt_shape`` / ``names``.
         """
@@ -1410,7 +1410,7 @@ class DatasetLoadingService:
         with yaml_path.open() as fh:
             content = yaml.safe_load(fh) or {}
 
-        # --- required keys (test is optional per Ultralytics) ---------------
+        # --- required keys (test is optional per yolo) ---------------
         required_keys = {"path", "train", "val", "kpt_shape", "names"}
         missing = required_keys - set(content.keys())
         if missing:
@@ -1470,7 +1470,7 @@ class DatasetLoadingService:
         for potential future use.  The primary label validation path now uses
         :meth:`_validate_label_file_inline` during download.
 
-        Ultralytics pose label format::
+        yolo pose label format::
 
             <class> <cx> <cy> <w> <h> <kp1x> <kp1y> [<kp1vis>] ... <kpNx> <kpNy> [<kpNvis>]
         """
@@ -1743,7 +1743,7 @@ class DatasetLoadingService:
     def _log_directory_integrity_report(self, output_path: Path, mode: str) -> None:
         """Verify and log the YOLO directory structure at *output_path*.
 
-        Checks (aligned with Ultralytics conventions)
+        Checks (aligned with yolo conventions)
         ----------------------------------------------
         - ``data.yaml`` exists and contains valid ``names``, ``kpt_shape``.
         - ``train`` and ``val`` split directories are required; ``test`` is optional.
@@ -1765,7 +1765,7 @@ class DatasetLoadingService:
         """
         failures: list[str] = []
 
-        # --- data.yaml presence + Ultralytics fields -----------------------
+        # --- data.yaml presence + yolo fields -----------------------
         yaml_path = output_path / "data.yaml"
         if yaml_path.exists():
             self._logger.info("  [OK] data.yaml present")
@@ -1819,7 +1819,7 @@ class DatasetLoadingService:
             self._logger.warning("  [FAIL] data.yaml missing")
 
         # --- split directories ---------------------------------------------
-        # train + val required; test optional (Ultralytics convention)
+        # train + val required; test optional (yolo convention)
         required_splits = ["train", "val"]
         optional_splits = ["test"]
 

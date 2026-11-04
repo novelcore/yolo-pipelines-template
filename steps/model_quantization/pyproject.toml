@@ -1,7 +1,7 @@
 [project]
 name = "model-quantization"
 version = "0.1.0"
-description = "Shared quantization export tail — PTQ (Ultralytics) and QAT passthrough to INT8 TFLite."
+description = "Shared quantization export tail — PTQ (yolo) and QAT passthrough to INT8 TFLite."
 authors = [
     { name = "Example Org", email = "dev@example.org" }
 ]

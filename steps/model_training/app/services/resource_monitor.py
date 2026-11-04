@@ -1,7 +1,7 @@
 """System resource sampler for GPU, CPU, and RAM metrics.
 
 Collects a single snapshot of system resource usage on demand and returns
-it as a plain dict.  The caller (an Ultralytics ``on_fit_epoch_end`` callback)
+it as a plain dict.  The caller (an yolo ``on_fit_epoch_end`` callback)
 is responsible for logging the returned values to MLflow at the appropriate
 epoch step.
 
@@ -12,7 +12,7 @@ so a monitoring failure never interrupts training.
 Usage pattern
 -------------
 1. Construct ``ResourceMonitor(gpu_index=0)`` before training.
-2. Call ``monitor.collect()`` from an Ultralytics ``on_fit_epoch_end`` callback.
+2. Call ``monitor.collect()`` from an yolo ``on_fit_epoch_end`` callback.
 3. Log the returned dict alongside model metrics via ``mlflow.log_metrics``.
 """
 
@@ -53,7 +53,7 @@ def gpu_available() -> bool:
 class ResourceMonitor:
     """Collects a snapshot of system resource metrics on demand.
 
-    Call :meth:`collect` from any Ultralytics epoch-end callback to get a
+    Call :meth:`collect` from any yolo epoch-end callback to get a
     dict of metric key/value pairs ready to pass to ``mlflow.log_metrics``.
 
     Parameters

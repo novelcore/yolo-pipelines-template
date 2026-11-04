@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class AugmentationParams(BaseModel):
-    """Ultralytics augmentation hyperparameters."""
+    """yolo augmentation hyperparameters."""
 
     hsv_h: float = Field(default=0.015, ge=0.0, le=1.0)
     hsv_s: float = Field(default=0.7, ge=0.0, le=1.0)
@@ -76,7 +76,7 @@ class TrainingParams(BaseModel):
         description="Local directory containing the downloaded YOLO dataset."
     )
     output_dir: str = Field(
-        description="Local directory for Ultralytics runs/ output."
+        description="Local directory for yolo runs/ output."
     )
 
     # ---- Dataset source ----
@@ -115,7 +115,7 @@ class TrainingParams(BaseModel):
     resume_from: Optional[str] = Field(
         default=None,
         description=(
-            "'auto', local path, or s3:// URI for full Ultralytics resume "
+            "'auto', local path, or s3:// URI for full yolo resume "
             "(restores epoch counter, optimizer, and scheduler state)."
         ),
     )
@@ -157,7 +157,7 @@ class TrainingParams(BaseModel):
         ge=0,
         description=(
             "DataLoader worker processes passed to model.train(). 0 = single-process "
-            "loading, which structurally avoids the Ultralytics persistent_workers / "
+            "loading, which structurally avoids the yolo persistent_workers / "
             "close_mosaic deadlock that intermittently hangs small-dataset runs at the "
             "mosaic-close epoch (GPU 0%, no error). Raise for large datasets where "
             "parallel prefetch pays off."
@@ -174,7 +174,7 @@ class TrainingParams(BaseModel):
     dfl: float = Field(default=1.5, gt=0.0)
 
     # ---- Early stopping ----
-    # 0 disables early stopping: Ultralytics treats it as "never stop"
+    # 0 disables early stopping: yolo treats it as "never stop"
     # (EarlyStopping: `patience or float("inf")`), and it is exactly what
     # config/train/callbacks/none.yaml selects. gt=0 made train.callbacks=none
     # crash every training run before it started.
@@ -184,7 +184,7 @@ class TrainingParams(BaseModel):
     device: Optional[str] = Field(
         default=None,
         description=(
-            "Device to train on: '0', '0,1', 'cpu', or None for Ultralytics "
+            "Device to train on: '0', '0,1', 'cpu', or None for yolo "
             "auto-select. When a single integer GPU index is given (e.g. '0') "
             "the ResourceMonitor will track only that GPU."
         ),
