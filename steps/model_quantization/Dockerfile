@@ -1,7 +1,7 @@
 # model-quantization step image — REAL quantization service (kubeline vendored
 # into app/). Mirrors the kubeline model_quantization image: Poetry base deps +
-# the Ultralytics TFLite INT8 export toolchain (tensorflow/onnx2tf/...) baked in
-# from PyPI (Ultralytics would otherwise pip-install these at RUNTIME,
+# the yolo TFLite INT8 export toolchain (tensorflow/onnx2tf/...) baked in
+# from PyPI (yolo would otherwise pip-install these at RUNTIME,
 # which fails in an offline pod), + a build-time import check.
 # In-image command: python -m app.entry --params <params> ...
 FROM python:3.12-slim
@@ -34,7 +34,7 @@ RUN /opt/poetry/bin/poetry export --only=main -f requirements.txt --output /tmp/
 
 COPY app/ ./app/
 
-# Ultralytics TFLite INT8 export toolchain (PTQ path). Baked at build time so the
+# yolo TFLite INT8 export toolchain (PTQ path). Baked at build time so the
 # offline pod does not pip-install at runtime. Versions per the ultralytics 8.4.x
 # check_requirements window + onnx2tf's tested stack. Everything resolves from
 # PyPI alone: onnx-graphsurgeon is published there (0.6.x). The former

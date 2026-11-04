@@ -2,7 +2,7 @@
 # Adapts internals of the AGPL-3.0 training library this step depends on; see README.md "License".
 """PoseTrainer subclass that builds S3YoloDataset instances.
 
-Ultralytics' ``model.train(trainer=...)`` accepts a custom trainer class.  We
+yolo's ``model.train(trainer=...)`` accepts a custom trainer class.  We
 subclass ``PoseTrainer`` and override ``build_dataset()`` to return an
 ``S3YoloDataset`` that streams images from S3 with an LRU disk cache, instead
 of the default ``YOLODataset`` that reads from local disk.
@@ -50,7 +50,7 @@ class S3PoseTrainer(_PoseTrainer):  # type: ignore[misc]
         Parameters
         ----------
         img_path:
-            Path string Ultralytics passes (e.g. ``"images/train"``).
+            Path string yolo passes (e.g. ``"images/train"``).
             We use it only to extract the split name.
         mode:
             ``"train"`` or ``"val"``.
@@ -73,7 +73,7 @@ class S3PoseTrainer(_PoseTrainer):  # type: ignore[misc]
         base_prefix = self._s3_prefix.rstrip("/")
         split_prefix = f"{base_prefix}/images/{split}/"
 
-        gs = self.args  # Ultralytics training args namespace
+        gs = self.args  # yolo training args namespace
 
         dataset = S3YoloDataset(
             img_path=img_path,
@@ -132,7 +132,7 @@ def make_s3_pose_trainer(
     """
     if not _ULTRALYTICS_AVAILABLE:
         raise ImportError(
-            "ultralytics is required for S3PoseTrainer. "
+            "the yolo training library is required for S3PoseTrainer. "
             "Install it with: pip install ultralytics"
         )
 

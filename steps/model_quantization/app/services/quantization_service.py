@@ -32,7 +32,7 @@ from app.services.resource_monitor import ResourceMonitor
 # Interval (seconds) between system-metric samples during the export.
 _SYSTEM_METRICS_INTERVAL_S = 15.0
 
-# Ultralytics results_dict keys → sanitized MLflow metric suffixes. Covers the
+# yolo results_dict keys → sanitized MLflow metric suffixes. Covers the
 # box (B) detection metrics and, for pose models, the keypoint (P) metrics.
 _MAP_METRIC_KEYS: dict[str, str] = {
     "metrics/mAP50(B)": "mAP50B",
@@ -47,7 +47,7 @@ class QuantizationError(Exception):
 
 
 class QuantizationService:
-    """Runs PTQ (Ultralytics) or QAT passthrough and logs to MLflow."""
+    """Runs PTQ (yolo) or QAT passthrough and logs to MLflow."""
 
     def __init__(self, mlflow_tracking_uri: str) -> None:
         self._mlflow_uri = mlflow_tracking_uri
@@ -72,7 +72,7 @@ class QuantizationService:
     # ------------------------------------------------------------------
 
     def _run_ptq(self, params: QuantizationParams) -> QuantizationResult:
-        """PTQ: Ultralytics export(int8=True) → TFLite → S3 → MLflow."""
+        """PTQ: yolo export(int8=True) → TFLite → S3 → MLflow."""
         assert params.fp32_checkpoint_path is not None
 
         local_ckpt = self._resolve_checkpoint(
@@ -127,7 +127,7 @@ class QuantizationService:
     def _export_ptq(
         self, checkpoint_path: str, data_yaml: str, params: QuantizationParams
     ) -> str:
-        """Run Ultralytics PTQ export and return the local TFLite path."""
+        """Run yolo PTQ export and return the local TFLite path."""
         self._logger.info(
             "Exporting PTQ INT8 TFLite | checkpoint=%s data=%s imgsz=%d",
             checkpoint_path,
@@ -297,7 +297,7 @@ class QuantizationService:
     def _seed_torch(self, seed: int) -> None:
         """Seed PyTorch RNG before PTQ calibration export (FR-M-04).
 
-        Ultralytics export(int8=True) calls torch ops internally during
+        yolo export(int8=True) calls torch ops internally during
         calibration; seeding here gives best-effort reproducibility.
         """
         torch.manual_seed(seed)
