@@ -1,4 +1,4 @@
-"""YOLO model training service with Ultralytics built-in MLflow integration.
+"""YOLO model training service with yolo built-in MLflow integration.
 
 Responsibilities
 ----------------
@@ -8,8 +8,8 @@ Responsibilities
 4. Download weights / resume checkpoint from S3 to a temp dir when needed.
 5. Write data.yaml to a temp dir (always deleted in a finally block).
 6. Set MLFLOW_TRACKING_URI and MLFLOW_EXPERIMENT_NAME env vars so that
-   the Ultralytics built-in MLflow callback handles all logging.
-7. Register Ultralytics callbacks for per-epoch metric + system resource
+   the yolo built-in MLflow callback handles all logging.
+7. Register yolo callbacks for per-epoch metric + system resource
    logging, console output, and periodic S3 checkpoint uploads.
 8. Call model.train() with the full hyperparameter set.
 9. Upload best.pt and last.pt to the S3 checkpoint path.
@@ -77,7 +77,7 @@ _S3_URI_RE = re.compile(r"^s3://([^/]+)/(.+)$")
 
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
-# Ultralytics metric keys
+# yolo metric keys
 _METRIC_PRECISION = "metrics/precision(B)"
 _METRIC_RECALL = "metrics/recall(B)"
 _METRIC_MAP50 = "metrics/mAP50(B)"
@@ -102,10 +102,10 @@ class TrainingError(Exception):
 
 
 class TrainingService:
-    """Orchestrates a YOLO training run with Ultralytics built-in MLflow tracking.
+    """Orchestrates a YOLO training run with yolo built-in MLflow tracking.
 
     MLflow logging (params, metrics, artifacts) is handled entirely by the
-    Ultralytics MLflow callback.  This service sets the required environment
+    yolo MLflow callback.  This service sets the required environment
     variables and focuses on S3 I/O and console output.
 
     Parameters
@@ -160,11 +160,11 @@ class TrainingService:
 
         Path(params.output_dir).mkdir(parents=True, exist_ok=True)
 
-        # Configure Ultralytics' built-in MLflow callback via env vars
+        # Configure yolo's built-in MLflow callback via env vars
         os.environ["MLFLOW_TRACKING_URI"] = self._mlflow_tracking_uri
         os.environ["MLFLOW_EXPERIMENT_NAME"] = params.experiment_name
 
-        # Ultralytics reads MLFLOW_RUN (not MLFLOW_RUN_NAME) for the run name.
+        # yolo reads MLFLOW_RUN (not MLFLOW_RUN_NAME) for the run name.
         # Bridge the Kubeline workflow name so each run gets a unique name.
         workflow_name = os.environ.get("KUBECORE_WORKFLOW_NAME", "")
         if workflow_name:
@@ -281,7 +281,7 @@ class TrainingService:
             # 2. Write data.yaml into the temp dir
             data_yaml_path = self._write_data_yaml(params, tmp_path)
 
-            # 3. Build the Ultralytics YOLO model object
+            # 3. Build the yolo YOLO model object
             model = yolo_cls(str(model_path))
 
             # 4. Register callbacks
@@ -377,7 +377,7 @@ class TrainingService:
                 tmp_path=tmp_path,
             )
 
-        # Build result — get MLflow run_id from Ultralytics' run
+        # Build result — get MLflow run_id from yolo's run
         mlflow_run_id = self._get_mlflow_run_id()
 
         # Tag the completed MLflow run with Kubeline platform metadata
@@ -414,7 +414,7 @@ class TrainingService:
     ) -> Callable[[Any], None]:
         """Return an on_train_start callback that logs dataset provenance to MLflow.
 
-        Fires after the Ultralytics MLflow callback opens the run
+        Fires after the yolo MLflow callback opens the run
         (on_pretrain_routine_end), so mlflow.active_run() is non-None.
         Implements FR-04 and CON-02: only non-None fields are logged.
         Q3 resolution: pipeline.config_hash is logged as both param and tag.
@@ -538,7 +538,7 @@ class TrainingService:
 
         def on_train_epoch_end(trainer: Any) -> None:
             try:
-                epoch: int = trainer.epoch + 1  # Ultralytics epoch is 0-indexed
+                epoch: int = trainer.epoch + 1  # yolo epoch is 0-indexed
                 if epoch % params.checkpoint_interval != 0:
                     return
                 last_pt = Path(trainer.last)
@@ -601,7 +601,7 @@ class TrainingService:
 
     @staticmethod
     def _get_mlflow_run_id() -> str:
-        """Return the MLflow run ID from the most recent Ultralytics-managed run."""
+        """Return the MLflow run ID from the most recent yolo-managed run."""
         try:
             import mlflow  # noqa: PLC0415
 
@@ -684,7 +684,7 @@ class TrainingService:
         """Show best.pt in the experiment's Models tab: an MLflow 3 logged model
         ``<experiment>-best`` whose weights stay in lakeFS (``mlflow.create_external_model``),
         with the training run as its source, the training settings as params, the ``kaos.*``
-        lakeFS tags and the final val metrics (Ultralytics validates best.pt last). The run gets
+        lakeFS tags and the final val metrics (yolo validates best.pt last). The run gets
         ``kaos.logged_model_id`` so model-registration registers the version from this model.
 
         A retried step reuses the model this run already has instead of creating a second one.
@@ -762,7 +762,7 @@ class TrainingService:
             for precision in params.export.precisions:
                 label = f"{fmt}_{precision}"
 
-                # ONNX does not support INT8 natively via Ultralytics export
+                # ONNX does not support INT8 natively via yolo export
                 if fmt == "onnx" and precision == "int8":
                     self._logger.warning(
                         "Skipping %s — ONNX INT8 requires a separate "
@@ -1031,7 +1031,7 @@ class TrainingService:
 
         Returns the integer index when ``device`` is a single GPU (e.g. ``"0"``
         or ``0``).  Returns ``None`` for CPU or multi-GPU strings (``"0,1"``).
-        When ``device`` is ``None`` (Ultralytics auto-select), defaults to GPU 0
+        When ``device`` is ``None`` (yolo auto-select), defaults to GPU 0
         if a GPU is available so that the ResourceMonitor still tracks GPU metrics
         on single-GPU machines.
 
@@ -1156,7 +1156,7 @@ class TrainingService:
            train_kwargs).
         2. pretrained_weights — download from S3 if needed; return the .pt path
            for weight-only initialisation.
-        3. model_variant — return the bare variant name so that Ultralytics
+        3. model_variant — return the bare variant name so that yolo
            downloads COCO pretrained weights from its CDN on first use.
         """
         if params.resume_from and params.resume_from != "auto":
@@ -1167,7 +1167,7 @@ class TrainingService:
                 params.pretrained_weights, tmp_path, "pretrained"
             )
 
-        # Bare variant name: Ultralytics downloads the COCO-pretrained asset on
+        # Bare variant name: yolo downloads the COCO-pretrained asset on
         # first use — INTO THE PATH WE HAND IT. A bare name means the current
         # directory, which is read-only off-cluster (Apptainer SIF; live job
         # 5149025: "[Errno 30] Read-only file system: 'yolov8n-pose.pt'"), so
@@ -1250,7 +1250,7 @@ class TrainingService:
         content["path"] = str(dataset_path)
 
         # In S3 streaming mode the dataset_loading step only downloads labels.
-        # Ultralytics validates that image directories exist at init time
+        # yolo validates that image directories exist at init time
         # (before S3PoseTrainer takes over), so we create empty stubs.
         if params.source == "s3":
             for split_key in ("train", "val", "test"):
@@ -1273,7 +1273,7 @@ class TrainingService:
         """DataLoader workers within this step's cores, one left for the training process.
 
         On a shared Slurm node (kubecore-operator PRD-HPC-1609) the step owns one slot's cores,
-        but ``os.cpu_count()``, which Ultralytics sizes by, still counts every core of the node.
+        but ``os.cpu_count()``, which yolo sizes by, still counts every core of the node.
         kaos-lib's ``runtime.usable_cpus()`` is the slot's cores, else the CPU binding; an older
         kaos-lib without it falls back to the CPU binding here. 0 (single-process loading) stays 0.
         """
@@ -1296,7 +1296,7 @@ class TrainingService:
     def _resolve_device(self, device: "str | None") -> "str | int | None":
         """Resolve the training device, defaulting to GPU when one is present.
 
-        Ultralytics' ``model.train(device=None)`` does NOT auto-select a GPU — it
+        yolo's ``model.train(device=None)`` does NOT auto-select a GPU — it
         silently falls back to CPU. On a GPU node that means we provision a T4,
         allocate ``nvidia.com/gpu: 1`` to the pod, then train on the CPU anyway
         (observed live: trainer logged ``device=cpu`` despite the GPU being bound).
@@ -1327,7 +1327,7 @@ class TrainingService:
     ) -> dict[str, Any]:
         """Build the keyword arguments dict for model.train().
 
-        When resume_from is 'auto' or a .pt path, Ultralytics restores full
+        When resume_from is 'auto' or a .pt path, yolo restores full
         training state via resume=True. The data and project/name are still
         passed for path resolution.
         """
@@ -1389,7 +1389,7 @@ class TrainingService:
         if params.freeze is not None:
             kwargs["freeze"] = params.freeze
 
-        # Full Ultralytics resume
+        # Full yolo resume
         if params.resume_from:
             kwargs["resume"] = True
 

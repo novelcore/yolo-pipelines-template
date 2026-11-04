@@ -15,7 +15,7 @@ sits at the repository root), pinned to the commit the picked
 ``<dataset-repo>@<version>`` pointed at when the run started.
 
 MLflow auth (Zitadel machine JWT) is NOT injected by the platform yet, so MLflow
-logging is made NON-FATAL: with no auth present we disable Ultralytics' built-in
+logging is made NON-FATAL: with no auth present we disable yolo's built-in
 MLflow callback (its only fatal path), leaving training + lakeFS checkpoint upload
 fully functional. It re-enables automatically once auth is wired.
 """
@@ -36,7 +36,7 @@ READS = ["experiment", "dataset", "data", "model", "train", "image_processing", 
 
 OUTPUT_DIR = Path("/work/output")   # where the platform collects declared outputs
 DATASET_DIR = "/work/dataset"       # streaming cache/root on this pod's volume
-RUNS_DIR = "/work/runs"             # ultralytics runs/ output
+RUNS_DIR = "/work/runs"             # yolo runs/ output
 
 
 def kaos_lib_version() -> str:
@@ -77,7 +77,7 @@ def _staged() -> bool:
 
 
 def _guard_mlflow() -> bool:
-    """Force-disable Ultralytics' MLflow callback (it is fatal on error) when MLflow
+    """Force-disable yolo's MLflow callback (it is fatal on error) when MLflow
     auth is not usable.
 
     The `zitadel` request-auth provider comes with kaos-lib[mlflow], installed as a
@@ -203,7 +203,7 @@ def main() -> None:
         # over by dataset-loading as --data-yaml. Without it the service falls back
         # to the spacecraft default (kpt_shape [11,3], names {0: spacecraft}), so a
         # dataset with any other keypoint count has EVERY label rejected and
-        # ultralytics dies with "No valid labels found in labels/train.cache"
+        # yolo dies with "No valid labels found in labels/train.cache"
         # (live gke-dev/prd1124yolo, 4-keypoint toy dataset, 2026-08-27). The
         # service copies this file into its temp dir and fixes `path` itself.
         data_yaml_text = (args.data_yaml or "").strip()
@@ -242,7 +242,7 @@ def main() -> None:
         s3_bucket=bucket,
         s3_prefix=prefix,
         pretrained_weights=(model.get("pretrained_weights") or None),
-        device=None,  # ultralytics auto-selects: GPU on gpu-t4, CPU when nvidia.com/gpu=0
+        device=None,  # yolo auto-selects: GPU on gpu-t4, CPU when nvidia.com/gpu=0
         # ---- schedule ----
         epochs=int(train["epochs"]),
         batch_size=int(train["batch_size"]),

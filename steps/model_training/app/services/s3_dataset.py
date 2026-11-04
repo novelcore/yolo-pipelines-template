@@ -2,7 +2,7 @@
 # Adapts internals of the AGPL-3.0 training library this step depends on; see README.md "License".
 """Custom PyTorch Dataset that streams YOLO images directly from S3.
 
-Ultralytics builds its dataset internally via ``build_yolo_dataset``. To inject
+yolo builds its dataset internally via ``build_yolo_dataset``. To inject
 S3 streaming we subclass ``ultralytics.data.YOLODataset`` and override the
 image-loading method so that images are fetched from S3 on demand rather than
 read from disk. Label files are expected to live on the local filesystem at
@@ -10,7 +10,7 @@ read from disk. Label files are expected to live on the local filesystem at
 
 Architecture note
 -----------------
-Ultralytics calls ``self.im_files`` (a list of file paths) to enumerate the
+yolo calls ``self.im_files`` (a list of file paths) to enumerate the
 dataset and ``cv2.imread`` inside ``load_image`` to load each sample. We
 substitute the file paths with synthetic "s3://" URIs and override ``load_image``
 to retrieve the bytes from S3 and decode them with OpenCV in-memory. Labels are
@@ -34,7 +34,7 @@ from app.services.lru_disk_cache import LruDiskCache
 
 _logger = logging.getLogger(__name__)
 
-# Ultralytics imports are deferred to keep this module importable in test
+# yolo imports are deferred to keep this module importable in test
 # environments where ultralytics may be mocked.
 try:
     from ultralytics.data import YOLODataset as _UltralyticsYOLODataset
@@ -76,7 +76,7 @@ class S3YoloDataset(_UltralyticsYOLODataset):  # type: ignore[misc]
     cache_max_bytes:
         Maximum disk budget for cached images (default 2 GiB).
     *args / **kwargs:
-        Forwarded to the Ultralytics ``YOLODataset`` constructor.
+        Forwarded to the yolo ``YOLODataset`` constructor.
     """
 
     def __init__(
@@ -94,7 +94,7 @@ class S3YoloDataset(_UltralyticsYOLODataset):  # type: ignore[misc]
     ) -> None:
         if not _ULTRALYTICS_AVAILABLE:
             raise ImportError(
-                "ultralytics is required to use S3YoloDataset. "
+                "the yolo training library is required to use S3YoloDataset. "
                 "Install it with: pip install ultralytics"
             )
 
@@ -117,7 +117,7 @@ class S3YoloDataset(_UltralyticsYOLODataset):  # type: ignore[misc]
                 max_bytes=cache_max_bytes,
             )
 
-        # Ultralytics needs a path argument pointing to the image directory.
+        # yolo needs a path argument pointing to the image directory.
         # We pass a synthetic sentinel; get_image_and_label is overridden below.
         super().__init__(*args, **kwargs)
 
@@ -128,7 +128,7 @@ class S3YoloDataset(_UltralyticsYOLODataset):  # type: ignore[misc]
     def get_img_files(self, img_path: str) -> list[str]:
         """Return synthetic s3:// URIs for all images under the S3 prefix.
 
-        Ultralytics calls this method (or reads ``self.im_files``) to build the
+        yolo calls this method (or reads ``self.im_files``) to build the
         file list. We list the bucket prefix and return each object key wrapped
         in an ``s3://`` URI so the rest of the pipeline has a unique identifier
         per sample.
@@ -238,7 +238,7 @@ class S3YoloDataset(_UltralyticsYOLODataset):  # type: ignore[misc]
         Otherwise, the parent implementation's ``verify_image_label()`` is
         skipped and local label ``.txt`` files are read directly.
 
-        Image shapes are set to a placeholder; Ultralytics replaces them with
+        Image shapes are set to a placeholder; yolo replaces them with
         the actual shape from ``load_image()`` at training time.
         """
         x: dict[str, Any] = {"labels": []}
@@ -384,7 +384,7 @@ class S3YoloDataset(_UltralyticsYOLODataset):  # type: ignore[misc]
         it ``Mosaic.get_indexes()`` fails on the empty list).
 
         Returns the same ``(image, original_hw, resized_hw)`` tuple as the
-        standard Ultralytics ``load_image`` implementation.
+        standard yolo ``load_image`` implementation.
         """
         # Return RAM-cached image if available
         im = self.ims[i]

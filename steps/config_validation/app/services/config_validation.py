@@ -38,6 +38,13 @@ from kaos_lib.errors import KaosLibError
 _DEFAULT_BUCKET = "io-audio-text-data"
 
 
+# Bounds of quantization.calibration_frames. They mirror QuantizationParams / QATParams
+# (steps/model_quantization, steps/qat_finetune: Field(ge=100, le=10000)); this image has no
+# pydantic, so step_tests/test_config_validation_bounds.py pins these to the models.
+CALIBRATION_FRAMES_MIN = 100
+CALIBRATION_FRAMES_MAX = 10000
+
+
 class ConfigValidationError(Exception):
     """A required external dependency is missing or unreachable."""
 
@@ -66,6 +73,7 @@ class ConfigValidationService:
         except KaosLibError as exc:
             raise ConfigValidationError(str(exc)) from exc
 
+        self._check_quantization(resolved.get("quantization") or {})
         self._check_mlflow()
 
         s3 = self._s3_client(str(data.get("source") or "lakefs"))
@@ -83,6 +91,29 @@ class ConfigValidationService:
         self._check_pretrained_weights(s3, model)
         self._check_checkpoint_resume(s3, data, platform)
         self._log.info("config-validation: all liveness checks passed")
+
+    # ------------------------------------------------------------------ quantization
+
+    @staticmethod
+    def _check_quantization(quant: dict) -> None:
+        """Fail now, before training, on a calibration_frames the INT8 steps would reject.
+
+        Only when the INT8 steps run (mode ptq or qat): otherwise the value is not used.
+        """
+        if str(quant.get("mode") or "none").lower() == "none":
+            return
+        raw = quant.get("calibration_frames", 512)
+        try:
+            frames = int(str(raw).strip())
+        except ValueError:
+            raise ConfigValidationError(
+                f"quantization.calibration_frames must be a whole number, got {raw!r}"
+            ) from None
+        if not CALIBRATION_FRAMES_MIN <= frames <= CALIBRATION_FRAMES_MAX:
+            raise ConfigValidationError(
+                f"quantization.calibration_frames must be between {CALIBRATION_FRAMES_MIN} and "
+                f"{CALIBRATION_FRAMES_MAX}, got {frames} (quantization-calibration_frames on the run form)"
+            )
 
     # ------------------------------------------------------------------ s3/lakefs
 
@@ -197,7 +228,7 @@ class ConfigValidationService:
     def _check_pretrained_weights(self, s3, model: dict) -> None:
         weights = model.get("pretrained_weights")
         if not weights:
-            return  # standard Ultralytics names ship in the training image
+            return  # standard yolo names ship in the training image
         if not str(weights).startswith("s3://"):
             raise ConfigValidationError(
                 f"model.pretrained_weights must be null or an s3:// path, got: {weights!r}"

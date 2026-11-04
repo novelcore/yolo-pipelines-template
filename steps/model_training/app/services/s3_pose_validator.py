@@ -4,7 +4,7 @@
 
 Mirrors :mod:`app.services.s3_pose_trainer` for the validation path.  When
 ``model.val(split=...)`` is called with ``validator=S3PoseValidator``,
-Ultralytics instantiates this subclass and uses it to build the dataset.
+yolo instantiates this subclass and uses it to build the dataset.
 Overriding :meth:`build_dataset` lets us stream images (and optionally
 labels) from S3 for the requested split, reusing the same
 :class:`S3YoloDataset` used during training.
@@ -53,14 +53,14 @@ class S3PoseValidator(_PoseValidator):  # type: ignore[misc]
         OKS (Object Keypoint Similarity) is the keypoint analogue of box IoU: it
         scores how close predicted keypoints are to ground truth, and pose-mAP is
         built by thresholding it. Each keypoint has a ``sigma`` (its tolerance —
-        how much positional error is acceptable). Ultralytics' ``PoseValidator``
+        how much positional error is acceptable). yolo's ``PoseValidator``
         defaults to COCO's 17 hand-tuned sigmas when there are 17 keypoints, else
         a uniform ``np.ones(nkpt)/nkpt``. For a non-17 custom keypoint set a
         uniform sigma treats every keypoint as equally easy to localise.
 
         If ``data.yaml`` provides a ``kpt_sigmas`` list (one value per keypoint),
         we use it so pose-mAP reflects per-keypoint tolerance. When absent or the
-        length does not match the keypoint count, the Ultralytics default is kept
+        length does not match the keypoint count, the yolo default is kept
         (no behaviour change). Note: this affects *measurement only*, not training.
         """
         super().init_metrics(model)
@@ -95,7 +95,7 @@ class S3PoseValidator(_PoseValidator):  # type: ignore[misc]
         Parameters
         ----------
         img_path:
-            Path string Ultralytics passes (e.g. ``"images/test"``).  Used
+            Path string yolo passes (e.g. ``"images/test"``).  Used
             only to extract the split name.
         mode:
             Always ``"val"`` for validation.
@@ -114,7 +114,7 @@ class S3PoseValidator(_PoseValidator):  # type: ignore[misc]
         base_prefix = self._s3_prefix.rstrip("/")
         split_prefix = f"{base_prefix}/images/{split}/"
 
-        gs = self.args  # Ultralytics args namespace
+        gs = self.args  # yolo args namespace
 
         dataset = S3YoloDataset(
             img_path=img_path,
@@ -173,7 +173,7 @@ def make_s3_pose_validator(
     """
     if not _ULTRALYTICS_AVAILABLE:
         raise ImportError(
-            "ultralytics is required for S3PoseValidator. "
+            "the yolo training library is required for S3PoseValidator. "
             "Install it with: pip install ultralytics"
         )
 
