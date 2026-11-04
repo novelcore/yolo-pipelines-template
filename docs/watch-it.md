@@ -32,7 +32,7 @@ Most early failures are caught by the first step, checking your settings, before
 - **Retry** (on a failed run in Argo) runs the failed steps again under the same run name. `model-training` finds the checkpoint it last saved (`last.pt` on its run branch) and continues from there instead of starting over.
 - **Resubmit** starts a new run, with a new name, from scratch.
 
-More in [cookbook 7](https://novelcore.github.io/hera-pipeline-template/cookbook/07-run-it/).
+More in [cookbook 7](https://novelcore.github.io/hera-pipeline-template/cookbook/7-run-it/).
 
 ![The model-training step's log, showing training epochs](img/training-logs.png)
 

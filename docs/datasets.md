@@ -57,7 +57,7 @@ kaosctl dataset release <repo>
 
 In the browser, lakeFS's **Datasets** page has **New dataset**, upload on a branch with a pull
 request, and **Release version**. Sharing a dataset with another project is done in the console
-(**Datasets** → the dataset → **Sharing**, by the owning project's admins); see [Use a dataset shared with you](shared-dataset.md). The hera cookbook has the general versions: [create a dataset](https://novelcore.github.io/hera-pipeline-template/cookbook/04-create-a-dataset/) and [share a dataset](https://novelcore.github.io/hera-pipeline-template/cookbook/09-share-a-dataset/).
+(**Datasets** → the dataset → **Sharing**, by the owning project's admins); see [Use a dataset shared with you](shared-dataset.md). The hera guide has one page per task: [create](https://novelcore.github.io/hera-pipeline-template/dataset-create/), [add data](https://novelcore.github.io/hera-pipeline-template/dataset-upload/), [check](https://novelcore.github.io/hera-pipeline-template/dataset-validate/), [release](https://novelcore.github.io/hera-pipeline-template/dataset-release/), [download](https://novelcore.github.io/hera-pipeline-template/dataset-pull/), [share](https://novelcore.github.io/hera-pipeline-template/dataset-share/).
 
 Every command prints the next step and the link to what it made. Exit codes: 0 ok, 1 something for
 you to fix (one `ERROR:` line), 2 an invalid dataset.

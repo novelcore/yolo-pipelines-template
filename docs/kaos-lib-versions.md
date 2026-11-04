@@ -9,7 +9,7 @@ documented in the [kaos-lib reference](https://storage.googleapis.com/kaos-dev-5
 !!! note "The minimum version"
     The `kaosctl` command exists from **0.4.0rc5** on; the pipeline's dev channel delivers **0.4.0rc10**. Releases are on the platform's package
     index, in two channels: *prerelease* (`kaos-lib-rc`, the `rc` versions) and *stable*
-    (`kaos-lib`, which has no release yet). [Install kaosctl](https://novelcore.github.io/hera-pipeline-template/cookbook/03-install-kaosctl/) has the
+    (`kaos-lib`, which has no release yet). [Install kaosctl](https://novelcore.github.io/hera-pipeline-template/cookbook/4-install-kaosctl/) has the
     command for each.
 
 ## Who picks the version
@@ -107,5 +107,5 @@ The policy for each release is in the [kaos-lib reference](https://storage.googl
 ## On your computer
 
 To work with the package your steps use, install it as in
-[Install kaosctl](https://novelcore.github.io/hera-pipeline-template/cookbook/03-install-kaosctl/), with the version from the step image's
+[Install kaosctl](https://novelcore.github.io/hera-pipeline-template/cookbook/4-install-kaosctl/), with the version from the step image's
 `io.kaos.lib` label or from the first line of a step log.

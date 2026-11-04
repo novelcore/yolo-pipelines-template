@@ -45,7 +45,7 @@ Because every run saves its settings and its numbers, you can line two runs up s
 
 1. Open the experiment, tick two or more runs, and click **Compare**. MLflow shows their parameters side by side, marks the ones that differ, and draws their metrics on one chart.
 2. The experiment's **Models** tab lists each run's `<experiment-name>-best` with `val/mAP50`, `val/mAP50_95`, `val/precision` and `val/recall`, so you can sort by the score you care about.
-3. To judge the weights yourself, download both `best.pt` files (below) and evaluate them on the same data. `kaosctl run --lock <mlflow-run-id> -- <your eval command>` makes your script read exactly the dataset commit that run trained on: training writes that **data lock** to its MLflow run (the `data.lock.json` artifact and the `kaos_lib.data.<repo>.commit` tag). See [cookbook 8](https://novelcore.github.io/hera-pipeline-template/cookbook/08-see-results/).
+3. To judge the weights yourself, download both `best.pt` files (below) and evaluate them on the same data. `kaosctl run --lock <mlflow-run-id> -- <your eval command>` makes your script read exactly the dataset commit that run trained on: training writes that **data lock** to its MLflow run (the `data.lock.json` artifact and the `kaos_lib.data.<repo>.commit` tag). See [cookbook 8](https://novelcore.github.io/hera-pipeline-template/cookbook/8-results-and-weights/).
 
 ## Why the settings are saved
 

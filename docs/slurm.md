@@ -20,4 +20,4 @@ Things to know:
 - **INT8 steps** have their own `<step>-class` fields; leave them on the cluster unless you need otherwise.
 - **Which machine otherwise:** leave the class dropdowns alone and training runs on a cluster GPU.
 
-If a job waits or stops for a long time, see [When something breaks](troubleshooting.md#a-step-waits-and-never-starts).
+More (the classes, staging, time limits, what to do when a job waits or stops): [the MeluXina page of the hera cookbook](https://novelcore.github.io/hera-pipeline-template/meluxina/). See also [When something breaks](troubleshooting.md#a-step-waits-and-never-starts).
