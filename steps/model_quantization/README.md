@@ -1,24 +1,13 @@
 # model-quantization
 
-Quantization step of the Kubeline YOLO MLOps pipeline (PRD-174).
+Makes the INT8 TFLite model.
 
-Produces an INT8 model from the trained FP32 YOLOv8-pose checkpoint. Supports:
-- **PTQ** — post-training INT8 quantization (the YOLO TFLite int8 export with a
-  calibration set), and
-- **QAT pass-through** — packages/validates the INT8 TFLite produced by `qat-finetune`.
+- **Runs on:** CPU, only when `quantization-mode` is `ptq` or `qat`.
+- **`ptq`:** exports the trained FP32 `best.pt` to INT8 TFLite after calibrating on `quantization-calibration_frames` training images (at least 100, at most 10000).
+- **`qat`:** packages the INT8 TFLite that `qat-finetune` made.
+- **Parity:** compares INT8 and FP32 on `quantization-parity_frames` images and logs `parity_max_abs_error` and `parity_passed` to MLflow. This is diagnostic: it does not fail the step.
+- **Writes:** the `.tflite` to `outputs-<pipeline>` under `quantization/<experiment>/<run>/`.
+- **Output:** `quantization-result`.
+- **Settings:** [docs/parameters.md](../../docs/parameters.md) (model: `app/models/quantization.py`).
 
-Also runs the FP32-vs-INT8 parity check (FR-M-03). CPU step.
-
-## Run
-
-```bash
-model-quantization run \
-  --mode ptq \
-  --fp32-checkpoint-path s3://bucket/checkpoints/best.pt \
-  --source-mlflow-run-id <run_id> \
-  --dataset-dir /work/dataset \
-  --output-dir /work/quant_output \
-  --output-bucket <bucket> \
-  --output-prefix quant/<exp> \
-  --experiment-name <name>
-```
+The step is started by the pipeline with the composed params and the training result; there is no separate command line to run it by hand.

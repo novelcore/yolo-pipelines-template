@@ -1,10 +1,12 @@
-# Read your results
+# 5. Results, weights and models in MLflow
 
-Every run records its numbers and charts on a page called MLflow. This is where you go to see how your training went.
+**Goal:** read how your training went, compare runs, and get the weights.
+
+*MLflow* is the results page every run writes to: numbers, charts, settings and a registry of models. Your *weights* (the model files) are not in MLflow: they are in the lakeFS repository `outputs-<pipeline>` (the **Outputs** link).
 
 ## Open MLflow
 
-In the console, open **Pipelines** and click your app's **MLflow** link. Or **Models** in the console sidebar lists the registered models of your project, with **Open in MLflow**.
+**Do:** in the console, open **Pipelines** and click your pipeline's **MLflow** link. Or **Models** in the console sidebar lists the registered models of your project, with **Open in MLflow**.
 
 Find your run by the name you set in `experiment-name`. Click it to open it.
 
@@ -43,7 +45,7 @@ Because every run saves its settings and its numbers, you can line two runs up s
 
 1. Open the experiment, tick two or more runs, and click **Compare**. MLflow shows their parameters side by side, marks the ones that differ, and draws their metrics on one chart.
 2. The experiment's **Models** tab lists each run's `<experiment-name>-best` with `val/mAP50`, `val/mAP50_95`, `val/precision` and `val/recall`, so you can sort by the score you care about.
-3. To judge the weights yourself, download both `best.pt` files (below) and evaluate them on the same data. `kaosctl run --lock <mlflow-run-id> -- <your eval command>` makes your script read exactly the dataset commit that run trained on: training writes that **data lock** to its MLflow run (the `data.lock.json` artifact and the `kaos_lib.data.<repo>.commit` tag). See [cookbook 8](https://novelcore.github.io/hera-pipeline-template/cookbook/8-results-and-weights/).
+3. To judge the weights yourself, download both `best.pt` files (below) and evaluate them on the same data. `kaosctl run --lock <mlflow-run-id> -- <your eval command>` makes your script read exactly the dataset commit that run trained on: training writes that **data lock** to its MLflow run (the `data.lock.json` artifact and the `kaos_lib.data.<repo>.commit` tag). See [cookbook 8](https://novelcore.github.io/hera-pipeline-template/cookbook/08-see-results/).
 
 ## Why the settings are saved
 
@@ -51,6 +53,13 @@ You never have to remember what you did. If a run turns out well, its parameters
 
 ## Your files
 
-Checkpoints, exports and the INT8 model are not in MLflow's charts: they are in your app's repository `outputs-<app>` in lakeFS, branch `main`, one commit per step per run, under `checkpoints/<experiment>/<run>/` and `quantization/<experiment>/<run>/`. The commit's details name the dataset and the MLflow run, and the MLflow run names the commit back: its tags `kaos.outputs_repo`, `kaos.outputs_commit` and `kaos.outputs_path` say where the files are. The model in the Models tab carries the same tags. A registered model has its own tag on that commit, `model-<name>-v<version>` ([Promote a model](promote.md)). [First dataset to results](first-run.md), step 6, shows how to download them.
+Checkpoints, exports and the INT8 model are not in MLflow's charts: they are in your pipeline's repository `outputs-<pipeline>` in lakeFS, branch `main`, one commit per step per run, under `checkpoints/<experiment>/<run>/` and `quantization/<experiment>/<run>/`. The commit's details name the dataset and the MLflow run, and the MLflow run names the commit back: its tags `kaos.outputs_repo`, `kaos.outputs_commit` and `kaos.outputs_path` say where the files are. The model in the Models tab carries the same tags. A registered model has its own tag on that commit, `model-<name>-v<version>` ([Promote a model](promote.md)). To download them:
+
+```bash
+kaosctl dataset pull outputs-<pipeline>@main ./weights --prefix checkpoints/<experiment>/<run>/
+ls ./weights        # best.pt  last.pt  epoch_0010.pt ...
+```
+
+The run's `kaos.outputs_path` tag gives the exact folder; the INT8 `.tflite` of a `ptq` or `qat` run is under `quantization/<experiment>/<run>/`. If a training step is retried, it resumes from its last saved checkpoint.
 
 Happy with a model? Go to [Promote a model](promote.md).

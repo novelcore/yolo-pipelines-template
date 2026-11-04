@@ -10,7 +10,7 @@ This page has no tasks. It explains the seven steps, so the run form makes sense
 | 3 | `data-summary` | always, alongside training | prints one line about the dataset settings (`📊 Data summary: dataset=... source=... seed=...`) |
 | 4 | `model-training` | always | trains the YOLO pose model on a GPU for `train-epochs` epochs, streaming the images from lakeFS. It saves a checkpoint every `train-checkpointing-interval_epochs` epochs, logs to MLflow, and on a retry resumes from its last checkpoint |
 | 5 | `qat-finetune` | only when `quantization-mode` = `qat` | goes on training the model in a way that prepares it for INT8 |
-| 6 | `model-quantization` | when `quantization-mode` is `ptq` or `qat` | makes an INT8 `.tflite` model and checks it still matches the full model. It fails on purpose if they drift apart by more than `quantization-parity_max_abs_error` |
+| 6 | `model-quantization` | when `quantization-mode` is `ptq` or `qat` | makes an INT8 `.tflite` model and compares it with the full model on `quantization-parity_frames` images. The result is logged to MLflow (`parity_passed`, `parity_max_abs_error`); it does not stop the run, so look at it before you use the INT8 file |
 | 7 | `model-registration` | always | registers the best checkpoint in MLflow, tags its lakeFS commit `model-<name>-v<N>`, and optionally promotes it (`registration-promote_to`) |
 
 With `quantization-mode` = `none`, the default, steps 5 and 6 show as *skipped*. The pipeline
@@ -18,7 +18,7 @@ trains a model and registers it. That is the simple path.
 
 ## Where it all goes
 
-- **Weights and exports:** `outputs-<app>` in lakeFS, under `checkpoints/<experiment>/<run>/`
+- **Weights and exports:** `outputs-<pipeline>` in lakeFS, under `checkpoints/<experiment>/<run>/`
   (`best.pt`, `last.pt`, `epoch_NNNN.pt`). The INT8 model goes under
   `quantization/<experiment>/<run>/`.
 - **Metrics, parameters, plots:** the project's MLflow, in the experiment named by
@@ -26,4 +26,4 @@ trains a model and registers it. That is the simple path.
 - **The registered model:** MLflow's model registry; `object-pose-yolo` unless you set
   `registration-registered_model_name`.
 
-Next: [Upload images and labels](guide-upload-images.md).
+Next: [Upload images and labels](prepare-dataset.md).

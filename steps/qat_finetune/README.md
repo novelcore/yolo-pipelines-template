@@ -1,23 +1,11 @@
 # qat-finetune
 
-Quantization-Aware Training (QAT) step of the Kubeline YOLO MLOps pipeline (PRD-174).
+Quantization-aware training (QAT): a short fine-tune of the trained model that prepares it for INT8, then an INT8 TFLite export.
 
-Takes the FP32 YOLOv8-pose checkpoint produced by `model_training`, runs a short
-QAT fine-tune (PT2E / torchao), and exports an INT8 TFLite model. Runs on a GPU
-(CUDA) node.
+- **Runs on:** a GPU, only when `quantization-mode` is `qat`.
+- **Reads:** `experiment`, `train` (`train-qat-epochs`, `train-qat-lr`) and `quantization` from the form, and `training-result`.
+- **Output:** `qat-result` with the TFLite location, consumed by `model-quantization`.
+- **Settings:** [docs/parameters.md](../../docs/parameters.md) (model: `app/models/quantization.py`; `calibration_frames` is at least 100).
+- **Dependencies:** the CUDA/QAT stack is pinned in `requirements-cuda.txt` and `requirements-qat.txt`.
 
-## Run
-
-```bash
-qat-finetune run \
-  --fp32-checkpoint-path s3://bucket/checkpoints/best.pt \
-  --source-mlflow-run-id <run_id> \
-  --dataset-dir /work/dataset \
-  --output-dir /work/qat_output \
-  --output-bucket <bucket> \
-  --output-prefix qat/<exp> \
-  --experiment-name <name>
-```
-
-Dependency versions for the CUDA/QAT stack are pinned in `requirements-cuda.txt`
-and `requirements-qat.txt` (see `docs/qat-finetune-version-policy.md`).
+The step is started by the pipeline; there is no separate command line to run it by hand. `tools/qat_gpu_smoketest.py` checks a GPU machine can run it.
