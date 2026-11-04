@@ -186,13 +186,16 @@ def main() -> None:
     # (No data.yaml needed: the service generates the correct pose default when
     # dataset_dir has none — kpt_shape [11,3], names {0: spacecraft}.)
     os.makedirs(RUNS_DIR, exist_ok=True)
-    if _staged():
-        # Local mode: the pinned commit is on the node. The kaos-lib consumer finds the
-        # staged copy (it checks the commit), nothing is downloaded, and returns a data.yaml
-        # whose path: points at it.
+    shared = bool(summary.get("shared"))
+    if _staged() or shared:
+        # Local mode: the pinned commit is on the node (MeluXina), or the dataset is another
+        # project's, which this project's S3 gateway does not hold: kaos-lib downloads it from the
+        # owner's lakeFS into the workspace volume. The kaos-lib consumer uses a staged copy as is
+        # (it checks the commit; nothing is downloaded) and returns a data.yaml whose path: points
+        # at the local files.
         data_yaml = lakefs_io.materialize(ds_ref, commit, DATASET_DIR)
         dataset_dir, source = str(data_yaml.parent), "local"
-        print(f"[model-training] dataset {ds_ref} @ {commit} staged -> {data_yaml} (local mode)", flush=True)
+        print(f"[model-training] dataset {ds_ref} @ {commit} -> {data_yaml} (local mode{', shared' if shared else ''})", flush=True)
     else:
         dataset_dir, source = DATASET_DIR, "s3"
         os.makedirs(os.path.join(DATASET_DIR, "labels"), exist_ok=True)
