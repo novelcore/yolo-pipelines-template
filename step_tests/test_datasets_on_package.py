@@ -222,7 +222,8 @@ def test_should_use_the_copy_staged_on_meluxina_without_downloading(fake, client
     (staged / "images/train").mkdir(parents=True)
     (staged / "data.yaml").write_bytes(DATA_YAML)
     (staged / ".kaos-ready").write_text(json.dumps({"repo": "dataset-cats", "commit": commit}))
-    monkeypatch.setenv("KUBECORE_STAGED_DIR", str(staged))
+    monkeypatch.setenv("KAOS_STAGED_DIR", str(staged))
+    monkeypatch.setenv("KUBECORE_STAGED_DIR", str(staged))  # deprecated alias, an older kaos-lib reads it
     fake.calls.clear()
     data_yaml = lio.materialize("dataset-cats@v1", commit, str(tmp_path / "work"), client)
     assert yaml.safe_load(data_yaml.read_text())["path"] == str(staged)
@@ -241,12 +242,14 @@ def test_should_hand_the_trainer_the_folder_that_holds_the_images_not_the_data_y
     (staged / "images/train").mkdir(parents=True)
     (staged / "data.yaml").write_bytes(DATA_YAML)
     (staged / ".kaos-ready").write_text(json.dumps({"repo": "dataset-cats", "commit": commit}))
-    monkeypatch.setenv("KUBECORE_STAGED_DIR", str(staged))
+    monkeypatch.setenv("KAOS_STAGED_DIR", str(staged))
+    monkeypatch.setenv("KUBECORE_STAGED_DIR", str(staged))  # deprecated alias, an older kaos-lib reads it
     work = tmp_path / "work"
     data_yaml = lio.materialize("dataset-cats@v1", commit, str(work), client)
     assert data_yaml.parent == work and not (work / "images").exists()
     assert lio.dataset_root(data_yaml) == str(staged)
     # a downloaded copy keeps data.yaml and the data together
+    monkeypatch.delenv("KAOS_STAGED_DIR")
     monkeypatch.delenv("KUBECORE_STAGED_DIR")
     data_yaml = lio.materialize("dataset-cats@v1", commit, str(tmp_path / "dl"), client)
     assert lio.dataset_root(data_yaml) == str((tmp_path / "dl").resolve())
@@ -261,7 +264,8 @@ def test_steps_pass_the_dataset_root_to_the_trainer(step):
 def test_training_uses_the_consumer_only_when_a_copy_is_staged(monkeypatch):
     entry = import_in("model_training", "app.entry")
     assert entry._staged() is False
-    monkeypatch.setenv("KUBECORE_STAGED_DIR", "/kubecore/dataset")
+    monkeypatch.setenv("KAOS_STAGED_DIR", "/kaos/dataset")
+    monkeypatch.setenv("KUBECORE_STAGED_DIR", "/kaos/dataset")  # deprecated alias, an older kaos-lib reads it
     assert entry._staged() is True
 
 
@@ -278,7 +282,8 @@ def test_training_location_is_the_pinned_manifest_summary():
 @pytest.mark.parametrize("step", ["model_training", "qat_finetune", "model_quantization"])
 def test_should_write_results_as_one_commit_on_main_of_the_outputs_repository(step, fake, client, tmp_path, monkeypatch):
     lio = import_in(step, "app.services.lakefs_io")
-    monkeypatch.setenv("KUBECORE_RUN_ID", "yolo-pipeline-x7k2p")
+    monkeypatch.setenv("KAOS_RUN_ID", "yolo-pipeline-x7k2p")
+    monkeypatch.setenv("KUBECORE_RUN_ID", "yolo-pipeline-x7k2p")  # deprecated alias, an older kaos-lib reads it
     f = tmp_path / "model_int8.tflite"
     f.write_bytes(b"tflite")
     prefix = lio.write_outputs("outputs-yolo", "exp", [f], kind="quantization", client=client,
@@ -291,7 +296,8 @@ def test_should_write_results_as_one_commit_on_main_of_the_outputs_repository(st
 
 def test_should_read_a_checkpoint_back_from_the_s3_uri_we_return(fake, client, tmp_path, monkeypatch):
     lio = import_in("model_training", "app.services.lakefs_io")
-    monkeypatch.setenv("KUBECORE_RUN_ID", "run-1")
+    monkeypatch.setenv("KAOS_RUN_ID", "run-1")
+    monkeypatch.setenv("KUBECORE_RUN_ID", "run-1")  # deprecated alias, an older kaos-lib reads it
     f = tmp_path / "best.pt"
     f.write_bytes(b"PT")
     prefix = lio.write_outputs("outputs-yolo", "exp", [f], client=client)
@@ -302,7 +308,8 @@ def test_should_read_a_checkpoint_back_from_the_s3_uri_we_return(fake, client, t
 def _training_service(mod, tmp_path, client, monkeypatch):
     """A TrainingService with an OPEN run writer on outputs-yolo (what _run_training sets up)."""
     from kaos_lib import outputs
-    monkeypatch.setenv("KUBECORE_RUN_ID", "run-1")
+    monkeypatch.setenv("KAOS_RUN_ID", "run-1")
+    monkeypatch.setenv("KUBECORE_RUN_ID", "run-1")  # deprecated alias, an older kaos-lib reads it
     svc = mod.TrainingService.__new__(mod.TrainingService)
     svc._logger = mod.logging.getLogger("test")
     svc._outputs_stage = tmp_path / "stage"
@@ -365,7 +372,8 @@ def test_a_retried_step_resumes_from_the_last_checkpoint_of_the_run_branch(fake,
 
 def test_a_first_attempt_has_nothing_to_resume(fake, client, connected, tmp_path, monkeypatch):
     mod = import_in("model_training", "app.services.model_training")
-    monkeypatch.setenv("KUBECORE_RUN_ID", "fresh")
+    monkeypatch.setenv("KAOS_RUN_ID", "fresh")
+    monkeypatch.setenv("KUBECORE_RUN_ID", "fresh")  # deprecated alias, an older kaos-lib reads it
     svc = mod.TrainingService.__new__(mod.TrainingService)
     svc._logger = mod.logging.getLogger("test")
     assert svc._open_run_writer(_params(), tmp_path) is None
@@ -384,8 +392,10 @@ def test_training_fails_loudly_when_the_results_cannot_be_merged(fake, client, t
 def test_checkpoints_are_scoped_to_the_run(monkeypatch):
     mt = import_in("model_training", "app.services.model_training")
     params = type("P", (), {"checkpoint_prefix": "main/checkpoints/", "experiment_name": "exp"})()
-    monkeypatch.setenv("KUBECORE_RUN_ID", "yolo-pipeline-x7k2p")
+    monkeypatch.setenv("KAOS_RUN_ID", "yolo-pipeline-x7k2p")
+    monkeypatch.setenv("KUBECORE_RUN_ID", "yolo-pipeline-x7k2p")  # deprecated alias, an older kaos-lib reads it
     assert mt.checkpoint_base(params) == "main/checkpoints/exp/yolo-pipeline-x7k2p"
+    monkeypatch.delenv("KAOS_RUN_ID")
     monkeypatch.delenv("KUBECORE_RUN_ID")
     assert mt.checkpoint_base(params) == "main/checkpoints/exp"
 
@@ -429,7 +439,7 @@ def test_step_images_install_kaos_lib_and_not_the_vendored_engine():
                  "model_registration"):
         text = (ROOT / "steps" / step / "Dockerfile").read_text()
         assert 'pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"' in text, step   # the WHOLE requirement
-        assert "COPY kubecore" not in text and "hera-pipeline-template" not in text, step
+        assert "COPY kubecore" not in text and "COPY kaos_pipeline" not in text and "hera-pipeline-template" not in text, step
         specs.add(next(l.split("=", 1)[1] for l in text.splitlines() if l.startswith("ARG KAOS_LIB_PACKAGE=")))
     assert len(specs) == 1, "one kaos-lib pin for every step"
     spec = next(iter(specs))
@@ -550,3 +560,12 @@ def test_training_reads_a_shared_dataset_through_kaos_lib_not_s3(monkeypatch, tm
     data_yaml = lio.materialize("acme/dataset-x@v1", owner.head("dataset-x"), str(tmp_path / "ds"), oc)
     assert (tmp_path / "ds" / "images/train/a.jpg").read_bytes() == b"img"
     assert yaml.safe_load(data_yaml.read_text())["path"] == str((tmp_path / "ds").resolve())
+
+
+def test_the_run_id_is_read_under_either_name(monkeypatch):
+    """KAOS_RUN_ID is the name; KUBECORE_RUN_ID is the deprecated alias an older engine still sets."""
+    lakefs_io = import_in("model_training", "app.services.lakefs_io")
+    monkeypatch.setenv("KUBECORE_RUN_ID", "wf-old")
+    assert lakefs_io.run_id() == "wf-old"
+    monkeypatch.setenv("KAOS_RUN_ID", "wf-new")
+    assert lakefs_io.run_id() == "wf-new"

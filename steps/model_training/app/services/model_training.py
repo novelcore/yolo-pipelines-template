@@ -38,22 +38,20 @@ from app.services.resource_monitor import ResourceMonitor
 
 
 def kaos_lib_version() -> str:
-    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
-    for dist in ("kaos-lib", "kubecore"):
-        try:
-            return package_version(dist)
-        except PackageNotFoundError:
-            pass
-    return "unknown"
+    """The installed kaos-lib version (distribution `kaos-lib`)."""
+    try:
+        return package_version("kaos-lib")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def checkpoint_base(params: "TrainingParams") -> str:
     """``{checkpoint_prefix}/{experiment}/{run}``: one run's checkpoints and
     exports never overwrite another run's of the same experiment. The run is
-    the Argo workflow name the platform injects as KUBECORE_RUN_ID; without it
+    the Argo workflow name the platform injects as KAOS_RUN_ID; without it
     (local runs) the key is ``{checkpoint_prefix}/{experiment}``."""
     base = f"{params.checkpoint_prefix.rstrip('/')}/{params.experiment_name}"
-    run = os.environ.get("KUBECORE_RUN_ID", "").strip()
+    run = (os.environ.get("KAOS_RUN_ID") or os.environ.get("KUBECORE_RUN_ID") or "").strip()  # 2nd: deprecated alias
     return f"{base}/{run}" if run else base
 
 
@@ -166,7 +164,7 @@ class TrainingService:
 
         # yolo reads MLFLOW_RUN (not MLFLOW_RUN_NAME) for the run name.
         # Bridge the Kubeline workflow name so each run gets a unique name.
-        workflow_name = os.environ.get("KUBECORE_WORKFLOW_NAME", "")
+        workflow_name = os.environ.get("KAOS_WORKFLOW_NAME") or os.environ.get("KUBECORE_WORKFLOW_NAME", "")
         if workflow_name:
             os.environ["MLFLOW_RUN"] = workflow_name
 
@@ -381,7 +379,7 @@ class TrainingService:
         mlflow_run_id = self._get_mlflow_run_id()
 
         # Tag the completed MLflow run with Kubeline platform metadata
-        self._tag_kubecore_metadata(mlflow_run_id)
+        self._tag_platform_metadata(mlflow_run_id)
         self._tag_outputs(mlflow_run_id, outputs_commit)
 
         final_map50 = float(epoch_metrics.get("val/mAP50", 0.0))
@@ -622,8 +620,9 @@ class TrainingService:
         return ""
 
     @staticmethod
-    def _tag_kubecore_metadata(run_id: str) -> None:
-        """Tag the MLflow run with KUBECORE_* environment variables and ``kaos_lib.version``
+    def _tag_platform_metadata(run_id: str) -> None:
+        """Tag the MLflow run with the platform's ``KAOS_*`` environment variables (as ``kaos.<name>``;
+        the deprecated ``KUBECORE_*`` spelling counts when the new one is absent) and ``kaos_lib.version``
         (the kaos-lib package this image runs; novelcore/kaos#1147).
 
         Uses MlflowClient (not the fluent API) so it works on an already-ended
@@ -634,19 +633,20 @@ class TrainingService:
         try:
             from mlflow.tracking import MlflowClient  # noqa: PLC0415
 
-            kubecore_tags = {
-                k.lower().replace("kubecore_", "kubecore."): v
-                for k, v in os.environ.items()
-                if k.startswith("KUBECORE_") and v
-            }
-            kubecore_tags["kaos_lib.version"] = kaos_lib_version()
-            if kubecore_tags:
-                client = MlflowClient()
-                for key, value in kubecore_tags.items():
-                    client.set_tag(run_id, key, value)
-                _logger.info("Tagged MLflow run with %d kubecore tags", len(kubecore_tags))
+            tags: dict[str, str] = {}
+            # Old spelling first so the new one wins when both are set.
+            for prefix in ("KUBECORE_", "KAOS_"):
+                for k, v in os.environ.items():
+                    # KAOS_LIB_* are kaos-lib's own settings (support window, lock), not run metadata.
+                    if k.startswith(prefix) and v and not k.startswith("KAOS_LIB_"):
+                        tags["kaos." + k[len(prefix):].lower()] = v
+            tags["kaos_lib.version"] = kaos_lib_version()
+            client = MlflowClient()
+            for key, value in tags.items():
+                client.set_tag(run_id, key, value)
+            _logger.info("Tagged MLflow run with %d platform tags", len(tags))
         except Exception:  # noqa: BLE001
-            _logger.warning("Failed to tag MLflow run with kubecore metadata")
+            _logger.warning("Failed to tag MLflow run with platform metadata")
 
     def _tag_outputs(self, run_id: str, commit: str) -> None:
         """Link the MLflow run to its results in lakeFS (kaos#1283): the ``outputs-<app>``
@@ -676,7 +676,7 @@ class TrainingService:
             "kaos.outputs_repo": w.repo,
             "kaos.outputs_commit": commit,
             "kaos.outputs_path": w.prefix,
-            "kaos.workflow": os.environ.get("KUBECORE_WORKFLOW_NAME") or w.run,
+            "kaos.workflow": os.environ.get("KAOS_WORKFLOW_NAME") or os.environ.get("KUBECORE_WORKFLOW_NAME") or w.run,
         }
 
     def _log_model(self, run_id: str, commit: str, params: TrainingParams,
@@ -1196,7 +1196,7 @@ class TrainingService:
                 local_pt,
             )
             if bucket.startswith(("outputs-", "dataset-")):
-                # a lakeFS repository (our naming rule): read with the kubecore client,
+                # a lakeFS repository (our naming rule): read with the kaos-lib client,
                 # which works with the app's keys in-cluster and the bearer on HPC
                 return Path(lakefs_io.download_object(uri_or_path, str(tmp_path)))
             self._s3.download_file(bucket, key, str(local_pt))

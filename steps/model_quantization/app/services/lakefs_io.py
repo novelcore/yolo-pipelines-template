@@ -5,7 +5,7 @@ model-quantization (each step image carries only its own app/):
 
 - ``materialize``: the run's dataset at the commit dataset-loading pinned, as local files
   (the package's yolo consumer: one download, or the copy staged on HPC via
-  ``KUBECORE_STAGED_DIR``). data.yaml comes back with ``path:`` already pointing at it.
+  ``KAOS_STAGED_DIR``). data.yaml comes back with ``path:`` already pointing at it.
 - ``download_object``: one object of ``s3://<repo>/<ref>/<path>`` (a checkpoint, the qat tflite).
 - ``run_writer`` / ``write_outputs``: the step's results through the package's run writer:
   saved on the branch ``run-<run>-<kind>`` of ``outputs-<app>`` (durable, reused on a retry), merged
@@ -25,8 +25,9 @@ OUTPUTS_REF = "main"  # the branch results are merged to; the first segment of t
 
 
 def run_id() -> str:
-    """The workflow name the platform injects as KUBECORE_RUN_ID ("local" off-platform)."""
-    return os.environ.get("KUBECORE_RUN_ID", "").strip() or "local"
+    """The workflow name the platform injects as KAOS_RUN_ID ("local" off-platform).
+    KUBECORE_RUN_ID is the deprecated alias, read when the new name is absent."""
+    return (os.environ.get("KAOS_RUN_ID") or os.environ.get("KUBECORE_RUN_ID") or "").strip() or "local"
 
 
 def materialize(dataset_ref: str, dataset_commit: str, dest: str,
@@ -47,7 +48,7 @@ def dataset_root(data_yaml: Path) -> str:
     """The folder that holds the dataset's images/ and labels/: the ``path:`` of the data.yaml ``materialize`` returned.
 
     The data.yaml sits in the workspace, but on HPC the data is the staged copy used in place
-    (read-only, ``KUBECORE_STAGED_DIR``), so ``data_yaml.parent`` has no images/. Steps hand THIS
+    (read-only, ``KAOS_STAGED_DIR``), so ``data_yaml.parent`` has no images/. Steps hand THIS
     folder to the trainer as ``dataset_dir``.
     """
     import yaml

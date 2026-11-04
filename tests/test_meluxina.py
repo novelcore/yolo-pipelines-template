@@ -7,9 +7,9 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kubecore.enhance import enhance  # noqa: E402
+from kaos_pipeline.enhance import enhance  # noqa: E402
 
-CTX_PATH = Path(__file__).resolve().parents[1] / "kubecore/local-dev/pipeline-context.yaml"
+CTX_PATH = Path(__file__).resolve().parents[1] / "kaos_pipeline/local-dev/pipeline-context.yaml"
 
 
 def _raw():
@@ -82,7 +82,7 @@ def test_hpc_classes_route_every_step_per_class():
 
 def test_when_expr_translation_and_refusal():
     import pytest
-    from kubecore.meluxina import _when_expr
+    from kaos_pipeline.meluxina import _when_expr
     assert _when_expr("") == ""
     assert _when_expr("{{workflow.parameters.quantization-mode}} == qat") == "workflow.parameters['quantization-mode'] == 'qat'"
     assert _when_expr("{{workflow.parameters.mode}} != 'none'") == "workflow.parameters['mode'] != 'none'"
@@ -92,7 +92,7 @@ def test_when_expr_translation_and_refusal():
 
 
 def test_submit_code_places_the_job_by_class():
-    from kubecore.meluxina import MELUXINA_SUBMIT_CODE as code
+    from kaos_pipeline.meluxina import MELUXINA_SUBMIT_CODE as code
     assert "def hpc_class():" in code and "HPC = hpc_class()" in code.split("def submit():", 1)[1]
     # PRD-HPC-1231: the account (and user/paths) come from the pipeline context
     # via hpc_identity(); no literal account or user survives in the submit code.
@@ -123,7 +123,7 @@ def test_twin_arguments_never_carry_step_scoped_tags():
 def test_submit_code_normalizes_tag_digest_refs(monkeypatch):
     """Apptainer rejects name:tag@digest (live job 5140397); the submit code
     must normalize to digest-only before docker:// pull."""
-    from kubecore.meluxina import MELUXINA_SUBMIT_CODE
+    from kaos_pipeline.meluxina import MELUXINA_SUBMIT_CODE
     for k, v in {"SLURM_TOKEN": "t", "WF_UID": "u", "STEP_NAME": "s",
                  "IMAGE_REF": "reg.example.com/unknown:v1-abc@sha256:deadbeef",
                  "STEP_COMMAND": "[]"}.items():
@@ -138,7 +138,7 @@ def test_submit_code_normalizes_tag_digest_refs(monkeypatch):
 def test_registry_token_only_for_gar_hosts():
     """A GCP token presented to Zot turns anonymous-OK pulls into 401
     (live job 5140432); the batch must gate credentials on *-docker.pkg.dev."""
-    from kubecore.meluxina import MELUXINA_SUBMIT_CODE
+    from kaos_pipeline.meluxina import MELUXINA_SUBMIT_CODE
     assert '-docker.pkg.dev/*)' in MELUXINA_SUBMIT_CODE
     # the export must live INSIDE the case arm, never unconditional
     import re
@@ -150,7 +150,7 @@ def test_registry_token_only_for_gar_hosts():
 def test_submit_code_shell_quotes_command_tokens(monkeypatch):
     """argv tokens with spaces/quotes must survive the env->sh -c ride
     (live job 5140493: a python -c one-liner arrived as bare words)."""
-    from kubecore.meluxina import MELUXINA_SUBMIT_CODE
+    from kaos_pipeline.meluxina import MELUXINA_SUBMIT_CODE
     import json as _json
     for k, v in {"SLURM_TOKEN": "t", "WF_UID": "u", "STEP_NAME": "s",
                  "IMAGE_REF": "r/x:t",
@@ -231,6 +231,8 @@ def test_meluxina_run_carries_wallet_plumbing():
     assert env["CHECKPOINT_BUCKET"] == "outputs-PLACEHOLDER-app"
     assert env["CHECKPOINT_PREFIX"] == "main/checkpoints"
     # the run's id and name follow the job to the HPC site (MLflow run named after the workflow, kaos#1283)
+    assert env["KAOS_RUN_ID"] == env["KAOS_WORKFLOW_NAME"] == "{{workflow.name}}"
+    # the deprecated aliases, for step images that still run an older kaos-lib
     assert env["KUBECORE_RUN_ID"] == env["KUBECORE_WORKFLOW_NAME"] == "{{workflow.name}}"
 
 
@@ -247,7 +249,7 @@ def test_submit_code_stagein_and_wallet_invariants():
     """T-03/D-04 invariants pinned at source level: the machine key never
     enters the Slurm environment; stage-in fails loudly; the bearer rides
     both MLflow and lakeFS; the batch bind-mounts the staged version."""
-    from kubecore.meluxina import MELUXINA_SUBMIT_CODE as src
+    from kaos_pipeline.meluxina import MELUXINA_SUBMIT_CODE as src
     # wallet: minted in-cluster, key file read locally, never exported
     assert "mint_wallet" in src and "ZITADEL_MACHINE_KEY_FILE" in src
     assert "ZITADEL_MACHINE_KEY=" not in src  # no key material into env
@@ -260,8 +262,9 @@ def test_submit_code_stagein_and_wallet_invariants():
     assert "fail(){ scontrol update" in src
     assert "signal.signal(signal.SIGTERM" in src
     assert "resubmits < PULL_RESUBMITS" in src and "PULL_RESUBMITS = 3" in src
-    assert "/kubecore/dataset:ro" in src
-    assert "APPTAINERENV_KUBECORE_DATASET_DIR" in src
+    assert "/kaos/dataset:ro" in src
+    assert "APPTAINERENV_KAOS_DATASET_DIR" in src
+    assert "APPTAINERENV_KUBECORE_DATASET_DIR" in src, "deprecated alias"
     # the step runs from the image WORKDIR (Apptainer ignores it otherwise)
     assert 'PWD_OPT="--pwd $STEP_WORKDIR"' in src and "STEP_WORKDIR=" in src
     # the stage-in payload rides base64 in env and runs on system python3
@@ -274,7 +277,7 @@ def test_stagein_code_is_valid_python():
     """The embedded stage-in payload must parse standalone — it executes on
     the compute node's system python3 with no packaging step in between."""
     import ast
-    from kubecore.meluxina import MELUXINA_SUBMIT_CODE
+    from kaos_pipeline.meluxina import MELUXINA_SUBMIT_CODE
     g = {}
     # executing the module-level defs is network-free; STAGEIN is a constant
     prologue = MELUXINA_SUBMIT_CODE.split("API = ")[0]
@@ -286,7 +289,7 @@ def test_cmd_json_mixed_and_literal_tokens():
     """_cmd_json escaping table: literal -> plain JSON; pure-tag ->
     toJson(param); mixed -> toJson of single-quoted concatenation (quotes
     in the literal part escaped for the expr string)."""
-    from kubecore.meluxina import _cmd_json
+    from kaos_pipeline.meluxina import _cmd_json
     out = _cmd_json(["run", "--epochs={{workflow.parameters.epochs}}",
                      "it's", "{{workflow.parameters.cfg}}"])
     assert out == ('["run", '
@@ -309,7 +312,7 @@ def test_fetch_workdir_reads_oci_config_via_index(monkeypatch):
     code resolves WorkingDir from the registry: index -> amd64 manifest ->
     config blob; GAR gets the bearer, and any failure degrades to ''."""
     import io, json as _json, urllib.request
-    from kubecore.meluxina import MELUXINA_SUBMIT_CODE
+    from kaos_pipeline.meluxina import MELUXINA_SUBMIT_CODE
     g = {}
     exec(MELUXINA_SUBMIT_CODE.split("API = ")[0], g)
     calls = []
@@ -343,7 +346,7 @@ def test_fetch_workdir_reads_oci_config_via_index(monkeypatch):
 
 
 def test_parse_time_limit_units():
-    from kubecore.meluxina import parse_time_limit
+    from kaos_pipeline.meluxina import parse_time_limit
     assert parse_time_limit("90") == 90
     assert parse_time_limit("90m") == 90
     assert parse_time_limit("12h") == 720
@@ -354,7 +357,7 @@ def test_parse_time_limit_units():
 
 
 def _rendered_twin(annotation=None):
-    from kubecore.meluxina import HPC_ANNOTATION
+    from kaos_pipeline.meluxina import HPC_ANNOTATION
     raw = _raw()
     if annotation is not None:
         for t in raw["spec"]["templates"]:
@@ -368,7 +371,7 @@ def _rendered_twin(annotation=None):
 
 
 def test_twin_carries_default_time_limit_and_deadline():
-    from kubecore.meluxina import DEFAULT_TIME_LIMIT_MINUTES, QUEUE_ALLOWANCE_MINUTES
+    from kaos_pipeline.meluxina import DEFAULT_TIME_LIMIT_MINUTES, QUEUE_ALLOWANCE_MINUTES
     args, run = _rendered_twin()
     assert args["time-limit"] == str(DEFAULT_TIME_LIMIT_MINUTES)
     assert args["deadline-seconds"] == str((DEFAULT_TIME_LIMIT_MINUTES + QUEUE_ALLOWANCE_MINUTES) * 60)
@@ -382,7 +385,7 @@ def test_twin_carries_default_time_limit_and_deadline():
 
 
 def test_twin_honours_step_time_limit_annotation():
-    from kubecore.meluxina import QUEUE_ALLOWANCE_MINUTES
+    from kaos_pipeline.meluxina import QUEUE_ALLOWANCE_MINUTES
     args, _ = _rendered_twin("12h")
     assert args["time-limit"] == "720"
     assert args["deadline-seconds"] == str((720 + QUEUE_ALLOWANCE_MINUTES) * 60)
@@ -396,7 +399,7 @@ def test_bad_time_limit_annotation_fails_the_render():
 
 def test_authoring_hpc_time_limit_validation():
     import pytest
-    from kubecore.authoring import AuthoringError, pipeline, step
+    from kaos_pipeline.authoring import AuthoringError, pipeline, step
     for bad in ("1d", 720, "12 h"):
         with pytest.raises(AuthoringError):
             with pipeline("t"):
@@ -526,7 +529,7 @@ def test_status_qualified_depends_name_the_twin():
 
 
 def test_stage_out_batch_and_waiter_invariants():
-    from kubecore.meluxina import MELUXINA_SUBMIT_CODE as code
+    from kaos_pipeline.meluxina import MELUXINA_SUBMIT_CODE as code
     import ast, re
     assert "-B $KAOS_WORK:/work" in code                      # writable /work for the step
     assert 'rm -rf "$KAOS_WORK"' in code and "[ $rc -eq 0 ] && rm -rf" in code  # scratch kept on failure
@@ -548,7 +551,7 @@ def test_slurm_token_is_read_fresh_per_request():
     """The MeluXina JWT rotates every 25 min (60 min lifetime); a queue wait
     longer than that must not blind the waiter (live run tvsm8)."""
     import re
-    from kubecore.meluxina import MELUXINA_SUBMIT_CODE as code
+    from kaos_pipeline.meluxina import MELUXINA_SUBMIT_CODE as code
     out = enhance(_raw(), _ctx())
     run = next(t for t in out["spec"]["templates"] if t["name"] == "meluxina-run")
     vols = {v["name"]: v for v in run["volumes"]}
@@ -571,7 +574,7 @@ def test_wait_survives_pod_loss_and_wallet_expiry():
     run = next(t for t in out["spec"]["templates"] if t["name"] == "meluxina-run")
     # (the retry policy itself is pinned in tests/test_meluxina_retry.py)
     assert run["retryStrategy"]["limit"] == "2"
-    from kubecore.meluxina import MELUXINA_SUBMIT_CODE as code
+    from kaos_pipeline.meluxina import MELUXINA_SUBMIT_CODE as code
     ns = {}
     exec(code.split("\nWALLET = None", 1)[0], ns)
     exec("WALLET = None" + code.split("\nWALLET = None", 1)[1].split("\ndef mint_wallet", 1)[0], ns)
@@ -584,8 +587,9 @@ def test_wait_survives_pod_loss_and_wallet_expiry():
 
 
 def test_submit_forwards_the_run_id_and_workflow_name_to_the_job():
-    """The Slurm job sees the same KUBECORE_RUN_ID / KUBECORE_WORKFLOW_NAME as an in-cluster step,
+    """The Slurm job sees the same KAOS_RUN_ID / KAOS_WORKFLOW_NAME (and the deprecated KUBECORE_ aliases) as an in-cluster step,
     so outputs land under the run's folder and the MLflow run is named after the workflow."""
-    from kubecore.meluxina import MELUXINA_SUBMIT_CODE
+    from kaos_pipeline.meluxina import MELUXINA_SUBMIT_CODE
     forwarded = MELUXINA_SUBMIT_CODE.split("('CHECKPOINT_BUCKET'", 1)[1].split(")", 1)[0]
-    assert "'KUBECORE_RUN_ID'" in forwarded and "'KUBECORE_WORKFLOW_NAME'" in forwarded
+    for name in ("KAOS_RUN_ID", "KAOS_WORKFLOW_NAME", "KUBECORE_RUN_ID", "KUBECORE_WORKFLOW_NAME"):
+        assert "'%s'" % name in forwarded

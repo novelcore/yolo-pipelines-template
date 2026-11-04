@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from kubecore.meluxina import MELUXINA_SUBMIT_CODE  # noqa: E402
+from kaos_pipeline.meluxina import MELUXINA_SUBMIT_CODE  # noqa: E402
 
 
 def _refusal():

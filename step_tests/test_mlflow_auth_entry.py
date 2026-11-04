@@ -24,6 +24,7 @@ def mlflow_env(monkeypatch):
     for var in ("MLFLOW_TRACKING_URI", "MLFLOW_TRACKING_TOKEN", "MLFLOW_TRACKING_AUTH", "MLFLOW_RUN_ID",
                 "ZITADEL_MACHINE_KEY_FILE", "ZITADEL_DOMAIN", "ZITADEL_MLFLOW_PROJECT_ID", "KAOS_LIB_LOCK"):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("KAOS_ML_HOME", "/nonexistent/kaos-login")
     monkeypatch.setenv("KUBECORE_ML_HOME", "/nonexistent/kaos-login")   # no laptop session either
     monkeypatch.setattr(kmlflow, "_source", kmlflow.TokenSource())
     lock.reset()

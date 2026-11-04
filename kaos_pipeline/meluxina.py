@@ -34,13 +34,13 @@ Operational notes baked in from the live F-01/F-02 shakedown (2026-08):
     public endpoint to a Lustre cache keyed by lakeFS commit (D-04: the
     in-cluster manifest-only/S3-gateway streaming path is blocked by the
     SSO front off-cluster) and bind-mounts it read-only at
-    /kubecore/dataset (KUBECORE_DATASET_DIR) for the step.
+    /kaos/dataset (KAOS_DATASET_DIR) for the step.
 """
 
 import json
 import re
 
-from kubecore.outputs_repo import OUTPUTS_REF, checkpoint_prefix, outputs_repo
+from kaos_pipeline.outputs_repo import OUTPUTS_REF, checkpoint_prefix, outputs_repo
 
 # The submit/poll program the meluxina-run container executes via
 # `python3 -c`. Plain string — no Argo tags inside (all run-time inputs
@@ -54,7 +54,7 @@ STAGEOUT = r"""
 # downstream steps see real values, then deletes the branch. They never touch `main`:
 # lakeFS refuses a merge into a branch with uncommitted objects, and the step's real
 # results (checkpoints) are written by the step itself, inside the image, with the
-# kubecore package's run writer (branch run-<run>-<kind>, merged into main).
+# kaos-lib run writer (branch run-<run>-<kind>, merged into main).
 import json, os, pathlib, urllib.error, urllib.parse, urllib.request
 base = os.environ['LAKEFS_ENDPOINT'].rstrip('/') + '/api/v1'
 H = {'Authorization': 'Bearer ' + os.environ['LAKEFS_BEARER_TOKEN']}
@@ -115,7 +115,7 @@ dest = pathlib.Path(os.environ['DATASET_CACHE']) / REPO / commit
 open(os.environ['DATASET_DIRFILE'], 'w').write(str(dest))
 if (dest / '.complete').exists():
     (dest / '.complete').touch()            # last use, for the job's cache cleanup
-    (dest / '.kaos-commit').write_text(commit)  # the kubecore consumer checks it
+    (dest / '.kaos-commit').write_text(commit)  # the kaos-lib consumer checks it
     print('stage-in: cache hit', dest, flush=True)
     sys.exit(0)
 def ls(prefix):
@@ -155,7 +155,7 @@ def fetch(o):
 with concurrent.futures.ThreadPoolExecutor(8) as ex:
     n = sum(ex.map(fetch, objs))
 (dest / '.complete').touch()
-(dest / '.kaos-commit').write_text(commit)   # the kubecore consumer checks it
+(dest / '.kaos-commit').write_text(commit)   # the kaos-lib consumer checks it
 print('stage-in: downloaded', n, 'of', len(objs), '->', dest, flush=True)
 """
 
@@ -679,9 +679,11 @@ def submit():
         # reach the step; the bind gives it the staged version read-only.
         'BIND=""',
         'if [ -n "$DATASET_DIR" ]; then'
-        ' BIND="-B $DATASET_DIR:/kubecore/dataset:ro";'
-        ' export APPTAINERENV_KUBECORE_DATASET_DIR=/kubecore/dataset'
-        ' APPTAINERENV_KUBECORE_STAGED_DIR=/kubecore/dataset; fi',
+        ' BIND="-B $DATASET_DIR:/kaos/dataset:ro";'
+        ' export APPTAINERENV_KAOS_DATASET_DIR=/kaos/dataset'
+        ' APPTAINERENV_KAOS_STAGED_DIR=/kaos/dataset'
+        ' APPTAINERENV_KUBECORE_DATASET_DIR=/kaos/dataset'  # deprecated alias
+        ' APPTAINERENV_KUBECORE_STAGED_DIR=/kaos/dataset; fi',
         # Writable /work: the SIF is read-only, but steps write /work/output
         # (declared outputs), /work/runs, /work/dataset caches. Per-job scratch
         # on Lustre, removed after a successful stage-out.
@@ -734,7 +736,8 @@ def submit():
     # Only when set: step code reads os.environ.get(..., default), so an empty
     # value would override its own default.
     env += [k + '=' + os.environ[k] for k in
-            ('CHECKPOINT_BUCKET', 'CHECKPOINT_PREFIX', 'KUBECORE_RUN_ID', 'KUBECORE_WORKFLOW_NAME')
+            ('CHECKPOINT_BUCKET', 'CHECKPOINT_PREFIX', 'KAOS_RUN_ID', 'KAOS_WORKFLOW_NAME',
+             'KUBECORE_RUN_ID', 'KUBECORE_WORKFLOW_NAME')
             if os.environ.get(k)]
     global WALLET, WALLET_EXP
     wallet = WALLET = mint_wallet()
@@ -1293,6 +1296,9 @@ def enhance_hpc(spec: dict, ctx: dict, steps: list, gpu_step_names: set) -> None
                 {"name": "OUTPUTS_REF", "value": OUTPUTS_REF},
                 {"name": "CHECKPOINT_BUCKET", "value": outputs_repo(ctx)},
                 {"name": "CHECKPOINT_PREFIX", "value": checkpoint_prefix()},
+                {"name": "KAOS_RUN_ID", "value": "{{workflow.name}}"},
+                {"name": "KAOS_WORKFLOW_NAME", "value": "{{workflow.name}}"},
+                # Deprecated aliases for step images that still run an older kaos-lib.
                 {"name": "KUBECORE_RUN_ID", "value": "{{workflow.name}}"},
                 {"name": "KUBECORE_WORKFLOW_NAME", "value": "{{workflow.name}}"},
             ],

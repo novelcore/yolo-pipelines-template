@@ -8,23 +8,27 @@ def _cap():
 
 
 def test_single_process_loading_stays_single_process(monkeypatch):
-    monkeypatch.setenv("KUBECORE_SLOT_CPUS", "32")
+    monkeypatch.setenv("KAOS_SLOT_CPUS", "32")
+    monkeypatch.setenv("KUBECORE_SLOT_CPUS", "32")  # deprecated alias, an older kaos-lib reads it
     assert _cap()(0) == 0
 
 
 def test_workers_fit_the_slot_with_one_core_for_the_trainer(monkeypatch):
-    monkeypatch.setenv("KUBECORE_SLOT_CPUS", "32")
+    monkeypatch.setenv("KAOS_SLOT_CPUS", "32")
+    monkeypatch.setenv("KUBECORE_SLOT_CPUS", "32")  # deprecated alias, an older kaos-lib reads it
     assert _cap()(64) == 31
     assert _cap()(8) == 8, "a count that already fits is kept"
 
 
 def test_a_one_core_slot_still_gets_one_worker(monkeypatch):
-    monkeypatch.setenv("KUBECORE_SLOT_CPUS", "1")
+    monkeypatch.setenv("KAOS_SLOT_CPUS", "1")
+    monkeypatch.setenv("KUBECORE_SLOT_CPUS", "1")  # deprecated alias, an older kaos-lib reads it
     assert _cap()(4) == 1
 
 
 def test_without_a_slot_the_cpu_binding_counts(monkeypatch):
     import os
+    monkeypatch.delenv("KAOS_SLOT_CPUS", raising=False)
     monkeypatch.delenv("KUBECORE_SLOT_CPUS", raising=False)
     bound = len(os.sched_getaffinity(0))
     assert _cap()(10_000) == max(1, bound - 1)
@@ -34,5 +38,6 @@ def test_an_older_kaos_lib_without_usable_cpus_falls_back_to_the_binding(monkeyp
     import os
     from kaos_lib import runtime
     monkeypatch.delattr(runtime, "usable_cpus")
+    monkeypatch.setenv("KAOS_SLOT_CPUS", "2")
     monkeypatch.setenv("KUBECORE_SLOT_CPUS", "2")   # an old kaos-lib cannot read it; the binding still counts
     assert _cap()(10_000) == max(1, len(os.sched_getaffinity(0)) - 1)

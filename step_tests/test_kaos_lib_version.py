@@ -77,8 +77,25 @@ def test_training_tags_its_mlflow_run_with_the_kaos_lib_version(monkeypatch):
     mlf = FakeMlflow()
     _install(monkeypatch, mlf)
     mod = import_in("model_training", "app.services.model_training")
-    mod.TrainingService._tag_kubecore_metadata("mlflow-1")
+    mod.TrainingService._tag_platform_metadata("mlflow-1")
     assert mlf.run_tags["mlflow-1"]["kaos_lib.version"] == INSTALLED
+
+
+def test_training_tags_its_mlflow_run_with_the_platform_variables(monkeypatch):
+    """KAOS_* becomes `kaos.<name>`; the deprecated KUBECORE_* spelling counts when the new one is
+    absent; the kaos-lib settings (KAOS_LIB_*) are not run metadata."""
+    mlf = FakeMlflow()
+    _install(monkeypatch, mlf)
+    mod = import_in("model_training", "app.services.model_training")
+    monkeypatch.setenv("KAOS_RUN_ID", "wf-new")
+    monkeypatch.setenv("KUBECORE_RUN_ID", "wf-old")
+    monkeypatch.setenv("KUBECORE_DATASET_COMMIT", "c0ffee")  # an older engine sets only this spelling
+    monkeypatch.setenv("KAOS_LIB_SUPPORT", '{"min": "0.4"}')
+    mod.TrainingService._tag_platform_metadata("mlflow-1")
+    tags = mlf.run_tags["mlflow-1"]
+    assert tags["kaos.run_id"] == "wf-new", "the new name wins"
+    assert tags["kaos.dataset_commit"] == "c0ffee"
+    assert not any(k.startswith("kubecore.") or "lib_support" in k for k in tags)
 
 
 def test_registration_tags_the_model_versions_with_the_kaos_lib_version(fake, connected, monkeypatch):

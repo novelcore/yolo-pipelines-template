@@ -31,13 +31,11 @@ OUTPUT_DIR = Path("/work/output")   # durable step output (survives the pod)
 
 
 def kaos_lib_version() -> str:
-    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
-    for dist in ("kaos-lib", "kubecore"):
-        try:
-            return package_version(dist)
-        except PackageNotFoundError:
-            pass
-    return "unknown"
+    """The installed kaos-lib version (distribution `kaos-lib`)."""
+    try:
+        return package_version("kaos-lib")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def _write_result(payload: dict) -> None:

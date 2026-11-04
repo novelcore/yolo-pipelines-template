@@ -59,7 +59,7 @@ import tensorflow, tf_keras, onnx, onnx2tf, onnxslim, onnxruntime, sng4onnx, onn
 from ultralytics import YOLO; \
 print('tensorflow', tensorflow.__version__, '| export toolchain import OK')"
 
-# kaos-lib, the platform library (datasets, run outputs; formerly the kubecore package), from
+# kaos-lib, the platform library (datasets, run outputs), from
 # github.com/kaos-io/kaos-lib. The PLATFORM picks it: the CI passes --build-arg
 # KAOS_LIB_PACKAGE=<requirement> on every build, inside the range in .kaos/compat.yaml
 # (docs/kaos-lib-versions.md). The value is the whole pip requirement (name, extras, version or

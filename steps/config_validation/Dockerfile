@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir \
     "requests>=2.31,<3" \
     "PyYAML>=6,<7"
 
-# kaos-lib, the platform library (datasets, run outputs; formerly the kubecore package), from
+# kaos-lib, the platform library (datasets, run outputs), from
 # github.com/kaos-io/kaos-lib. The platform's CI passes KAOS_LIB_PACKAGE, the WHOLE pip requirement (the
 # platform registry's wheel); the default is this template's pin. Only app/ is copied into the image.
 ARG KAOS_LIB_PACKAGE="kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/0f22d38ec3dbb00fb1b0dfc71e970c76987fb68d.zip"

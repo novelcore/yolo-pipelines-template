@@ -1,8 +1,0 @@
-# Example dataset settings for the `kubecore` command.
-#
-# The platform writes the real file, .kubecore/dataset-config.yaml, into your app;
-# you normally never create it. If you work outside your app folder, copy this file
-# to .kubecore/dataset-config.yaml and fill in the value your Novelcore contact gives
-# you, or pass --url on the command line instead.
-
-lakefsUrl: https://lakefs-<project>.<your-domain>   # your project's lakeFS link

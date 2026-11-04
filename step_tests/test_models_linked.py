@@ -100,7 +100,8 @@ def _merged_commit(fake):
 
 def _training_service(mod, tmp_path, client, monkeypatch):
     from kaos_lib import outputs
-    monkeypatch.setenv("KUBECORE_RUN_ID", "wf-abc12")
+    monkeypatch.setenv("KAOS_RUN_ID", "wf-abc12")
+    monkeypatch.setenv("KUBECORE_RUN_ID", "wf-abc12")  # deprecated alias, an older kaos-lib reads it
     svc = mod.TrainingService.__new__(mod.TrainingService)
     svc._logger = mod.logging.getLogger("test")
     svc._outputs_stage = tmp_path / "stage"
@@ -130,7 +131,8 @@ def test_training_tags_the_mlflow_run_with_where_its_results_are(fake, client, t
     _install(monkeypatch, mlf)
     mod = import_in("model_training", "app.services.model_training")
     svc = _training_service(mod, tmp_path, client, monkeypatch)
-    monkeypatch.setenv("KUBECORE_WORKFLOW_NAME", "wf-abc12")
+    monkeypatch.setenv("KAOS_WORKFLOW_NAME", "wf-abc12")
+    monkeypatch.setenv("KUBECORE_WORKFLOW_NAME", "wf-abc12")  # deprecated alias, an older kaos-lib reads it
     svc._tag_outputs("mlflow-1", "c0ffee")
     assert mlf.run_tags["mlflow-1"] == {
         "kaos.outputs_repo": "outputs-yolo",
@@ -169,7 +171,8 @@ def _log_model(monkeypatch, fake, client, tmp_path, mlf):
     _install(monkeypatch, mlf)
     mod = import_in("model_training", "app.services.model_training")
     svc = _training_service(mod, tmp_path, client, monkeypatch)
-    monkeypatch.setenv("KUBECORE_WORKFLOW_NAME", "wf-abc12")
+    monkeypatch.setenv("KAOS_WORKFLOW_NAME", "wf-abc12")
+    monkeypatch.setenv("KUBECORE_WORKFLOW_NAME", "wf-abc12")  # deprecated alias, an older kaos-lib reads it
     svc._log_model("mlflow-1", "c0ffee", _params(), EPOCH_METRICS, 50)
     return svc
 

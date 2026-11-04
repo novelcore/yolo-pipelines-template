@@ -1,4 +1,4 @@
-"""Assertion suite for the kubecore ML-pipeline engine.
+"""Assertion suite for the kaos_pipeline ML-pipeline engine.
 
 Run offline (no cluster):  python -m pytest tests/ -v
 or standalone:             python tests/test_engine.py
@@ -19,9 +19,9 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from kubecore import compose, derive_tree, enhance  # noqa: E402
+from kaos_pipeline import compose, derive_tree, enhance  # noqa: E402
 
-CONTEXT = yaml.safe_load((ROOT / "kubecore" / "local-dev" / "pipeline-context.yaml").read_text())
+CONTEXT = yaml.safe_load((ROOT / "kaos_pipeline" / "local-dev" / "pipeline-context.yaml").read_text())
 
 
 def _render():
@@ -297,7 +297,7 @@ def test_step_name_guards():
     """Authoring guards give a clear error for the common add-a-step name
     mistakes (empty, uppercase, duplicate) instead of a silent bad render or a
     cryptic Hera NodeNameConflict."""
-    from kubecore.authoring import AuthoringError, pipeline, step
+    from kaos_pipeline.authoring import AuthoringError, pipeline, step
 
     for bad in ("", "Bad_Name", "-lead", "trail-"):
         try:

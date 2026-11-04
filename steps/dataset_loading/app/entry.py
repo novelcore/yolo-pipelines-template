@@ -54,13 +54,11 @@ OUTPUT_DIR = Path("/work/output")
 
 
 def kaos_lib_version() -> str:
-    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
-    for dist in ("kaos-lib", "kubecore"):
-        try:
-            return package_version(dist)
-        except PackageNotFoundError:
-            pass
-    return "unknown"
+    """The installed kaos-lib version (distribution `kaos-lib`)."""
+    try:
+        return package_version("kaos-lib")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def _int_field(value, name: str, default: int) -> int:

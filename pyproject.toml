@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "yolo-training-pipeline"
 version = "0.1.0"
-description = "KubeCore ML pipeline (Hera DAG + Hydra experiment config)"
+description = "KAOS ML pipeline (Hera DAG + Hydra experiment config)"
 requires-python = ">=3.11"
 # Render/compose-time dependencies. Pinned so the CI render is deterministic
 # (D4: determinism is a convention the lockfile enforces). The platform reads
@@ -27,12 +27,12 @@ dev = []
 # Console-script entrypoints so the in-image command matches local dev
 # invocation (O12d). Each step image installs this package and runs
 # `python -m app.entry` (see steps/*/Dockerfile).
-compose-and-validate = "kubecore.compose:main"
+compose-and-validate = "kaos_pipeline.compose:main"
 
 [tool.setuptools]
-packages = ["kubecore"]
+packages = ["kaos_pipeline"]
 
 [tool.pytest.ini_options]
-# Engine tests only. Step code imports the kubecore PACKAGE, which shares its name with the
-# vendored engine, so it has its own run: see step_tests/README.md.
+# Engine tests only. Step code imports kaos-lib (kaos_lib), installed separately; it has its own
+# run: see step_tests/README.md.
 testpaths = ["tests"]
