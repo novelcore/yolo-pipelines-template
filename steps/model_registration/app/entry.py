@@ -72,7 +72,7 @@ def _load_json_arg(value: str) -> dict:
 def _setup_mlflow_auth() -> bool:
     """MLflow auth through kaos-lib (kaos-lib[mlflow]). ``mlflow()`` sets the tracking URI and
     MLFLOW_TRACKING_AUTH=zitadel; that request-auth provider ships with kaos-lib and takes the
-    bearer from one chain: the platform's MLFLOW_TRACKING_TOKEN (MeluXina), else a token minted
+    bearer from one chain: the platform's MLFLOW_TRACKING_TOKEN (HPC), else a token minted
     from the machine key at ZITADEL_MACHINE_KEY_FILE with the org project's audience and minted
     again before it expires. Returns True when MLflow is usable; otherwise MLflow is disabled
     (non-fatal)."""

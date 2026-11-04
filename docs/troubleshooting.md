@@ -76,7 +76,7 @@ The labels do not match `kpt_shape` in `data.yaml` (a different number of keypoi
 
 ### A step waits and never starts
 
-The machines are busy, or on Slurm the job is queued. Give it a few minutes ([Run on Slurm](slurm.md)). If it stays stuck for a long time, tell your KAOS contact.
+The machines are busy, or on Slurm the job is queued. Give it a few minutes ([Run on HPC (Slurm)](slurm.md)). If it stays stuck for a long time, tell your KAOS contact.
 
 ### Training is taking forever
 

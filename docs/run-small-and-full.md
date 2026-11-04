@@ -62,6 +62,6 @@ If `config-validation` turns red, its log names the field to fix ([Troubleshooti
 
 ## Where it trains
 
-By default training runs on a cluster GPU. To use a Slurm supercomputer, see [Run on Slurm](slurm.md).
+By default training runs on a cluster GPU. To use a Slurm supercomputer, see [Run on HPC (Slurm)](slurm.md).
 
 **Next:** [read the results](results.md).

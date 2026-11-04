@@ -88,7 +88,7 @@ nav:
       - "4. Run, small then full": run-small-and-full.md
       - "5. Results, weights and models": results.md
       - "6. Use a shared dataset": shared-dataset.md
-      - "7. Run on Slurm (MeluXina)": slurm.md
+      - "7. Run on HPC (Slurm)": slurm.md
       - A day with yolo: worked-day.md
   - More on the pipeline:
       - What the pipeline does: the-pipeline.md

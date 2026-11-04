@@ -128,7 +128,7 @@ developer choices — are the **WFT name** and the **image**.
 
 **Unknown `platform.kubecore.io/*` annotations hard-fail the enhance** (typo
 protection). The known vocabulary: `compute-class, inject, source, image, shm,
-workspace, hpc` (`hpc` = the Slurm wall-clock limit set by `step(hpc_time_limit=...)`; used only when the step is placed on a `meluxina-*` class).
+workspace, hpc` (`hpc` = the Slurm wall-clock limit set by `step(hpc_time_limit=...)`; used only when the step is placed on an HPC class (`meluxina-*`)).
 
 Output: a complete, runnable `WorkflowTemplate` — CI commits it to the gitops
 repo, ArgoCD syncs it, and it becomes the live release. That live WFT's
@@ -178,7 +178,7 @@ references passed as parameters.
 (`dataset-<name>`, YOLO layout at the root); the run's `dataset` parameter is
 `<repo>@<version>` (`vN` tag, or `latest` = head of `main`). `dataset-loading`
 resolves it to a commit through the lakeFS API and publishes it in
-`manifest-summary` (CON-04); every later step, and the MeluXina stage-in, reads
+`manifest-summary` (CON-04); every later step, and the HPC stage-in, reads
 that commit. A version that does not resolve stops the run — there is no
 unpinned or legacy-layout fallback. Outputs are written to the app's
 `outputs-<app>` repository on `main` (`checkpoints/<experiment>/<run>/`,
