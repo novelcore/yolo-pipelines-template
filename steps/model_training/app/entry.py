@@ -194,7 +194,7 @@ def main() -> None:
         # (it checks the commit; nothing is downloaded) and returns a data.yaml whose path: points
         # at the local files.
         data_yaml = lakefs_io.materialize(ds_ref, commit, DATASET_DIR)
-        dataset_dir, source = str(data_yaml.parent), "local"
+        dataset_dir, source = lakefs_io.dataset_root(data_yaml), "local"
         print(f"[model-training] dataset {ds_ref} @ {commit} -> {data_yaml} (local mode{', shared' if shared else ''})", flush=True)
     else:
         dataset_dir, source = DATASET_DIR, "s3"

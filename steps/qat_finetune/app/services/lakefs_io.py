@@ -43,6 +43,18 @@ def materialize(dataset_ref: str, dataset_commit: str, dest: str,
     return get_format("ultralytics").consumer.materialize(ref, dest, client)
 
 
+def dataset_root(data_yaml: Path) -> str:
+    """The folder that holds the dataset's images/ and labels/: the ``path:`` of the data.yaml ``materialize`` returned.
+
+    The data.yaml sits in the workspace, but on HPC the data is the staged copy used in place
+    (read-only, ``KUBECORE_STAGED_DIR``), so ``data_yaml.parent`` has no images/. Steps hand THIS
+    folder to the trainer as ``dataset_dir``.
+    """
+    import yaml
+    path = (yaml.safe_load(Path(data_yaml).read_text()) or {}).get("path")
+    return str(Path(path)) if path else str(Path(data_yaml).parent)
+
+
 def download_object(uri: str, dest_dir: str, client: Optional[LakeFS] = None) -> str:
     """Download ``s3://<repo>/<ref>/<path>`` into ``dest_dir``; returns the local path.
 

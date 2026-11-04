@@ -229,6 +229,35 @@ def test_should_use_the_copy_staged_on_meluxina_without_downloading(fake, client
     assert not [c for c in fake.calls if c[1].endswith("/objects")], "nothing downloaded"
 
 
+@pytest.mark.parametrize("step", ["model_training", "qat_finetune", "model_quantization"])
+def test_should_hand_the_trainer_the_folder_that_holds_the_images_not_the_data_yaml_folder(
+        step, fake, client, tmp_path, monkeypatch):
+    """HPC (e2e ml_hpc, jobs 5418743/5420267): the staged copy is used in place, so the data.yaml
+    lives in the workspace while images/ and labels/ live in the staged folder. dataset_dir must be
+    the yaml's path:, or the trainer stops with 'images/train/ directory not found'."""
+    lio = import_in(step, "app.services.lakefs_io")
+    commit = fake.head("dataset-cats")
+    staged = tmp_path / "staged"
+    (staged / "images/train").mkdir(parents=True)
+    (staged / "data.yaml").write_bytes(DATA_YAML)
+    (staged / ".kaos-ready").write_text(json.dumps({"repo": "dataset-cats", "commit": commit}))
+    monkeypatch.setenv("KUBECORE_STAGED_DIR", str(staged))
+    work = tmp_path / "work"
+    data_yaml = lio.materialize("dataset-cats@v1", commit, str(work), client)
+    assert data_yaml.parent == work and not (work / "images").exists()
+    assert lio.dataset_root(data_yaml) == str(staged)
+    # a downloaded copy keeps data.yaml and the data together
+    monkeypatch.delenv("KUBECORE_STAGED_DIR")
+    data_yaml = lio.materialize("dataset-cats@v1", commit, str(tmp_path / "dl"), client)
+    assert lio.dataset_root(data_yaml) == str((tmp_path / "dl").resolve())
+
+
+@pytest.mark.parametrize("step", ["model_training", "qat_finetune", "model_quantization"])
+def test_steps_pass_the_dataset_root_to_the_trainer(step):
+    src = (ROOT / "steps" / step / "app" / "entry.py").read_text()
+    assert "lakefs_io.dataset_root(data_yaml)" in src and "data_yaml.parent" not in src
+
+
 def test_training_uses_the_consumer_only_when_a_copy_is_staged(monkeypatch):
     entry = import_in("model_training", "app.entry")
     assert entry._staged() is False
