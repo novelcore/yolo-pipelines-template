@@ -39,6 +39,7 @@ from pathlib import Path
 import yaml
 
 from app.manager import Manager
+from app.services.owner_objects import OwnerObjects
 from kaos_lib import datasets
 
 # The config sections this step reads from params.yaml. The compose-and-validate
@@ -134,7 +135,20 @@ def _resolve_dataset_params(cfg: dict, client=None) -> dict:
     return params
 
 
-def _write_outputs(cfg: dict) -> None:
+def _owner_objects(cfg: dict, client=None):
+    """The object-read client for a SHARED dataset, else None (the own lakeFS S3 gateway).
+
+    A ref owned by another project lives on the owner's lakeFS, which accepts this project's token
+    on its API only: `datasets.source` routes the ref to that client and the service reads through it.
+    """
+    data = cfg.get("data") or {}
+    if str(data.get("source") or "lakefs") != "lakefs" or str(data.get("path_override") or "").strip():
+        return None
+    ref, c = datasets.source(datasets.DatasetRef.parse(cfg.get("dataset")), client)
+    return OwnerObjects(c) if ref.owner else None
+
+
+def _write_outputs(cfg: dict, shared: bool = False) -> None:
     """Extract the two step outputs from the service's on-disk artifacts.
 
     model-training reconstructs /work/dataset from these:
@@ -143,7 +157,8 @@ def _write_outputs(cfg: dict) -> None:
                            version, dataset_commit} pointer; the label_keys sentinel
                            tells training to stream labels from object storage
                            too (manifest-only mode). prefix starts with the
-                           pinned commit; commit is "" only for source=s3.
+                           pinned commit; commit is "" only for source=s3. `shared` is
+                           true only for another project's dataset (see main()).
     """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     dataset_dir = Path(DATASET_DIR)
@@ -165,6 +180,10 @@ def _write_outputs(cfg: dict) -> None:
     summary = {"bucket": bucket, "prefix": prefix, "label_keys": label_keys_sentinel,
                "ref": str(dataset), "repo": dataset.repo, "version": dataset.version,
                "dataset_commit": manifest.get("lakefs_commit") or ""}
+    if shared:
+        # Another project's dataset: not on this project's S3 gateway, so training reads it
+        # through kaos-lib (materialize) instead of streaming the bucket/prefix above.
+        summary["shared"] = True
     (OUTPUT_DIR / "manifest-summary.json").write_text(
         json.dumps(summary, separators=(",", ":"))
     )
@@ -187,9 +206,10 @@ def main() -> None:
     # Manager reads endpoints + credentials from the platform-injected env
     # (LAKEFS_ENDPOINT / LAKEFS_ACCESS_KEY / LAKEFS_SECRET_KEY, or the AWS_*
     # chain for source=s3). The developer wires none of this.
-    Manager().run(**params)
+    owner_objects = _owner_objects(cfg)
+    Manager(s3_client=owner_objects).run(**params)
 
-    _write_outputs(cfg)
+    _write_outputs(cfg, shared=owner_objects is not None)
 
 
 if __name__ == "__main__":

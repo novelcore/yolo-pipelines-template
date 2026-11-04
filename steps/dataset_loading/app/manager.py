@@ -25,14 +25,17 @@ class Manager:
     config:
         Optional pre-built ``Config`` instance.  When *None* a default
         ``Config()`` is constructed (which reads from env vars / .env).
+    s3_client:
+        Optional object-read client replacing the boto3 one: a shared dataset is read
+        through its owner's lakeFS API (``OwnerObjects``), not the own S3 gateway.
     """
 
-    def __init__(self, config: Optional[Config] = None) -> None:
+    def __init__(self, config: Optional[Config] = None, s3_client: Optional[object] = None) -> None:
         self._config = config or Config()
         setup_logging(level=self._config.log_level)
         self._logger = logging.getLogger(__name__)
 
-        self._s3_client = self._build_s3_client()
+        self._s3_client = s3_client or self._build_s3_client()
         self._service = DatasetLoadingService(
             s3_client=self._s3_client,
             max_retries=self._config.max_retries,

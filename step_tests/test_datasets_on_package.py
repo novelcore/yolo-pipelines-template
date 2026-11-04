@@ -3,6 +3,7 @@
 A run picks `<dataset-repo>@<version>`; dataset-loading resolves it to ONE commit; training, qat and
 quantization read that commit (consumer) and write to `outputs-<app>` (write_run).
 """
+import importlib
 import json
 import re
 from pathlib import Path
@@ -410,3 +411,113 @@ def test_should_pin_a_branch_pick_to_its_commit_too(client, fake):
     entry = import_in("dataset_loading", "app.entry")
     p = entry._resolve_dataset_params({"dataset": "dataset-cats@main", "data": {"source": "lakefs"}}, client)
     assert p["lakefs_ref"] == fake.head("dataset-cats"), "a moving branch is resolved once, to a commit"
+
+
+# ---------------------------------------------------------------- shared datasets: dataset-loading -> training
+
+class _NoGateway:
+    """The consumer's S3 gateway: the shared dataset is not there, and any call is a failure."""
+    def __getattr__(self, name):
+        raise AssertionError(f"consumer S3 gateway used: {name}")
+
+
+POSE_YAML = b"path: .\ntrain: images/train\nval: images/val\nnc: 1\nnames:\n  0: ship\nkpt_shape: [1, 3]\n"
+POSE_LABEL = b"0 0.5 0.5 0.1 0.1 0.5 0.5 2\n"
+
+
+def _owner_world(monkeypatch):
+    """The dataset exists ONLY on the owner's lakeFS; `datasets.source` routes an owned ref there."""
+    from fake_lakefs import FakeLakeFS
+    from kaos_lib import datasets
+    consumer, owner = FakeLakeFS(), FakeLakeFS()
+    owner.add_repo("dataset-x", files={"data.yaml": POSE_YAML, "images/train/a.jpg": b"img",
+                                       "labels/train/a.txt": POSE_LABEL,
+                                       "images/val/b.jpg": b"img", "labels/val/b.txt": POSE_LABEL})
+    owner.tag("dataset-x", "v1")
+    owner_client = owner.client()
+    monkeypatch.setattr(datasets, "source", lambda ref, client=None: (
+        (ref, owner_client) if ref.owner else (ref, client or consumer.client())))
+    return consumer, owner, owner_client
+
+
+def test_should_serve_list_head_and_download_from_the_owners_lakefs(monkeypatch, tmp_path):
+    _, owner, oc = _owner_world(monkeypatch)
+    objects = import_in("dataset_loading", "app.services.owner_objects").OwnerObjects(oc)
+    commit = owner.head("dataset-x")
+    keys = [o["Key"] for page in objects.get_paginator("list_objects_v2").paginate(
+        Bucket="dataset-x", Prefix=f"{commit}/") for o in page["Contents"]]
+    assert sorted(keys) == [f"{commit}/{p}" for p in (
+        "data.yaml", "images/train/a.jpg", "images/val/b.jpg", "labels/train/a.txt", "labels/val/b.txt")]
+    objects.head_object(Bucket="dataset-x", Key=f"{commit}/data.yaml")
+    with pytest.raises(Exception):
+        objects.head_object(Bucket="dataset-x", Key=f"{commit}/missing.yaml")
+    objects.download_file("dataset-x", f"{commit}/labels/train/a.txt", str(tmp_path / "x" / "a.txt"))
+    assert (tmp_path / "x" / "a.txt").read_bytes() == POSE_LABEL
+
+
+def test_should_load_a_shared_dataset_without_the_consumers_s3_gateway(monkeypatch, tmp_path):
+    _, owner, oc = _owner_world(monkeypatch)
+    entry = import_in("dataset_loading", "app.entry")
+    with step_app("dataset_loading"):
+        svc_mod = importlib.import_module("app.services.dataset_loading")
+        models = importlib.import_module("app.models.dataset")
+    cfg = {"dataset": "acme/dataset-x@v1", "data": {"source": "lakefs"}}
+    objects = entry._owner_objects(cfg)
+    assert objects is not None
+    params = entry._resolve_dataset_params(cfg)
+    assert params["lakefs_ref"] == owner.head("dataset-x")
+    params["output_dir"] = str(tmp_path / "out")
+    svc = svc_mod.DatasetLoadingService(s3_client=objects)
+    svc.run(models.YoloDatasetParams(**params))
+    assert yaml.safe_load((tmp_path / "out" / "data.yaml").read_text())["kpt_shape"] == [1, 3]
+    manifest = json.loads((tmp_path / "out" / "dataset_manifest.json").read_text())
+    assert manifest["bucket"] == "dataset-x" and manifest["prefix"] == owner.head("dataset-x") + "/"
+    assert manifest["total_images"] == 2
+
+
+def test_should_keep_the_s3_gateway_for_the_projects_own_dataset(fake, client):
+    entry = import_in("dataset_loading", "app.entry")
+    assert entry._owner_objects({"dataset": "dataset-cats@v1", "data": {"source": "lakefs"}}, client) is None
+    # an s3 source or an explicit override never goes through lakeFS
+    assert entry._owner_objects({"dataset": "acme/dataset-x@v1", "data": {"source": "s3"}}, client) is None
+    assert entry._owner_objects({"dataset": "acme/dataset-x@v1",
+                                 "data": {"source": "lakefs", "path_override": "s3://b/p/"}}, client) is None
+
+
+def test_should_use_the_gateway_service_path_for_an_own_dataset(fake, client, tmp_path):
+    """Regression: with no owner client the service still reads through the injected S3 client."""
+    with step_app("dataset_loading"):
+        svc_mod = importlib.import_module("app.services.dataset_loading")
+    calls = []
+
+    class Gateway:
+        def head_object(self, Bucket, Key):
+            calls.append(("head", Bucket, Key))
+        def get_paginator(self, op):
+            calls.append(("paginator", op))
+            raise RuntimeError("stop after the gateway was used")
+    svc = svc_mod.DatasetLoadingService(s3_client=Gateway())
+    assert svc._key_exists("dataset-cats", "c1/data.yaml") is True
+    assert calls == [("head", "dataset-cats", "c1/data.yaml")]
+
+
+def test_dataset_loading_marks_a_shared_dataset_for_training(tmp_path, monkeypatch):
+    entry = import_in("dataset_loading", "app.entry")
+    monkeypatch.setattr(entry, "DATASET_DIR", str(tmp_path))
+    monkeypatch.setattr(entry, "OUTPUT_DIR", tmp_path / "out")
+    (tmp_path / "data.yaml").write_text("kpt_shape: [4, 3]\n")
+    (tmp_path / "dataset_manifest.json").write_text(json.dumps(
+        {"bucket": "dataset-x", "prefix": "c0ffee/", "lakefs_commit": "c0ffee", "label_keys": {"a": 1}}))
+    entry._write_outputs({"dataset": "acme/dataset-x@v1"}, shared=True)
+    assert json.loads((tmp_path / "out" / "manifest-summary.json").read_text())["shared"] is True
+    entry._write_outputs({"dataset": "dataset-x@v1"})
+    assert "shared" not in json.loads((tmp_path / "out" / "manifest-summary.json").read_text())
+
+
+def test_training_reads_a_shared_dataset_through_kaos_lib_not_s3(monkeypatch, tmp_path):
+    """The shared dataset exists only on the owner: training must materialize it, not stream bucket/prefix."""
+    _, owner, oc = _owner_world(monkeypatch)
+    lio = import_in("model_training", "app.services.lakefs_io")
+    data_yaml = lio.materialize("acme/dataset-x@v1", owner.head("dataset-x"), str(tmp_path / "ds"), oc)
+    assert (tmp_path / "ds" / "images/train/a.jpg").read_bytes() == b"img"
+    assert yaml.safe_load(data_yaml.read_text())["path"] == str((tmp_path / "ds").resolve())
