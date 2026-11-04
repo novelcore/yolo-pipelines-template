@@ -60,21 +60,15 @@ That version does not exist. Pick one it lists, or release a new one. A version 
 
 `model-pretrained_weights` must be empty or the full `s3://` path of a `.pt` file that exists.
 
+### `quantization.calibration_frames must be between 100 and 10000, got 50`
+
+With `quantization-mode` = `ptq` or `qat`, `quantization-calibration_frames` (the number of training images used to calibrate the INT8 model) must be from 100 to 10000; the default is 512. The first step checks it, so a bad value fails in seconds, before any training. Fix the field and submit again. With mode `none` the value is not used.
+
 ### Other messages
 
 Some fields only accept certain choices (the message lists them) and some pairs of fields must agree (the message names both). Change the field and submit again. [All the fields](parameters.md) list the allowed values.
 
 ## During the run
-
-### `model-quantization` fails with `calibration_frames` under 100
-
-```
-1 validation error for QuantizationParams
-calibration_frames
-  Input should be greater than or equal to 100 [type=greater_than_equal, input_value=50, input_type=int]
-```
-
-Set `quantization-calibration_frames` to 100 or more (default 512; at most 10000) and submit again. The first step does not catch this, so the training before it was spent.
 
 ### Training ends with `No valid labels found`
 

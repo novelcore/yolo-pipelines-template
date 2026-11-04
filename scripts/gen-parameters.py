@@ -71,7 +71,7 @@ D = {  # one line each; what the field does for you
     "data-sample_size": "Train on this many image and label pairs per split, to make a quick test. Empty uses all of it.",
     "data-seed": "Random seed for the sampling above.",
     "train-epochs": "Training rounds.",
-    "train-batch_size": "Images per step. Use a positive number: `-1` (automatic) is rejected by the training step.",
+    "train-batch_size": "Images per step, a positive number.",
     "train-image_size": "Input size in pixels, a multiple of 32.",
     "train-cos_lr": "Cosine learning-rate schedule.",
     "train-lrf": "Final learning rate as a fraction of the start.",
@@ -104,7 +104,7 @@ D = {  # one line each; what the field does for you
     "image_processing": "Dropdown: `mosaic_default`, `conservative` (light, for small datasets) or `none`.",
     "quantization-mode": "`none` (default) skips both INT8 steps; `ptq` quantizes the trained model; `qat` fine-tunes for INT8 first, then exports.",
     "quantization-image_size": "Must equal `train-image_size`.",
-    "quantization-calibration_frames": "Training images used to calibrate the INT8 model. Must be at least 100.",
+    "quantization-calibration_frames": "Training images used to calibrate the INT8 model; 100 to 10000, checked before training when `quantization-mode` is `ptq` or `qat`.",
     "quantization-calibration_seed": "Seed for picking those images.",
     "quantization-parity_frames": "Images used to compare the INT8 and the full model.",
     "quantization-parity_max_abs_error": "Largest allowed difference between the INT8 and the full model. Reported as the MLflow metric `parity_passed`; it does not fail the run.",
@@ -192,9 +192,9 @@ def build():
          "Fields set by a dropdown change when you pick another option, so their default is that of the option shown.", "",
          "The form also has `<step>-class`, `<step>-cpu`, `<step>-mem` and `<step>-disk` for each step, "
          "described in [Run on Slurm](slurm.md).", "",
-         "!!! note \"A bound that is checked late\"",
-         "    The bound on `quantization-calibration_frames` (at least 100) is enforced by the quantization step, "
-         "after training has finished; the first step does not check it. Set it right on the form.", ""]
+         "!!! note \"Checked before training\"",
+         "    With `quantization-mode` = `ptq` or `qat`, the first step (`config-validation`) checks that "
+         "`quantization-calibration_frames` is from 100 to 10000, so a wrong value fails in seconds.", ""]
     for sec in ORDER:
         if not rows[sec]:
             continue

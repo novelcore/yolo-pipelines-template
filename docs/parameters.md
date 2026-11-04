@@ -5,8 +5,8 @@ Every field of the **Run** form, with its type, default and allowed values. Type
 
 The form also has `<step>-class`, `<step>-cpu`, `<step>-mem` and `<step>-disk` for each step, described in [Run on Slurm](slurm.md).
 
-!!! note "A bound that is checked late"
-    The bound on `quantization-calibration_frames` (at least 100) is enforced by the quantization step, after training has finished; the first step does not check it. Set it right on the form.
+!!! note "Checked before training"
+    With `quantization-mode` = `ptq` or `qat`, the first step (`config-validation`) checks that `quantization-calibration_frames` is from 100 to 10000, so a wrong value fails in seconds.
 
 ## Run
 
@@ -43,7 +43,7 @@ The form also has `<step>-class`, `<step>-cpu`, `<step>-mem` and `<step>-disk` f
 | field | type | default | allowed | what it does |
 |---|---|---|---|---|
 | `train-epochs` | int | `100` | > 0 | Training rounds. |
-| `train-batch_size` | int | `16` | > 0 | Images per step. Use a positive number: `-1` (automatic) is rejected by the training step. |
+| `train-batch_size` | int | `16` | > 0 | Images per step, a positive number. |
 | `train-image_size` | int | `640` | > 0, multiple of 32 | Input size in pixels, a multiple of 32. |
 | `train-cos_lr` | bool | `true` |  | Cosine learning-rate schedule. |
 | `train-lrf` | float | `0.01` | > 0.0, <= 1.0 | Final learning rate as a fraction of the start. |
@@ -107,7 +107,7 @@ The form also has `<step>-class`, `<step>-cpu`, `<step>-mem` and `<step>-disk` f
 |---|---|---|---|---|
 | `quantization-mode` | text | `none` | one of none, ptq, qat | `none` (default) skips both INT8 steps; `ptq` quantizes the trained model; `qat` fine-tunes for INT8 first, then exports. |
 | `quantization-image_size` | int | `640` | > 0 | Must equal `train-image_size`. |
-| `quantization-calibration_frames` | int | `512` | >= 100, <= 10000 | Training images used to calibrate the INT8 model. Must be at least 100. |
+| `quantization-calibration_frames` | int | `512` | >= 100, <= 10000 | Training images used to calibrate the INT8 model; 100 to 10000, checked before training when `quantization-mode` is `ptq` or `qat`. |
 | `quantization-calibration_seed` | int | `42` |  | Seed for picking those images. |
 | `quantization-parity_frames` | int | `100` | >= 1 | Images used to compare the INT8 and the full model. |
 | `quantization-parity_max_abs_error` | float | `0.05` | > 0.0 | Largest allowed difference between the INT8 and the full model. Reported as the MLflow metric `parity_passed`; it does not fail the run. |

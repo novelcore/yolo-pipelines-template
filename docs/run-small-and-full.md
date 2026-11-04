@@ -57,8 +57,8 @@ If `config-validation` turns red, its log names the field to fix ([Troubleshooti
 
     The step also compares the INT8 model with the full one. The result is two MLflow metrics on the quantization run, `parity_max_abs_error` and `parity_passed` (passed means the difference is at most `quantization-parity_max_abs_error`, default 0.05). It does **not** fail the run: check `parity_passed` before you use the INT8 file.
 
-!!! warning "Set `calibration_frames` right the first time"
-    A value under 100 is only rejected by `model-quantization`, after the training has finished. [Troubleshooting](troubleshooting.md#model-quantization-fails-with-calibration_frames-under-100) has the message.
+!!! note "`calibration_frames` bounds"
+    With `ptq` or `qat`, `quantization-calibration_frames` must be 100 to 10000. The first step checks it, so a wrong value fails in seconds, before training ([Troubleshooting](troubleshooting.md#quantizationcalibration_frames-must-be-between-100-and-10000-got-50)).
 
 ## Where it trains
 
