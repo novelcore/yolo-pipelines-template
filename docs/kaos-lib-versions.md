@@ -1,13 +1,13 @@
 # kaos-lib versions and upgrades
 
 Your step images install **kaos-lib**, the platform's Python package for datasets and run outputs
-(`import kaos_lib`; the `kubecore` package is its deprecated former name). The same package gives
+(`import kaos_lib`; an older name for it, `kubecore`, is no longer used). The same package gives
 you `kaosctl` on your computer. This page explains who picks its version, how a new version reaches
-your app, how to hold a version, and how long a version is supported. The library itself is
+your pipeline, how to hold a version, and how long a version is supported. The library itself is
 documented in the [kaos-lib reference](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/index.html).
 
 !!! note "The minimum version"
-    The `kaosctl` command exists from **0.4.0rc5** on. Releases are on the platform's package
+    The `kaosctl` command exists from **0.4.0rc5** on; the pipeline's dev channel delivers **0.4.0rc10**. Releases are on the platform's package
     index, in two channels: *prerelease* (`kaos-lib-rc`, the `rc` versions) and *stable*
     (`kaos-lib`, which has no release yet). [Install kaosctl](https://novelcore.github.io/hera-pipeline-template/cookbook/4-install-kaosctl/) has the
     command for each.
@@ -50,7 +50,7 @@ counts as inside your range; so does every version when the file is missing.
   and you do nothing.
 - **Outside your range** (for example 0.4.2 → 0.5.0): your images stay on the version they
   have, and the platform asks for a **bump pull request** (below). Until you merge it,
-  every build of your app keeps the version it already runs.
+  every build of your pipeline keeps the version it already runs.
 
 ## The bump pull request
 
@@ -64,20 +64,18 @@ counts as inside your range; so does every version when the file is missing.
 way any push does. Check your next run.
 
 **Close it** if you are not ready: the platform does not open a second pull request for the
-same version, and your app keeps the version it runs now. When a newer version comes out,
+same version, and your pipeline keeps the version it runs now. When a newer version comes out,
 you get a new pull request for that one, and the platform closes the older one.
 
 ## Holding a version
 
 - **From your repository**: narrow the range. `kaos-lib: "==0.4.2"` keeps exactly 0.4.2;
   a newer released version arrives as a bump pull request instead of a rebuild.
-- **On the platform**: your platform contact can pin your app to one version (the app's
-  `kaosLib` setting). A pinned app is never moved when the platform's default changes, and
-  gets no bump pull requests.
+- **Through your KAOS contact**: ask to pin your pipeline to one version. A pinned pipeline is never moved when the default changes, and gets no bump pull requests.
 
 ## Which version is my pipeline running?
 
-- The first line of every step's log: `kaos-lib 0.4.0rc5`.
+- The first line of every step's log: `kaos-lib 0.4.0rc10`.
 - MLflow: `model-training` tags its run `kaos_lib.version`, and `model-registration` the
   model versions it registers. A new step that logs an MLflow run should do the same.
 - Each step image carries the label `io.kaos.lib` with the exact requirement it was built

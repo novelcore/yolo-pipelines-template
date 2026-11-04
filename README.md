@@ -1,80 +1,59 @@
 # yolo-pipelines-template
 
-**The yolo pipelines KubeApp template.** A KubeApp with `kubeAppTemplateRef: yolo-pipelines` gets
-a complete YOLO pose pipeline: dataset loading, YOLOv8/YOLOv11 training with authenticated MLflow
-tracking, optional QAT fine-tuning, INT8 TFLite export (PTQ or QAT), and model registration.
-Results go to the app's own `outputs-<app>` lakeFS repository.
+**yolo** is the community pipeline for training YOLO pose models on KAOS: give it labelled images, fill in a form, and it trains, logs to MLflow, optionally makes an INT8 (PTQ or QAT) model, and registers the best one. It is built on the [hera pipeline template](https://github.com/novelcore/hera-pipeline-template) (the scaffold for your own pipelines) and is co-owned with Infinite Orbits.
 
-It is built on the scaffold [`hera-pipeline-template`](https://github.com/novelcore/hera-pipeline-template)
-and is the worked use case of its guide, *the engineer's cookbook*. Start from the scaffold to
-write your own pipeline, and read this one to see a real one. The platform injects the
-environment's MLflow, lakeFS and compute context at render time. Nothing environment-specific
-lives in this repository.
+## Start here
 
-**The guide: [novelcore.github.io/yolo-pipelines-template](https://novelcore.github.io/yolo-pipelines-template/)**.
-Its [day with yolo](https://novelcore.github.io/yolo-pipelines-template/worked-day/) takes you
-from a new app to two trained models compared in MLflow.
+**Read the guide: [novelcore.github.io/yolo-pipelines-template](https://novelcore.github.io/yolo-pipelines-template/)**. You need a KAOS account and a project. The journey, with an action and an expected result at every step:
 
-## The pipeline
+1. [Prepare and upload a yolo dataset](docs/prepare-dataset.md)
+2. [Release a version and pick it](docs/release-a-version.md)
+3. [Create a yolo pipeline](docs/create-pipeline.md)
+4. [Run it: small, then full, PTQ or QAT](docs/run-small-and-full.md)
+5. [Results, weights and models in MLflow](docs/results.md)
+6. [Use a dataset shared with you](docs/shared-dataset.md)
+7. [Run on Slurm (MeluXina)](docs/slurm.md)
 
-Seven steps; `qat-finetune` and `model-quantization` run only when `quantization-mode` is not
-`none`:
-
-```
-config-validation → dataset-loading → data-summary
-                                    → model-training → qat-finetune → model-quantization → model-registration
-```
-
-The whole pipeline is `pipeline.py`. **The `config/` tree is the submit form**: every plain value in
-`config/` becomes a field, and every group folder (`config/model/`, `config/train/optimizer/`, …)
-becomes a dropdown.
-
-```
-pipeline.py            the steps (reads=, gpu=, needs=, when=, hpc_time_limit=)
-config/                every setting: a field or a dropdown on the run form
-steps/<name>/          one folder per step: app/ and a Dockerfile
-kubecore/              the platform's engine: seeded, do not edit
-tests/, step_tests/    engine tests; step-code tests (DEVELOPER.md §15)
-docs/                  the guide (mkdocs)
-```
+Something failed? [When something breaks](docs/troubleshooting.md). All the run-form fields: [parameters](docs/parameters.md).
 
 ## Quick start
 
 ```bash
 python3 -m venv ~/.venvs/kaos && . ~/.venvs/kaos/bin/activate
 pip install --index-url https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib-rc/simple/ \
-    --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel,mlflow]>=0.4.0rc5"
-kaosctl login                                              # inside the app folder
-kaosctl dataset create spacecraft --layout yolo --classes spacecraft   # yolo layout; add kpt_shape to data.yaml
+    --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel,mlflow]==0.4.0rc10"
+kaosctl login                                    # inside your pipeline's folder
+kaosctl dataset create spacecraft --layout yolo --classes spacecraft   # a new dataset has no layout unless you ask
+# add images, labels and kpt_shape / flip_idx in data.yaml, then:
+kaosctl layout validate ./dataset-spacecraft --layout yolo
 kaosctl dataset push ./dataset-spacecraft dataset-spacecraft -m "first images"
-kaosctl dataset release dataset-spacecraft                 # after merging the pull request
-./run.sh                                                   # render the pipeline locally, no cluster
+kaosctl dataset release dataset-spacecraft       # after merging the pull request
 ```
 
-`kaosctl` needs kaos-lib **0.4.0rc5** or newer. The library is documented in
-[the kaos-lib reference](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/index.html).
+Then pick `dataset-spacecraft@v1` in the pipeline's **Run** form. `kaosctl` comes with kaos-lib; its [reference](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/index.html) documents every command.
 
-## Where to read next
+## The pipeline
 
-| you want to | read |
-|---|---|
-| train for the first time | [first dataset to a trained model](https://novelcore.github.io/yolo-pipelines-template/first-run/) |
-| compare two trainings and pick the weights | [a day with yolo](https://novelcore.github.io/yolo-pipelines-template/worked-day/) |
-| how the steps read data, write results and log models | [docs/datasets-in-the-steps.md](docs/datasets-in-the-steps.md) |
-| access, apps, tools, and everything the templates share | [the engineer's cookbook](https://novelcore.github.io/hera-pipeline-template/) |
-| add your first step | [ADD-A-STEP.md](ADD-A-STEP.md) |
-| the operating manual: config, tests, HPC | [DEVELOPER.md](DEVELOPER.md) |
-| how the platform works inside | [MECHANISMS.md](MECHANISMS.md), [PLATFORM.md](PLATFORM.md) |
+```
+config-validation → dataset-loading → data-summary
+                                    → model-training → qat-finetune → model-quantization → model-registration
+```
+
+`qat-finetune` and `model-quantization` run only when `quantization-mode` is `qat` or `ptq` (`qat-finetune`: `qat` only). The whole pipeline is `pipeline.py`; **the `config/` tree is the run form**: each plain value is a field and each group folder (`config/model/`, `config/train/optimizer/`, ...) a dropdown.
+
+## For people changing the template
+
+```
+pipeline.py            the steps
+config/                every setting: a field or a dropdown on the run form
+steps/<name>/          one folder per step (README.md in each)
+kubecore/              the platform's build engine: seeded, do not edit
+scripts/               check-docs.sh, gen-parameters.py
+docs/                  the guide (mkdocs)
+```
+
+[ADD-A-STEP.md](ADD-A-STEP.md), [DEVELOPER.md](DEVELOPER.md), [MECHANISMS.md](MECHANISMS.md), [PLATFORM.md](PLATFORM.md). Check the guide before a pull request: `scripts/check-docs.sh`. `docs/parameters.md` is generated: `python scripts/gen-parameters.py`.
 
 ## License
 
-This template is licensed under the **GNU Affero General Public License v3.0**
-(`AGPL-3.0-only`). See [LICENSE](LICENSE) for the full terms.
-
-It depends on a training library that is itself AGPL-3.0, and three files adapt that
-library's internals (`steps/model_training/app/services/s3_dataset.py`,
-`s3_pose_trainer.py` and `s3_pose_validator.py`), so the template as a whole carries
-that licence. Releases before this change were published under Apache-2.0, which may
-be redistributed under AGPL-3.0.
-
-An app created from this template inherits these terms for the template's code.
+**GNU Affero General Public License v3.0** (`AGPL-3.0-only`), see [LICENSE](LICENSE). It depends on a training library that is itself AGPL-3.0, and three files adapt that library's internals (`steps/model_training/app/services/s3_dataset.py`, `s3_pose_trainer.py` and `s3_pose_validator.py`), so the template as a whole carries that licence. Releases before this change were published under Apache-2.0, which may be redistributed under AGPL-3.0. A pipeline created from this template inherits these terms for the template's code.

@@ -1,10 +1,5 @@
-# steps/ — your pipeline step code
+# steps/ - the pipeline's step code
 
-One directory per pipeline step: your code, plus a Dockerfile in the
-real repo (the PoC keeps only minimal entry points).
+One directory per step of the pipeline (`pipeline.py` lists them), each with its own `app/` and `Dockerfile`. A step image carries only its own `app/`. Each step has a README: [config-validation](config_validation/README.md), [dataset-loading](dataset_loading/README.md), [model-training](model_training/README.md), [qat-finetune](qat_finetune/README.md), [model-quantization](model_quantization/README.md), [model-registration](model_registration/README.md).
 
-Each step receives the fully resolved experiment config (`--params`)
-and should read only the config sections it declares via `reads=` in
-`pipeline.py` — that declaration is checked at release time, so a
-renamed or deleted section fails loudly instead of breaking your step
-mid-run.
+A step receives the fully resolved experiment config (`--params`) and should read only the config sections it declares with `reads=` in `pipeline.py`. That declaration is checked when the pipeline is built, so a renamed or deleted section fails loudly instead of breaking the step mid-run. To add a step see [ADD-A-STEP.md](../ADD-A-STEP.md).

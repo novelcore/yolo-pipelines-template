@@ -6,7 +6,7 @@ When a run finishes, the last step saves the model and gives it a name and a ver
 
 **At run time, on the form.** When you submit a run, there is a field called `registration-promote_to`. Leave it empty and the model is just saved, not promoted. Set it to `champion` or `challenger` and the pipeline gives the model that label as soon as it finishes.
 
-**Later, in MLflow.** If you left it empty and decide later that a model is good, you can promote it by hand in MLflow. Open the model in the registry, pick the version, and add the alias. This needs rights to manage the model in MLflow; a project `admin` has them (verify for other roles). The form way works whoever submits, because the pipeline registers with the project's own MLflow account.
+**Later, in MLflow.** If you left it empty and decide later that a model is good, you can promote it by hand in MLflow. Open the model in the registry, pick the version, and add the alias. This needs rights to manage the model in MLflow; if you cannot, use the form field instead: it works whoever submits.
 
 ## Which should you use
 
@@ -20,7 +20,7 @@ There is also a field called `registration-registered_model_name`. Leave it empt
 
 ## Where the model files are
 
-The files are not stored in MLflow: they are in lakeFS, in your app's repository `outputs-<app>`, and the pipeline puts a tag on that commit named `model-<name>-v<version>`, for example `model-object-pose-yolo-v3`. In lakeFS, open that tag to see exactly the files of that version; `best.pt` is under the folder that the model's `kaos.outputs_path` tag names. In MLflow, the version's tags `kaos.outputs_repo`, `kaos.outputs_commit` and `kaos.lakefs_tag` say where they are, and the model it was made from (the Models tab) carries `kaos.outputs_path` too.
+The files are not stored in MLflow: they are in lakeFS, in your pipeline's repository `outputs-<pipeline>`, and the pipeline puts a tag on that commit named `model-<name>-v<version>`, for example `model-object-pose-yolo-v3`. In lakeFS (the **Outputs** link), open that tag to see exactly the files of that version; `best.pt` is under the folder that the model's `kaos.outputs_path` tag names. In MLflow, the version's tags `kaos.outputs_repo`, `kaos.outputs_commit` and `kaos.lakefs_tag` say where they are, and the model it was made from (the Models tab) carries `kaos.outputs_path` too.
 
 So from any of the three you reach the other two:
 

@@ -1,31 +1,27 @@
-# The yolo pipeline
+# yolo: train a pose model on KAOS
 
-This template is a complete **YOLO pose training pipeline** for KAOS. Give it a labelled dataset,
-pick a few options on a web form, and it trains a model, logs it to MLflow, keeps the weights in
-lakeFS, and registers the best one.
+**yolo** is the community pipeline for training YOLO *pose* models (boxes plus keypoints) on KAOS. You give it labelled images and fill in a form. It trains the model, logs the numbers to MLflow, keeps the weights, can make a smaller INT8 model, and registers the best one.
 
-It is built on the [hera pipeline template](https://novelcore.github.io/hera-pipeline-template/), and it is the worked use case of
-**[the engineer's cookbook](https://novelcore.github.io/hera-pipeline-template/)**. The cookbook covers everything the two templates share:
-access and roles, apps, tools, `kaosctl`, datasets, pull requests, runs and results. This guide
-covers what is specific to yolo, and links back to the cookbook chapters for the rest.
+You need a KAOS account and a project, and you should know Python and ML. You do not need to know how KAOS works inside. yolo is built on the [hera pipeline template](https://novelcore.github.io/hera-pipeline-template/) (the cookbook for KAOS pipelines in general) and is licensed AGPL-3.0, co-owned with Infinite Orbits.
 
-## Your day with yolo
+## The journey
 
-| | do this | where |
+Each page has, for every step, what to do and what you should see.
+
+| | page | result |
 |---|---|---|
-| 1 | sign in, find your project and role | [cookbook 1: You're in](https://novelcore.github.io/hera-pipeline-template/cookbook/1-youre-in/) |
-| 2 | create a yolo app: **Pipelines** → **New pipeline** → the yolo card | [cookbook 2: Your project's apps](https://novelcore.github.io/hera-pipeline-template/cookbook/2-your-apps/) |
-| 3 | open Argo, lakeFS, MLflow | [cookbook 3: Your tools](https://novelcore.github.io/hera-pipeline-template/cookbook/3-your-tools/) |
-| 4 | install `kaosctl` (kaos-lib 0.4.0rc5 or newer) | [cookbook 4: Install kaosctl](https://novelcore.github.io/hera-pipeline-template/cookbook/4-install-kaosctl/) |
-| 5 | upload labelled images, release `v1` | [Upload images and labels](guide-upload-images.md) |
-| 6 | train on `v1`, then train again with other settings | [Train on a version and find the model](guide-train-and-find-the-model.md) |
-| 7 | compare the two in MLflow and pick the weights | [Read your results](results.md), [Promote a model](promote.md) |
+| 1 | [Prepare and upload a yolo dataset](prepare-dataset.md) | a checked dataset, merged |
+| 2 | [Release a version and pick it](release-a-version.md) | `v1`, selectable in the run form |
+| 3 | [Create a yolo pipeline](create-pipeline.md) | a pipeline in the console and a clone on your laptop |
+| 4 | [Run the pipeline: small, then full, PTQ or QAT](run-small-and-full.md) | a trained model |
+| 5 | [Results, weights and models in MLflow](results.md) | metrics, comparison, weights, a registered model |
+| 6 | [Use a dataset shared with you](shared-dataset.md) | training on another project's data |
+| 7 | [Run on Slurm (MeluXina)](slurm.md) | training on a supercomputer |
+| | [When something breaks](troubleshooting.md) | the real messages and their fix |
 
-**[A day with yolo](worked-day.md)** walks through all of it in one page.
+Short on time? [A day with yolo](worked-day.md) does all of it in one page.
 
-## The pipeline
-
-Seven steps. Two of them run only when you turn quantization on:
+## The pipeline in one picture
 
 ```mermaid
 graph LR
@@ -39,17 +35,8 @@ graph LR
     E --> F
 ```
 
-[What the pipeline does](the-pipeline.md) explains each step.
+[What each step does](the-pipeline.md). Every setting is a field of the run form: [all the fields](parameters.md).
 
-## Changing the pipeline
+## Reference
 
-The steps are ordinary hera steps. To add, write or remove one, follow the hera guide:
-[add a step that reads the dataset](https://novelcore.github.io/hera-pipeline-template/guide-step-with-data/),
-[write results from a step](https://novelcore.github.io/hera-pipeline-template/write-a-step/), [remove a step](https://novelcore.github.io/hera-pipeline-template/remove-a-step/),
-[change a setting](https://novelcore.github.io/hera-pipeline-template/change-a-setting/), [send your change in](https://novelcore.github.io/hera-pipeline-template/send-it-in/).
-How the yolo steps read data and write results is in
-[How the steps use datasets](datasets-in-the-steps.md).
-
-!!! note "Licence"
-    The yolo template is a community template, licensed under AGPL-3.0. An app created from it
-    inherits these terms for the template's code. See the repository's `LICENSE` and README.
+[Datasets](datasets.md), [kaos-lib versions](kaos-lib-versions.md), [Word list](glossary.md), and, optional, [how the steps read data and write results](datasets-in-the-steps.md). To change the steps themselves, follow the [hera cookbook](https://novelcore.github.io/hera-pipeline-template/).
