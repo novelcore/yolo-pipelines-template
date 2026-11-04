@@ -132,8 +132,10 @@ class ConfigValidationService:
         which versions exist.
         """
         try:
-            commit = datasets.resolve(dataset, client)
-            c = client or self._lakefs()
+            # A shared ref (`owner/dataset-x@v1`) lives on the OWNER's lakeFS: resolve it and
+            # list its objects with the client `source` routes it to, not the own one.
+            dataset, c = datasets.source(dataset, client)
+            commit = datasets.resolve(dataset, c)
             has_yaml = any(True for _ in c.list_objects(dataset.repo, commit, "data.yaml"))
         except KaosLibError as exc:
             raise ConfigValidationError(f"dataset {dataset}: {exc}") from exc
@@ -142,11 +144,6 @@ class ConfigValidationService:
                 f"dataset {dataset} (commit {commit[:12]}) has no data.yaml at the root of its "
                 "repository - a valid yolo dataset has data.yaml, images/ and labels/.")
         self._log.info("dataset OK (%s -> commit %s, data.yaml present)", dataset, commit[:12])
-
-    @staticmethod
-    def _lakefs():
-        from kaos_lib.lakefs import LakeFS
-        return LakeFS.connect()
 
     def _dataset_uri(self, data: dict, dataset) -> str:
         """The s3:// URI of a dataset given as an explicit override (the only S3 probe left)."""
