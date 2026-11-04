@@ -292,6 +292,10 @@ class TrainingService:
                 self._make_provenance_callback(params),
             )
             model.add_callback(
+                "on_train_start",
+                self._make_autosave_callback(),
+            )
+            model.add_callback(
                 "on_train_batch_end",
                 self._make_batch_end_callback(epoch_metrics),
             )
@@ -579,6 +583,23 @@ class TrainingService:
                 _logger.warning("S3 checkpoint upload failed: %s", cb_exc)
 
         return on_train_epoch_end
+
+    def _make_autosave_callback(self) -> Callable[[Any], None]:
+        """Return a callback that has the run writer save Ultralytics' ``last.pt`` on the stop signal.
+
+        On HPC (Slurm) the platform sends a stop signal shortly before the job's time limit; kaos-lib then
+        saves the run writer's paths and the run continues in a new job, which resumes from ``last.pt``
+        (see _open_run_writer). Ultralytics rewrites ``last.pt`` every epoch, so the newest epoch is saved,
+        not only the last ``checkpoint_interval`` one. A kaos-lib without ``autosave`` ignores this.
+        """
+
+        def on_train_start(trainer: Any) -> None:
+            autosave = getattr(self._run_writer, "autosave", None)
+            last = getattr(trainer, "last", None)
+            if isinstance(autosave, list) and last:
+                autosave.append(Path(last))
+
+        return on_train_start
 
     @staticmethod
     def _make_train_end_callback(
