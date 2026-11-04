@@ -109,7 +109,7 @@ def main() -> None:
     result = Manager().run(
         mode=mode,
         source_mlflow_run_id=(tr.get("mlflow_run_id") or ""),
-        dataset_dir=str(data_yaml.parent),
+        dataset_dir=lakefs_io.dataset_root(data_yaml),
         output_dir=RUNS_DIR,
         output_bucket=_output_bucket(platform),
         experiment_name=exp["name"],
