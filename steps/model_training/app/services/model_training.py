@@ -1197,7 +1197,7 @@ class TrainingService:
             )
             if bucket.startswith(("outputs-", "dataset-")):
                 # a lakeFS repository (our naming rule): read with the kubecore client,
-                # which works with the app's keys in-cluster and the bearer on MeluXina
+                # which works with the app's keys in-cluster and the bearer on HPC
                 return Path(lakefs_io.download_object(uri_or_path, str(tmp_path)))
             self._s3.download_file(bucket, key, str(local_pt))
             return local_pt

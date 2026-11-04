@@ -12,7 +12,7 @@
 4. [Run it: small, then full, PTQ or QAT](docs/run-small-and-full.md)
 5. [Results, weights and models in MLflow](docs/results.md)
 6. [Use a dataset shared with you](docs/shared-dataset.md)
-7. [Run on Slurm (MeluXina)](docs/slurm.md)
+7. [Run on HPC (Slurm)](docs/slurm.md)
 
 Something failed? [When something breaks](docs/troubleshooting.md). All the run-form fields: [parameters](docs/parameters.md).
 

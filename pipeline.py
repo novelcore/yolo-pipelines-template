@@ -27,8 +27,8 @@ with pipeline("ml-pipeline") as p:
     load = step("dataset-loading", reads=["data", "dataset"], needs=[validate],
                 outputs=["data-yaml", "manifest-summary"])
     summary = step("data-summary", reads=["data", "dataset", "summary"], needs=[load])
-    # hpc_time_limit: Slurm wall-clock when this step is placed on a meluxina-*
-    # class (DEVELOPER.md §8.1). Size it to the longest expected epoch budget.
+    # hpc_time_limit: Slurm wall-clock when this step is placed on an HPC
+    # (meluxina-*) class (DEVELOPER.md §8.1). Size it to the longest expected epoch budget.
     train = step("model-training", gpu=True, needs=[load], hpc_time_limit="12h",
                  reads=["experiment", "dataset", "data", "model", "train", "image_processing", "logging"],
                  outputs=["training-result"])

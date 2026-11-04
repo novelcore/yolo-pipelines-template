@@ -69,7 +69,7 @@ def _dataset_location(summary: dict) -> tuple[str, str, str]:
 
 
 def _staged() -> bool:
-    """True on MeluXina: the platform staged the pinned dataset commit onto the node
+    """True on HPC: the platform staged the pinned dataset commit onto the node
     (bind-mounted read-only, announced as KUBECORE_STAGED_DIR, PRD-1016 F-04 / PRD-1541).
     There is no S3 gateway off-cluster, so the dataset is read as local files through the
     kaos-lib consumer; in-cluster the trainer streams from the lakeFS S3 gateway."""
@@ -104,7 +104,7 @@ def _as_csv(value):
 def _setup_mlflow_auth() -> bool:
     """MLflow auth through kaos-lib (kaos-lib[mlflow]). ``mlflow()`` sets the tracking URI and
     MLFLOW_TRACKING_AUTH=zitadel; that request-auth provider ships with kaos-lib and takes the
-    bearer from one chain: the platform's MLFLOW_TRACKING_TOKEN (MeluXina), else a token minted
+    bearer from one chain: the platform's MLFLOW_TRACKING_TOKEN (HPC), else a token minted
     from the machine key at ZITADEL_MACHINE_KEY_FILE with the org project's audience and minted
     again before it expires. Returns True when MLflow is usable; otherwise MLflow is disabled
     (non-fatal)."""
@@ -122,7 +122,7 @@ def _write_data_lock(mlflow_run_id: str, ds_ref: str, commit: str) -> bool:
     """Record the dataset commit this run trained on in its MLflow run: the data lock
     (kaos#1147 F-18), tags ``kaos_lib.data.<repo>.commit`` and ``data.lock.json``.
     In-cluster the trainer streams from the lakeFS S3 gateway, past kaos-lib, so the
-    read is recorded here; a staged read (MeluXina) went through kaos-lib and is
+    read is recorded here; a staged read (HPC) went through kaos-lib and is
     recorded already. Non-fatal, like the rest of the MLflow logging."""
     if not (mlflow_run_id and ds_ref and commit):
         print("[model-training] data lock not written: no MLflow run or no pinned dataset commit.")
@@ -188,7 +188,7 @@ def main() -> None:
     os.makedirs(RUNS_DIR, exist_ok=True)
     shared = bool(summary.get("shared"))
     if _staged() or shared:
-        # Local mode: the pinned commit is on the node (MeluXina), or the dataset is another
+        # Local mode: the pinned commit is on the node (HPC), or the dataset is another
         # project's, which this project's S3 gateway does not hold: kaos-lib downloads it from the
         # owner's lakeFS into the workspace volume. The kaos-lib consumer uses a staged copy as is
         # (it checks the commit; nothing is downloaded) and returns a data.yaml whose path: points

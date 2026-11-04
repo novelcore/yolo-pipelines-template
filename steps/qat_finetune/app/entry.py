@@ -51,7 +51,7 @@ def _output_bucket(platform: dict) -> str:
 def _setup_mlflow_auth() -> bool:
     """MLflow auth through kaos-lib (kaos-lib[mlflow]). ``mlflow()`` sets the tracking URI and
     MLFLOW_TRACKING_AUTH=zitadel; that request-auth provider ships with kaos-lib and takes the
-    bearer from one chain: the platform's MLFLOW_TRACKING_TOKEN (MeluXina), else a token minted
+    bearer from one chain: the platform's MLFLOW_TRACKING_TOKEN (HPC), else a token minted
     from the machine key at ZITADEL_MACHINE_KEY_FILE with the org project's audience and minted
     again before it expires. Returns True when MLflow is usable; otherwise MLflow is disabled
     (non-fatal)."""
@@ -82,7 +82,7 @@ def main() -> None:
     tr = json.loads(args.training_result) if args.training_result.strip() not in ("", "{}") else {}
 
     # The calibration/parity dataset: the commit training pinned, read through the
-    # kaos-lib consumer (one download, or the copy staged on MeluXina). Its ref/commit
+    # kaos-lib consumer (one download, or the copy staged on HPC). Its ref/commit
     # go into the artifacts' lakeFS commit metadata.
     _ref = str(tr.get("dataset_ref") or "")
     os.environ["KUBECORE_DATASET_REF"] = _ref

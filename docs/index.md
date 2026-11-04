@@ -16,7 +16,7 @@ Each page has, for every step, what to do and what you should see.
 | 4 | [Run the pipeline: small, then full, PTQ or QAT](run-small-and-full.md) | a trained model |
 | 5 | [Results, weights and models in MLflow](results.md) | metrics, comparison, weights, a registered model |
 | 6 | [Use a dataset shared with you](shared-dataset.md) | training on another project's data |
-| 7 | [Run on Slurm (MeluXina)](slurm.md) | training on a supercomputer |
+| 7 | [Run on HPC (Slurm)](slurm.md) | training on a supercomputer |
 | | [When something breaks](troubleshooting.md) | the real messages and their fix |
 
 Short on time? [A day with yolo](worked-day.md) does all of it in one page.

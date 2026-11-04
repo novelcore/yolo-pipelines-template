@@ -191,7 +191,7 @@ def build():
          "checks the steps run on the values. A field is a path with dashes: `train.batch_size` is `train-batch_size`. "
          "Fields set by a dropdown change when you pick another option, so their default is that of the option shown.", "",
          "The form also has `<step>-class`, `<step>-cpu`, `<step>-mem` and `<step>-disk` for each step, "
-         "described in [Run on Slurm](slurm.md).", "",
+         "described in [Run on HPC (Slurm)](slurm.md).", "",
          "!!! note \"Checked before training\"",
          "    With `quantization-mode` = `ptq` or `qat`, the first step (`config-validation`) checks that "
          "`quantization-calibration_frames` is from 100 to 10000, so a wrong value fails in seconds.", ""]
