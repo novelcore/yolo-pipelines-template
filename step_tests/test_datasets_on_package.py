@@ -148,6 +148,35 @@ def test_should_refuse_a_dataset_without_data_yaml(fake, client):
         svc._check_dataset(datasets.DatasetRef.parse("dataset-empty@v1"), client)
 
 
+def _shared_world(monkeypatch, owner_has_yaml=True):
+    """A consumer lakeFS WITHOUT the dataset and an owner lakeFS WITH it; `datasets.source` routes a
+    ref carrying an owner to the owner's client, as kaos-lib does through the peers."""
+    from fake_lakefs import FakeLakeFS
+    from kaos_lib import datasets
+    consumer, owner = FakeLakeFS(), FakeLakeFS()
+    owner.add_repo("dataset-x", files={"data.yaml": DATA_YAML} if owner_has_yaml else {"README.md": b"x"})
+    owner.tag("dataset-x", "v1")
+    owner_client = owner.client()
+    monkeypatch.setattr(datasets, "source", lambda ref, client=None: (
+        (ref, owner_client) if ref.owner else (ref, client)))
+    return consumer.client()
+
+
+def test_should_read_a_shared_dataset_from_the_owners_lakefs(monkeypatch):
+    mod, svc = _validation()
+    from kaos_lib import datasets
+    consumer = _shared_world(monkeypatch)
+    svc._check_dataset(datasets.DatasetRef.parse("acme/dataset-x@v1"), consumer)
+
+
+def test_should_refuse_a_shared_dataset_without_data_yaml_on_the_owners_lakefs(monkeypatch):
+    mod, svc = _validation()
+    from kaos_lib import datasets
+    consumer = _shared_world(monkeypatch, owner_has_yaml=False)
+    with pytest.raises(mod.ConfigValidationError, match="has no data.yaml"):
+        svc._check_dataset(datasets.DatasetRef.parse("acme/dataset-x@v1"), consumer)
+
+
 @pytest.mark.parametrize("value", MALFORMED)
 def test_should_reject_a_malformed_dataset_even_without_credentials(monkeypatch, value):
     mod, svc = _validation()
