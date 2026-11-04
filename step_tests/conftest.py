@@ -22,8 +22,11 @@ except ImportError:
 from fake_lakefs import FakeLakeFS  # noqa: E402
 
 ENV_VARS = ("LAKEFS_ENDPOINT", "LAKEFS_URL", "LAKEFS_ACCESS_KEY", "LAKEFS_SECRET_KEY", "LAKEFS_BEARER_TOKEN",
-            "KUBECORE_STAGED_DIR", "KUBECORE_CACHE_DIR", "KUBECORE_DATASET_CONFIG", "CHECKPOINT_BUCKET",
-            "CHECKPOINT_PREFIX", "KUBECORE_RUN_ID", "KUBECORE_WORKFLOW_NAME", "KUBECORE_DATASET_DIR")
+            "KAOS_STAGED_DIR", "KAOS_CACHE_DIR", "KAOS_DATASET_CONFIG", "CHECKPOINT_BUCKET",
+            "CHECKPOINT_PREFIX", "KAOS_RUN_ID", "KAOS_WORKFLOW_NAME", "KAOS_DATASET_DIR",
+            # deprecated aliases, still read by a kaos-lib older than the rename
+            "KUBECORE_STAGED_DIR", "KUBECORE_CACHE_DIR", "KUBECORE_DATASET_CONFIG", "KUBECORE_RUN_ID",
+            "KUBECORE_WORKFLOW_NAME", "KUBECORE_DATASET_DIR")
 
 DATA_YAML = b"path: .\ntrain: images/train\nval: images/val\nnc: 1\nnames:\n  0: ship\n"
 
@@ -53,7 +56,8 @@ def import_in(step, module):
 def clean_env(tmp_path, monkeypatch):
     for var in ENV_VARS:
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv("KUBECORE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("KAOS_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("KUBECORE_CACHE_DIR", str(tmp_path / "cache"))  # deprecated alias
     monkeypatch.chdir(tmp_path)
 
 

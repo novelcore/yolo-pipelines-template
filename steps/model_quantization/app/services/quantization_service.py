@@ -283,8 +283,8 @@ class QuantizationService:
         """
         prefix = lakefs_io.write_outputs(params.output_bucket, params.experiment_name,
                                          [local_path], kind="quantization",
-                                         metadata={"dataset_ref": os.environ.get("KUBECORE_DATASET_REF", ""),
-                                                   "dataset_commit": os.environ.get("KUBECORE_DATASET_COMMIT", "")})
+                                         metadata={"dataset_ref": os.environ.get("KAOS_DATASET_REF") or os.environ.get("KUBECORE_DATASET_REF", ""),
+                                                   "dataset_commit": os.environ.get("KAOS_DATASET_COMMIT") or os.environ.get("KUBECORE_DATASET_COMMIT", "")})
         self._logger.info("model-quantization: INT8 tflite written to %s", prefix)
         return prefix + Path(local_path).name
 

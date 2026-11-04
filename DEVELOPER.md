@@ -19,7 +19,7 @@ your-repo/
 │   ├── data.yaml  train.yaml  quantization.yaml  ...
 │   ├── train/optimizer/{sgd,adam,adamw}.yaml     # a config GROUP
 │   └── image_processing/{mosaic_default,...}.yaml
-├── kubecore/                # platform-owned engine (seeded — do not edit)
+├── kaos_pipeline/           # platform-owned engine (seeded — do not edit)
 ├── tests/, step_tests/      # engine tests, step-code tests (two commands: §15)
 └── steps/
     ├── model_training/      # Dockerfile + entry point (your code)
@@ -98,9 +98,7 @@ platform declares them (e.g. `data-source`: lakefs/s3,
 run immediately, with the allowed values listed in the error.
 
 **The boolean non-rule:** booleans are just values now. Write
-`amp: true`, submit `false`, your step reads a real `False`. (If you
-used the previous Typer-based version of this platform: the
-true/false-Enum workaround is gone.)
+`amp: true`, submit `false`, your step reads a real `False`.
 
 ---
 
@@ -141,7 +139,7 @@ Push. The `train-optimizer` dropdown now offers `lion`.
 complete step list from this repo:
 
 ```python
-from kubecore.authoring import pipeline, step  # platform-owned, do not edit
+from kaos_pipeline.authoring import pipeline, step  # platform-owned, do not edit
 
 with pipeline("ml-pipeline") as p:  # platform renames to {app}-pipeline at release
     load = step("dataset-loading", reads=["data"],
@@ -334,15 +332,15 @@ its own machine with its own disk. Move data like this:
 ## 10. Local iteration loop (authoring preview only — not a way to run the pipeline)
 
 This is a **render preview**, not a run. It lets you check your DAG and see the
-resolved `params.yaml` on a laptop before you push. **Pipelines only ever run in
-the cluster, submitted from Argo Workflows** (§12) — there is no local execution
-and no local submit. No cluster needed for the preview:
+resolved `params.yaml` on a laptop before you push. **Pipelines only ever run on
+the platform, submitted from Argo Workflows** (§12) — there is no local execution
+and no local submit. No connection to the platform is needed for the preview:
 
 ```bash
 ./run.sh                                  # or the commands below
 python pipeline.py                        # -> out/raw-workflow-template.yaml (your DAG)
-python -m kubecore.compose --output out/params.yaml         # composed defaults
-python -m kubecore.compose train.epochs=5 train/optimizer=adamw   # try overrides
+python -m kaos_pipeline.compose --output out/params.yaml         # composed defaults
+python -m kaos_pipeline.compose train.epochs=5 train/optimizer=adamw   # try overrides
 ```
 
 `out/params.yaml` is exactly what your steps will receive at run time. Errors you
@@ -407,7 +405,8 @@ dataset = cfg["dataset"]                               # "dataset-default@latest
 |---|---|
 | `MLFLOW_TRACKING_URI` | your project's MLflow tracking server |
 | `LAKEFS_ENDPOINT` | your project's lakeFS endpoint |
-| `LAKEFS_ACCESS_KEY` / `LAKEFS_SECRET_KEY` | lakeFS credentials (managed secret) |
+| `LAKEFS_ACCESS_KEY` / `LAKEFS_SECRET_KEY` | lakeFS credentials |
+| `KAOS_RUN_ID` / `KAOS_WORKFLOW_NAME` | the run's name (kaos-lib uses it to name the MLflow run and the results folder) |
 
 MLflow just works:
 
@@ -464,44 +463,35 @@ training run.
 
 ---
 
-## 13. What CI does for you (PR checks + per-step builds)
+## 13. What the platform checks for you (PR checks + per-step builds)
 
-You never run the render or the image builds by hand — the platform's
-**in-cluster CI (Argo Workflows)** does it and reports back on the commit.
-There are **no GitHub Actions** in this repo, and none are needed: every
-check you see on GitHub is posted by a workflow running on the cluster, and
-its link opens that run.
+You never run the render or the image builds by hand: the platform does it and reports back
+on the commit. There are **no GitHub Actions** in this repo, and none are needed. Every check you
+see on GitHub is posted by the platform, and its link opens that run.
 
 **On a PR to `dev`** (`wft-render` commit status):
 
-- The platform renders your pipeline exactly the way it will after merge
-  (`pipeline.py` → enhance with the *real* cluster context → the
-  release-hygiene gate → the step ↔ folder check).
+- The platform renders your pipeline exactly the way it will after merge.
 - The **`wft-render` status check** gates the PR: green = your DAG builds,
   every `reads=` section exists, every step is declared, every step has a
-  buildable `steps/<dir>/Dockerfile` (or a verbatim-image annotation), no
+  buildable `steps/<dir>/Dockerfile` (or a ready-made image annotation), no
   duplicate form params. The check's description carries the step / form-param
-  counts; its link opens the Argo run — if the render fails, the error is in
-  that run's `hera-enhance-gate` (or `hera-render`) log.
-- Nothing is written anywhere on a PR. The gate only checks.
+  counts; its link opens the run. If the render fails, the error is in that run's log.
+- Nothing is released on a PR. The check only checks.
 
-**On merge to `dev`** (`kubecore-ml-ci` commit status + `ml-ci` deployment):
+**On merge to `dev`** (`kaos-ml-ci` commit status):
 
-- The same render runs again and this time **commits** the rendered
-  WorkflowTemplate to the project's GitOps repo.
-- Every `steps/*/` whose contents changed is built (kaniko → the platform
-  registry) and wired into the WorkflowTemplate as `image-<step>`. The matrix
-  is discovered from the folders, so a step you add gets built automatically,
-  with no CI edits.
-- One **`kubecore-ml-ci`** status on the commit (pending → success/failure,
-  link = the Argo build run) and one GitHub **Deployment** (`ml-ci`) that
-  resolves to the same run. A missed webhook is caught within ~3 minutes by
-  the platform's reconciler — no build is ever lost.
+- The same render runs again and this time **releases** the pipeline.
+- Every `steps/*/` whose contents changed is built and wired into the pipeline as
+  `image-<step>`. The list of steps comes from the folders, so a step you add is built
+  automatically, with no CI edits.
+- One **`kaos-ml-ci`** status on the commit (pending, then success or failure; its link opens
+  the build run). A missed notification is caught within a few minutes, so no build is lost.
 
 So the whole loop for adding a step (§5) is: add `steps/<name>/` + a config
-section + one `pipeline.py` line → **open a PR** → `wft-render` renders your
-WFT → merge → `kubecore-ml-ci` builds your step image and updates the
-WorkflowTemplate → it is ready to run in the Argo UI.
+section + one `pipeline.py` line, **open a PR**, `wft-render` checks it, merge,
+`kaos-ml-ci` builds your step image and releases the pipeline, and it is ready to run in the
+Argo UI.
 
 ---
 
@@ -560,7 +550,7 @@ Config is for knobs; bulk data goes through lakeFS/checkpoints (§9).
 There are two test commands, on purpose:
 
 ```bash
-python -m pytest tests                             # the engine: the vendored kubecore/
+python -m pytest tests                             # the engine: the vendored kaos_pipeline/
 pip install "$(sed -n 's/^ARG KAOS_LIB_PACKAGE="\(.*\)"$/\1/p' steps/*/Dockerfile | head -1)" \
     pytest boto3 psutil pydantic pydantic-settings    # once, in a virtual environment
 pytest step_tests                                  # step code that imports kaos_lib
@@ -568,11 +558,10 @@ pytest step_tests                                  # step code that imports kaos
 
 That installs exactly the requirement in `KAOS_LIB_PACKAGE` in the step Dockerfiles (run it from the repo root).
 
-**Why two.** The platform's engine in `kubecore/` (render, compose, enhance; it runs in CI and is never
-in a step image) is imported as `kubecore`; the step code imports kaos-lib as `kaos_lib`, installed in
-the step images at the pinned `KAOS_LIB_PACKAGE`. For one release kaos-lib also ships a deprecated
-`kubecore` import shim, so the engine tests keep their own command with the repository root first on
-the path (`python -m pytest tests`). A step image copies only its `app/` folder.
+**Why two.** The engine in `kaos_pipeline/` (render, compose, enhance; it is never in a step image) is
+imported as `kaos_pipeline`; the step code imports kaos-lib as `kaos_lib`, installed in the step images
+at the pinned `KAOS_LIB_PACKAGE`. The engine tests have their own command, with the repository root first
+on the path (`python -m pytest tests`). A step image copies only its `app/` folder.
 
 The step tests use kaos-lib's in-memory lakeFS (`step_tests/fake_lakefs.py`, vendored at the same pin),
 so no network or cluster is needed.

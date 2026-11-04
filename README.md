@@ -47,12 +47,12 @@ config-validation → dataset-loading → data-summary
 pipeline.py            the steps
 config/                every setting: a field or a dropdown on the run form
 steps/<name>/          one folder per step (README.md in each)
-kubecore/              the platform's build engine: seeded, do not edit
+kaos_pipeline/         the platform's build engine: seeded, do not edit
 scripts/               check-docs.sh, gen-parameters.py
 docs/                  the guide (mkdocs)
 ```
 
-[ADD-A-STEP.md](ADD-A-STEP.md), [DEVELOPER.md](DEVELOPER.md), [MECHANISMS.md](MECHANISMS.md), [PLATFORM.md](PLATFORM.md). Check the guide before a pull request: `scripts/check-docs.sh`. `docs/parameters.md` is generated: `python scripts/gen-parameters.py`.
+[ADD-A-STEP.md](ADD-A-STEP.md), [DEVELOPER.md](DEVELOPER.md). Pipelines created before the rename may still have the engine folder as `kubecore/`; it works the same. Check the guide before a pull request: `scripts/check-docs.sh`. `docs/parameters.md` is generated: `python scripts/gen-parameters.py`.
 
 ## License
 

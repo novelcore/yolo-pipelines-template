@@ -40,13 +40,11 @@ RUNS_DIR = "/work/runs"             # yolo runs/ output
 
 
 def kaos_lib_version() -> str:
-    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
-    for dist in ("kaos-lib", "kubecore"):
-        try:
-            return package_version(dist)
-        except PackageNotFoundError:
-            pass
-    return "unknown"
+    """The installed kaos-lib version (distribution `kaos-lib`)."""
+    try:
+        return package_version("kaos-lib")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def _mlflow_auth_present() -> bool:
@@ -70,10 +68,10 @@ def _dataset_location(summary: dict) -> tuple[str, str, str]:
 
 def _staged() -> bool:
     """True on HPC: the platform staged the pinned dataset commit onto the node
-    (bind-mounted read-only, announced as KUBECORE_STAGED_DIR, PRD-1016 F-04 / PRD-1541).
+    (bind-mounted read-only, announced as KAOS_STAGED_DIR, PRD-1016 F-04 / PRD-1541).
     There is no S3 gateway off-cluster, so the dataset is read as local files through the
     kaos-lib consumer; in-cluster the trainer streams from the lakeFS S3 gateway."""
-    return bool(os.environ.get("KUBECORE_STAGED_DIR"))
+    return bool(os.environ.get("KAOS_STAGED_DIR") or os.environ.get("KUBECORE_STAGED_DIR"))  # 2nd: deprecated alias
 
 
 def _guard_mlflow() -> bool:

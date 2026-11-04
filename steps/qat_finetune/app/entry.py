@@ -32,13 +32,11 @@ RUNS_DIR = "/work/runs"
 
 
 def kaos_lib_version() -> str:
-    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
-    for dist in ("kaos-lib", "kubecore"):
-        try:
-            return package_version(dist)
-        except PackageNotFoundError:
-            pass
-    return "unknown"
+    """The installed kaos-lib version (distribution `kaos-lib`)."""
+    try:
+        return package_version("kaos-lib")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def _output_bucket(platform: dict) -> str:
@@ -85,8 +83,8 @@ def main() -> None:
     # kaos-lib consumer (one download, or the copy staged on HPC). Its ref/commit
     # go into the artifacts' lakeFS commit metadata.
     _ref = str(tr.get("dataset_ref") or "")
-    os.environ["KUBECORE_DATASET_REF"] = _ref
-    os.environ["KUBECORE_DATASET_COMMIT"] = str(tr.get("dataset_commit") or "")
+    os.environ["KAOS_DATASET_REF"] = os.environ["KUBECORE_DATASET_REF"] = _ref  # KUBECORE_*: deprecated alias
+    os.environ["KAOS_DATASET_COMMIT"] = os.environ["KUBECORE_DATASET_COMMIT"] = str(tr.get("dataset_commit") or "")
     os.makedirs(RUNS_DIR, exist_ok=True)
     data_yaml = lakefs_io.materialize(_ref, str(tr.get("dataset_commit") or ""), DATASET_DIR)
     print(f"[dataset] {_ref} @ {tr.get('dataset_commit')} -> {data_yaml}", flush=True)

@@ -1,7 +1,7 @@
 # kaos-lib versions and upgrades
 
 Your step images install **kaos-lib**, the platform's Python package for datasets and run outputs
-(`import kaos_lib`; an older name for it, `kubecore`, is no longer used). The same package gives
+(`import kaos_lib`). The same package gives
 you `kaosctl` on your computer. This page explains who picks its version, how a new version reaches
 your pipeline, how to hold a version, and how long a version is supported. The library itself is
 documented in the [kaos-lib reference](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/index.html).

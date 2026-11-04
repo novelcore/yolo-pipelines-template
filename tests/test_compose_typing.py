@@ -15,7 +15,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from kubecore import compose  # noqa: E402
+from kaos_pipeline import compose  # noqa: E402
 
 STRING_LOOKALIKES = ["3e286280", "1234", "1e5", "true", "null", "nan", "inf", "0x1f",
                      "-7", "False", "~", "1_000"]

@@ -14,7 +14,7 @@ See README.md / DEVELOPER.md to add a step or a parameter.
 
 from pathlib import Path
 
-from kubecore.authoring import pipeline, step  # platform-owned, do not edit
+from kaos_pipeline.authoring import pipeline, step  # platform-owned, do not edit
 
 HERE = Path(__file__).parent
 

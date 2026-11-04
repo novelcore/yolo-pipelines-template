@@ -32,7 +32,8 @@ your own name wherever you see it.
 Everything else — building the image, publishing it, putting it on the submit
 form, picking the compute node, injecting lakeFS/MLflow credentials, wiring the
 CI status checks — **the platform does automatically.** You never edit anything
-under `kubecore/`. That directory is the platform engine; leave it alone.
+under `kaos_pipeline/`. That directory is the platform engine; leave it alone.
+(Pipelines created earlier may still have it as `kubecore/`; it works the same.)
 
 ---
 
@@ -231,15 +232,12 @@ git commit -m "add model-evaluation step"
 git push
 ```
 
-Now the platform takes over — all of it in-cluster (Argo Workflows), reported
-back to GitHub as commit statuses:
-1. **On your PR** — the `wft-render` check renders the pipeline (with the real
-   cluster context) and gates the PR: steps, form parameters, and that every
-   step has a buildable Dockerfile. Its link opens the Argo run; if anything's
-   wrong, that run's log tells you exactly what.
-2. **On merge** — the `kubecore-ml-ci` check builds your step's image and
-   updates the workflow template (the `ml-ci` deployment on the commit resolves
-   to the same run). Your step is now on the Argo submit form, ready to run.
+Now the platform takes over, and reports back to GitHub as commit statuses:
+1. **On your PR** — the `wft-render` check renders the pipeline and gates the PR:
+   steps, form parameters, and that every step has a buildable Dockerfile. Its
+   link opens the run; if anything's wrong, that run's log tells you exactly what.
+2. **On merge** — the `kaos-ml-ci` check builds your step's image and releases
+   the pipeline. Your step is now on the Argo submit form, ready to run.
 
 You did not touch the platform. You did not write a registry URL, an image name,
 a credential, a node selector, or a resource request. You wrote a small Python
@@ -295,7 +293,7 @@ change the DAG    -> edit needs=[...] in pipeline.py            (that's the whol
 add a step        -> mkdir steps/<name>/app + Dockerfile + 1 pipeline.py line
                      (platform auto-does: image, form fields, node, creds, CI check)
 run it            -> only from the Argo UI (Submit). ./run.sh is a local preview only.
-never edit        -> anything under kubecore/  (that's the platform engine)
+never edit        -> anything under kaos_pipeline/  (that's the platform engine)
 ```
 
 If you remember one thing: **you describe *what* your step is (name, what it

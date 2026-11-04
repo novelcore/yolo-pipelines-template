@@ -68,6 +68,6 @@ warning. `last.pt` is registered from its lakeFS path, without a tag. A run with
 
 - Keep `lakefs_io.py` identical in the three steps that have it (a test checks it): each image
   carries only its own `app/`.
-- Never copy the repository's `kubecore/` folder into a step image: it is the build engine the platform seeds into your repository, not the library the steps use (that is `kaos_lib`).
+- Never copy the repository's `kaos_pipeline/` folder into a step image: it is the build engine the platform seeds into your repository, not the library the steps use (that is `kaos_lib`).
 - Step tests live in `step_tests/` and run with the `pytest` command with the package installed
   (DEVELOPER.md §15).
