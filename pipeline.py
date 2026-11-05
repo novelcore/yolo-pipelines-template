@@ -29,7 +29,8 @@ with pipeline("ml-pipeline") as p:
     summary = step("data-summary", reads=["data", "dataset", "summary"], needs=[load])
     # hpc_time_limit: Slurm wall-clock when this step is placed on an HPC
     # (meluxina-*) class (DEVELOPER.md §8.1). Size it to the longest expected epoch budget.
-    train = step("model-training", gpu=True, needs=[load], hpc_time_limit="12h",
+    # resumable: shortly before it, the step saves last.pt and continues in a new job.
+    train = step("model-training", gpu=True, needs=[load], hpc_time_limit="12h", resumable=True,
                  reads=["experiment", "dataset", "data", "model", "train", "image_processing", "logging"],
                  outputs=["training-result"])
     qat = step("qat-finetune", gpu=True, needs=[train], disk="20Gi",

@@ -17,6 +17,7 @@
 Things to know:
 
 - **Time limit:** training on HPC has a 12-hour limit (`hpc_time_limit="12h"` on `model-training` in `pipeline.py`). Raise it there for longer trainings.
+- **Long trainings continue:** `model-training` is resumable (`resumable=True` in `pipeline.py`). About 10 minutes before its wall time it saves `last.pt` at the end of an epoch, and training continues from it in a new job, up to 5 times. Each new job waits in the queue again and counts against your budget.
 - **INT8 steps** have their own `<step>-class` fields; leave them on the cluster unless you need otherwise.
 - **Which machine otherwise:** leave the class dropdowns alone and training runs on a cluster GPU.
 
