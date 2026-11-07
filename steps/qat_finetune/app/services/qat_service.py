@@ -31,6 +31,12 @@ from ultralytics import YOLO
 
 from app.models.quantization import QATParams, QATResult
 from app.services import lakefs_io
+from app.services.qat_resume import QatResume, adopt_mlflow_run
+
+try:   # checkpoint-and-continue before an HPC (Slurm) wall time; absent from an older kaos-lib
+    from kaos_lib import checkpoint
+except ImportError:  # pragma: no cover
+    checkpoint = None
 
 # Interval (seconds) between system-metric samples during the QAT run.
 _SYSTEM_METRICS_INTERVAL_S = 15.0
@@ -48,6 +54,7 @@ class QATService:
 
     def __init__(self, mlflow_tracking_uri: str) -> None:
         self._mlflow_uri = mlflow_tracking_uri
+        self._run_id = ""
         self._logger = logging.getLogger(__name__)
 
     # ------------------------------------------------------------------
@@ -77,10 +84,15 @@ class QATService:
         local_ckpt = self._resolve_checkpoint(params.fp32_checkpoint_path, params.output_dir)
         device = self._resolve_device(params.device)
 
+        handed = checkpoint.resume_path() if checkpoint is not None else None
+        if handed is not None:
+            adopt_mlflow_run(handed)   # a continued job logs to the run the first job opened
+
         with mlflow.start_run(
             tags={"source_run_id": params.source_mlflow_run_id}
         ) as active_run:
             run_id = active_run.info.run_id
+            self._run_id = run_id
             self._logger.info(
                 "QAT run started | run_id=%s source_run_id=%s device=%s",
                 run_id,
@@ -317,6 +329,13 @@ class QATService:
         )
         criterion = nn.MSELoss()
 
+        resume = QatResume(params.qat_epochs, self._run_id)
+        resume.prepared, resume.optimizer = prepared, optimizer
+        handed = checkpoint.resume_path() if checkpoint is not None else None
+        start_epoch = resume.load(handed) if handed is not None else 0
+        if start_epoch:
+            self._logger.info("Continuing QAT fine-tune from epoch %d/%d", start_epoch, params.qat_epochs)
+
         fp32_module.eval()
         # eval() flips the Detect head OUT of headless mode (it would emit decoded
         # (1,no,8400) preds), which no longer matches the raw backbone+neck features
@@ -331,7 +350,7 @@ class QATService:
             device,
         )
 
-        for epoch in range(params.qat_epochs):
+        for epoch in range(start_epoch, params.qat_epochs):
             epoch_loss = 0.0
             steps = 0
 
@@ -377,6 +396,13 @@ class QATService:
                 mlflow.log_metric("qat_finetune_loss", avg_loss, step=epoch)
             except Exception as exc:  # noqa: BLE001
                 self._logger.warning("Failed to log qat_finetune_loss: %s", exc)
+
+            # End of an epoch is the safe point to stop. Not after the last epoch: the step is about to
+            # finish, and a continuation of a finished fine-tune would have nothing to do.
+            resume.epochs_done = epoch + 1
+            if checkpoint is not None and checkpoint.stop_requested() and epoch + 1 < params.qat_epochs:
+                self._logger.info("Asked to stop before the wall time: saving QAT state after epoch %d", epoch + 1)
+                checkpoint.save(resume.save)
 
         prepared.eval()
         self._logger.info("QAT fine-tuning complete")

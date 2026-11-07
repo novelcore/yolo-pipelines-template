@@ -69,4 +69,81 @@ def test_the_continued_job_resumes_from_the_saved_last_pt(tmp_path, monkeypatch)
 def test_the_training_step_is_resumable():
     from pathlib import Path
     src = (Path(__file__).resolve().parents[1] / "pipeline.py").read_text()
-    assert 'step("model-training", gpu=True, needs=[load], hpc_time_limit="12h", resumable=True,' in src
+    assert 'step("model-training", gpu=True, needs=[load], hpc_time_limit="12h", resumable="30m",' in src
+    assert 'disk="20Gi", resumable=True,' in src
+
+
+# ---- save(folder) -> progress / load(folder): the shape the platform's checkpoint registration expects
+
+def _trainer(tmp_path, epoch=4, epochs=100, stop=False, data=b"epoch-5"):
+    weights = tmp_path / "runs" / "weights"
+    weights.mkdir(parents=True, exist_ok=True)
+    (weights / "last.pt").write_bytes(data)
+    return types.SimpleNamespace(last=str(weights / "last.pt"), epoch=epoch, epochs=epochs, stop=stop)
+
+
+def _resume():
+    with step_app("model_training"):
+        from app.services.resume import YoloResume
+        return YoloResume()
+
+
+def test_save_writes_last_pt_and_returns_the_epochs_done(tmp_path):
+    r = _resume()
+    r.trainer = _trainer(tmp_path, epoch=4)
+    folder = tmp_path / "f"
+    folder.mkdir()
+    assert r.save(folder) == {"epoch": 5}
+    assert (folder / "last.pt").read_bytes() == b"epoch-5"
+
+
+def test_save_refuses_when_there_is_no_last_pt(tmp_path):
+    r = _resume()
+    r.trainer = types.SimpleNamespace(last=str(tmp_path / "none.pt"), epoch=0)
+    with pytest.raises(RuntimeError):
+        r.save(tmp_path)
+
+
+def test_load_starts_fresh_when_the_folder_has_no_usable_last_pt(tmp_path):
+    r = _resume()
+    assert r.load(tmp_path) is None
+    (tmp_path / "last.pt").write_bytes(b"")
+    assert r.load(tmp_path) is None, "an empty file is never offered as a checkpoint"
+
+
+def test_load_continues_the_first_jobs_mlflow_run(tmp_path, monkeypatch):
+    monkeypatch.delenv("MLFLOW_RUN_ID", raising=False)
+    (tmp_path / "last.pt").write_bytes(b"x")
+    (tmp_path / "state.json").write_text('{"epoch": 5, "mlflow_run_id": "abc123"}')
+    assert _resume().load(tmp_path) == tmp_path / "last.pt"
+    assert os.environ["MLFLOW_RUN_ID"] == "abc123"
+    monkeypatch.delenv("MLFLOW_RUN_ID")
+
+
+def test_a_checkpoint_without_state_json_still_loads_without_touching_mlflow(tmp_path, monkeypatch):
+    monkeypatch.delenv("MLFLOW_RUN_ID", raising=False)
+    (tmp_path / "last.pt").write_bytes(b"x")
+    assert _resume().load(tmp_path) is not None
+    assert "MLFLOW_RUN_ID" not in os.environ
+
+
+@pytest.mark.parametrize("trainer_kw", [dict(epoch=99, epochs=100), dict(epoch=3, epochs=100, stop=True)],
+                         ids=["last_epoch", "early_stopping"])
+def test_no_checkpoint_is_taken_when_training_ends_by_itself(tmp_path, trainer_kw):
+    os.kill(os.getpid(), checkpoint.STOP_SIGNAL)
+    _service()._make_stop_callback()(_trainer(tmp_path, **trainer_kw))      # returns: training finishes
+    assert not (tmp_path / "output").exists()
+
+
+def test_a_continuation_without_a_checkpoint_folder_starts_fresh(tmp_path):
+    svc = _service()
+    lakefs_io = type(svc)._open_run_writer.__globals__["lakefs_io"]
+    svc._logger = types.SimpleNamespace(info=lambda *a: None)
+    import pytest as _p
+    mp = _p.MonkeyPatch()
+    mp.setattr(lakefs_io, "run_writer", lambda b, e: types.SimpleNamespace(latest=lambda *a, **k: None))
+    try:
+        params = types.SimpleNamespace(checkpoint_bucket="outputs-yolo", experiment_name="e")
+        assert svc._open_run_writer(params, tmp_path) is None
+    finally:
+        mp.undo()

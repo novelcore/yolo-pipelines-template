@@ -17,7 +17,7 @@
 Things to know:
 
 - **Time limit:** training on HPC has a 12-hour limit (`hpc_time_limit="12h"` on `model-training` in `pipeline.py`). Raise it there for longer trainings.
-- **Long trainings continue:** `model-training` is resumable (`resumable=True` in `pipeline.py`). About 10 minutes before its wall time it saves `last.pt` at the end of an epoch, and training continues from it in a new job, up to 5 times. Each new job waits in the queue again and counts against your budget.
+- **Long trainings continue:** `model-training` and `qat-finetune` are resumable (`resumable=` in `pipeline.py`). `model-training` is asked to stop 30 minutes before its wall time: it finishes the epoch it is on, saves `last.pt`, and training continues from it in a new job, up to 5 times, with the same total number of epochs and in the same MLflow run. The 30 minutes must cover your longest epoch plus the save and upload: if one epoch takes longer, give a longer lead, for example `resumable="1h"`. `qat-finetune` has short epochs and uses the default 10 minutes. A job that has no checkpoint to continue from starts fresh. Each new job waits in the queue again and counts against your budget.
 - **INT8 steps** have their own `<step>-class` fields; leave them on the cluster unless you need otherwise.
 - **Which machine otherwise:** leave the class dropdowns alone and training runs on a cluster GPU.
 
