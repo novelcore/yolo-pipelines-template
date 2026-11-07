@@ -42,7 +42,7 @@ layout (the starter files above, plus the checks that `validate` and `push` run)
 
 ## The commands
 
-`kaosctl` comes with kaos-lib (0.4.0rc10 at the time of writing; [install it](prepare-dataset.md#install-and-sign-in)).
+`kaosctl` comes with kaos-lib (0.4.0rc15 at the time of writing; [install it](prepare-dataset.md#install-and-sign-in)).
 
 ```bash
 kaosctl login
