@@ -24,13 +24,14 @@ import mlflow
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
+from kaos_lib import checkpoint
 from mlflow.tracking import MlflowClient
 from torchao.quantization.pt2e import allow_exported_model_train_eval
 from torchao.quantization.pt2e.quantize_pt2e import convert_pt2e, prepare_qat_pt2e
 from ultralytics import YOLO
 
 from app.models.quantization import QATParams, QATResult
-from app.services import lakefs_io
+from app.services import lakefs_io, qat_resume
 
 # Interval (seconds) between system-metric samples during the QAT run.
 _SYSTEM_METRICS_INTERVAL_S = 15.0
@@ -77,10 +78,14 @@ class QATService:
         local_ckpt = self._resolve_checkpoint(params.fp32_checkpoint_path, params.output_dir)
         device = self._resolve_device(params.device)
 
+        # A continued job (platform checkpoint folder restored) logs into the first job's MLflow run:
+        # reuse_saved_run() sets MLFLOW_RUN_ID, which start_run resumes (as kaos-lib does for training).
+        qat_resume.reuse_saved_run()
         with mlflow.start_run(
             tags={"source_run_id": params.source_mlflow_run_id}
         ) as active_run:
             run_id = active_run.info.run_id
+            qat_resume.remember_run(run_id)
             self._logger.info(
                 "QAT run started | run_id=%s source_run_id=%s device=%s",
                 run_id,
@@ -317,6 +322,15 @@ class QATService:
         )
         criterion = nn.MSELoss()
 
+        # Continue from the platform's checkpoint folder when this is a repeated step: the prepared module
+        # (weights + fake-quantize scales), the optimizer and the finished-epoch count. The loop has no other
+        # state: no scheduler or scaler, and the calibration loader is deterministic (fixed sample, no shuffle).
+        start_epoch = 0
+        saved = qat_resume.load_state(device)
+        if saved is not None:
+            start_epoch = qat_resume.restore(prepared, optimizer, saved)
+            self._logger.info("QAT resumed from the checkpoint | epochs_done=%d", start_epoch)
+
         fp32_module.eval()
         # eval() flips the Detect head OUT of headless mode (it would emit decoded
         # (1,no,8400) preds), which no longer matches the raw backbone+neck features
@@ -331,11 +345,15 @@ class QATService:
             device,
         )
 
-        for epoch in range(params.qat_epochs):
+        for epoch in range(start_epoch, params.qat_epochs):
             epoch_loss = 0.0
             steps = 0
 
             for batch in loader:
+                # The platform asked us to stop (node reclaimed, drain, time limit): drop this partly done
+                # epoch (its weights are not saved) and end so the last saved epoch is continued.
+                if qat_resume.stop_wanted(epoch):
+                    checkpoint.exit_for_restart()
                 images: torch.Tensor = batch.to(device)  # type: ignore[attr-defined]
 
                 with torch.no_grad():  # type: ignore[attr-defined]
@@ -377,6 +395,11 @@ class QATService:
                 mlflow.log_metric("qat_finetune_loss", avg_loss, step=epoch)
             except Exception as exc:  # noqa: BLE001
                 self._logger.warning("Failed to log qat_finetune_loss: %s", exc)
+
+            # End of the epoch is the safe point: save, then report the epoch to the platform.
+            qat_resume.save_epoch(prepared, optimizer, epoch + 1)
+            if qat_resume.stop_wanted(epoch + 1) and epoch + 1 < params.qat_epochs:
+                checkpoint.exit_for_restart()
 
         prepared.eval()
         self._logger.info("QAT fine-tuning complete")

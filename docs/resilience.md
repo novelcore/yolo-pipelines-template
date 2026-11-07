@@ -31,17 +31,38 @@ This template's steps import `kaos_lib`, which also hooks the training framework
 
 | framework | saved | on the repeated step |
 |---|---|---|
-| Ultralytics (YOLO), used by `model-training` and `qat-finetune` | `last.pt` at the end of each epoch | training continues, same total epochs, same MLflow run |
+| Ultralytics (YOLO), used by `model-training` | `last.pt` at the end of each epoch | training continues, same total epochs, same MLflow run |
+| your own loop, through `kaos_lib.checkpoint`, used by `qat-finetune` | the model, optimizer and finished epochs at the end of each epoch | the fine-tune continues from the last finished epoch, same total epochs, same MLflow run |
 
-If you add a step of your own with plain PyTorch, write into the folder yourself and resume "if the file exists":
+`qat-finetune` is a hand-written PyTorch loop, so it uses the second way. It calls `checkpoint.load("qat")` at the start
+and `checkpoint.save(..., "qat")` plus `checkpoint.progress({"epoch": n})` after each epoch. When the platform asks the
+step to stop (a reclaimed node, a drain, the time limit), it ends the epoch that was running without saving it and exits
+so the step continues from the last finished epoch. `model-quantization` is a single short export with nothing to
+continue from: a repeat simply runs it again.
+
+If you add a step of your own with plain PyTorch, use the same few calls as `qat-finetune`:
 
 ```python
-import os
-ckpt = os.environ.get("KAOS_CHECKPOINT_DIR", "runs/checkpoints")   # your own default on a laptop
-# torch.save(state, f"{ckpt}/last.pt") at a safe point; torch.load it at start if it exists
+import io, torch
+from kaos_lib import checkpoint
+
+raw = checkpoint.load("state")                                   # None on a first run
+state = torch.load(io.BytesIO(raw), weights_only=True) if raw else {"epoch": 0}
+# ... restore the model and optimizer from `state`, then:
+for epoch in range(state["epoch"], epochs):
+    train_one_epoch()
+    buffer = io.BytesIO()
+    torch.save({"epoch": epoch + 1, "model": model.state_dict(), "optimizer": optimizer.state_dict()}, buffer)
+    checkpoint.save(buffer.getvalue(), "state")                  # written atomically
+    checkpoint.progress({"epoch": epoch + 1})                    # lets the platform see the step moves forward
+    if checkpoint.stop_requested():                              # node being taken away, or the time limit
+        checkpoint.exit_for_restart()                            # exit code 85: "saved, continue me"
 ```
 
-or register a save and a load function (see the kaos-lib reference). This is the only resume mechanism: **Retry** in the run view uses it too. On your laptop `KAOS_CHECKPOINT_DIR` is not set and
+Saving the weights with `torch.save` into bytes keeps one file that loads on any kind of machine. If you keep a scheduler
+or mixed-precision scaler, put their `state_dict()` in the same file. A model prepared for quantization-aware training
+needs its `state_dict()` saved as it is (not copied key by key): it carries version information that its quantization
+observers read when loading. This is the only resume mechanism: **Retry** in the run view uses it too. On your laptop `KAOS_CHECKPOINT_DIR` is not set and
 none of this happens.
 
 !!! note "Large checkpoints and disk"
@@ -89,7 +110,7 @@ repeating the same hours.
 
 | symptom | fix |
 |---|---|
-| a repeated step starts from epoch 0 | the step wrote nothing to `KAOS_CHECKPOINT_DIR` and no framework hook applies: write there, or register save and load |
+| a repeated step starts from epoch 0 | the step wrote nothing to `KAOS_CHECKPOINT_DIR` and no framework hook applies: save with `checkpoint.save` and load with `checkpoint.load` |
 | the step ends as failed after its machine was reclaimed | the step ran out of its two repeats; run it again, or pick an on-demand class in `model-training-class` |
 | `NoProgress` | the step restarted without loading its checkpoint, or saved the same state again: check that loading restores your epoch counter |
 | copies fail with a disk message | raise `disk=` for the step |
