@@ -21,7 +21,7 @@ Something failed? [When something breaks](docs/troubleshooting.md). All the run-
 ```bash
 python3 -m venv ~/.venvs/kaos && . ~/.venvs/kaos/bin/activate
 pip install --index-url https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib-rc/simple/ \
-    --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel,mlflow]==0.4.0rc10"
+    --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel,mlflow]==0.4.0rc15"
 kaosctl login                                    # inside your pipeline's folder
 kaosctl dataset create spacecraft --layout yolo --classes spacecraft   # a new dataset has no layout unless you ask
 # add images, labels and kpt_shape / flip_idx in data.yaml, then:
