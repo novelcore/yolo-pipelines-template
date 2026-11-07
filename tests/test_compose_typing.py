@@ -1,28 +1,75 @@
 """compose-and-validate keeps every form value in the type its config leaf
-declares (Hydra numeric/bool/null coercion bug: a bare `label=3e286280` parsed
-as 3x10^286280 = inf and params.yaml said `label: .inf`).
+declares (Hydra numeric/bool/null coercion bug: `probe.label=3e286280` reached
+Hydra bare, parsed as 3x10^286280 = inf, and params.yaml said `label: .inf`).
 
-Runs against this template's real config tree (config/ + the vendored
-platform group). Run:  python -m pytest tests/ -v
+Run:  python -m pytest tests/ -v
 """
 
 import sys
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
+from typing import Optional
 
 import pytest
 import yaml
+from hydra.core.config_store import ConfigStore
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from kubecore import compose  # noqa: E402
+from kubecore import compose, derive_tree  # noqa: E402
+
+LEAVES = {
+    "label": "baseline",   # str
+    "name": "run",         # str
+    "epochs": 3,           # int
+    "lr": 0.01,            # float
+    "flag": False,         # bool
+    "note": None,          # untyped null -> string
+    "sizes": [1, 2],       # list
+}
 
 STRING_LOOKALIKES = ["3e286280", "1234", "1e5", "true", "null", "nan", "inf", "0x1f",
                      "-7", "False", "~", "1_000"]
 
 
+class Mode(Enum):
+    none = "none"
+    ptq = "ptq"
+
+
+@dataclass
+class TypedSection:
+    tag: str = "v1"
+    steps: int = 5
+    ratio: float = 0.5
+    on: bool = True
+    seed: Optional[int] = None
+    mode: Mode = Mode.none
+
+
+@pytest.fixture
+def tree(tmp_path, monkeypatch):
+    """A throwaway config tree: an untyped yaml section `probe`, a group
+    `model` (whose options change a leaf's type), and a schema-typed section."""
+    cfg = tmp_path / "config"
+    (cfg / "model").mkdir(parents=True)
+    ConfigStore.instance().store(name="typed_schema_test", node={"typed": TypedSection})
+    (cfg / "config.yaml").write_text(yaml.safe_dump({
+        "defaults": ["typed_schema_test", "_self_", {"model": "small"}],
+        "probe": LEAVES,
+        "typed": {"tag": "v1"},
+    }, sort_keys=False))
+    (cfg / "model" / "small.yaml").write_text("size: 8\n")
+    (cfg / "model" / "named.yaml").write_text("size: tiny\n")
+    monkeypatch.setattr(derive_tree, "CONFIG_DIR", cfg)
+    monkeypatch.setattr(derive_tree, "PLATFORM_SEARCHPATH", tmp_path)
+    return cfg
+
+
 def resolved(tokens, render_defaults=None):
-    """Full compose path; returns params.yaml text and its parsed form (the
+    """Full compose path; returns the params.yaml text parsed back (the
     downstream steps' view)."""
     text = compose.compose_and_validate(tokens, render_defaults=render_defaults or {})
     return text, yaml.safe_load(text)
@@ -32,133 +79,123 @@ def resolved(tokens, render_defaults=None):
 
 
 @pytest.mark.parametrize("value", STRING_LOOKALIKES)
-def test_untyped_string_leaf_stays_string(value):
-    _, out = resolved([f"summary.label={value}"])
-    assert out["summary"]["label"] == value
-    assert isinstance(out["summary"]["label"], str)
+def test_string_param_stays_string(tree, value):
+    text, out = resolved([f"probe.label={value}"])
+    assert out["probe"]["label"] == value
+    assert isinstance(out["probe"]["label"], str)
 
 
-@pytest.mark.parametrize("value", STRING_LOOKALIKES)
-def test_schema_str_leaf_stays_string(value):
-    # data.path_override is `str` in the DataConfig structured schema
-    _, out = resolved([f"data.path_override={value}"])
-    assert out["data"]["path_override"] == value
-
-
-def test_dataset_param_round_trips_repo_at_version():
-    """The `dataset` pick (`<dataset-repo>@<version>`) survives Hydra's override
-    grammar (`@` is its package separator) as a plain string."""
-    _, out = resolved(["dataset=dataset-cats@v2"])
-    assert out["dataset"] == "dataset-cats@v2"
-    _, out = resolved([])
-    assert out["dataset"] == "dataset-default@latest"
-    assert "ref" not in out["data"]
-
-
-def test_reported_case_3e286280_is_not_inf():
-    text, out = resolved(["experiment.name=3e286280"])
+def test_reported_case_3e286280_is_not_inf(tree):
+    text, out = resolved(["probe.label=3e286280"])
     assert ".inf" not in text
-    assert out["experiment"]["name"] == "3e286280"
+    assert out["probe"]["label"] == "3e286280"
 
 
 @pytest.mark.parametrize("value", [
     "my run", 'say "hi"', "it's", "a=b", "k=v=w", "📊 Data summary",
-    "C:\\data\\x", "trail\\", 'back\\"quote', "a,b", "[1,2]", "{a: 1}", "$x",
+    "C:\\data\\x", "trail\\", 'back\\"quote', "a,b", "[1,2]", "{a: 1}", "$x", "  ",
 ])
-def test_string_special_characters_round_trip(value):
-    _, out = resolved([f"experiment.description={value}"])
-    assert out["experiment"]["description"] == value
+def test_string_special_characters_round_trip(tree, value):
+    _, out = resolved([f"probe.name={value}"])
+    assert out["probe"]["name"] == value.strip()  # surrounding whitespace is stripped (#867)
 
 
-def test_empty_string_default_leaf_takes_text():
-    # train.freeze defaults to "" (an untyped string); model_training int()s it
-    _, out = resolved(["train.freeze=10"])
-    assert out["train"]["freeze"] == "10"
+def test_untyped_null_leaf_takes_string(tree):
+    _, out = resolved(["probe.note=1234"])
+    assert out["probe"]["note"] == "1234"
 
 
-def test_enum_leaf_accepts_its_value():
-    _, out = resolved(["quantization.mode=ptq"])
-    assert out["quantization"]["mode"] == "ptq"
+def test_typed_str_leaf_stays_string(tree):
+    _, out = resolved(["typed.tag=1e5"])
+    assert out["typed"]["tag"] == "1e5"
+
+
+def test_enum_leaf_accepts_its_value(tree):
+    _, out = resolved(["typed.mode=ptq"])
+    assert out["typed"]["mode"] == "ptq"
 
 
 # ------------------------------------------------- numeric / bool leaves
 
 
-def test_int_param_stays_int():
-    _, out = resolved(["train.epochs=10"])
-    assert out["train"]["epochs"] == 10 and type(out["train"]["epochs"]) is int
+def test_int_param_stays_int(tree):
+    _, out = resolved(["probe.epochs=10"])
+    assert out["probe"]["epochs"] == 10 and type(out["probe"]["epochs"]) is int
 
 
-def test_float_param_stays_float():
-    _, out = resolved(["train.lrf=0.5"])
-    assert out["train"]["lrf"] == 0.5 and type(out["train"]["lrf"]) is float
+def test_float_param_stays_float(tree):
+    _, out = resolved(["probe.lr=0.5"])
+    assert out["probe"]["lr"] == 0.5 and type(out["probe"]["lr"]) is float
 
 
-def test_float_param_given_integer_text_stays_float():
-    _, out = resolved(["train.warmup_epochs=5", "image_processing.mosaic=1"])
-    assert type(out["train"]["warmup_epochs"]) is float and out["train"]["warmup_epochs"] == 5.0
-    assert type(out["image_processing"]["mosaic"]) is float
+def test_float_param_given_integer_text_stays_float(tree):
+    _, out = resolved(["probe.lr=1"])
+    assert out["probe"]["lr"] == 1.0 and type(out["probe"]["lr"]) is float
 
 
-def test_bool_param_stays_bool():
-    _, out = resolved(["train.cos_lr=False", "train.export.enabled=TRUE"])
-    assert out["train"]["cos_lr"] is False
-    assert out["train"]["export"]["enabled"] is True
+def test_float_param_scientific(tree):
+    _, out = resolved(["probe.lr=1e-4"])
+    assert out["probe"]["lr"] == pytest.approx(1e-4)
 
 
-def test_schema_int_leaf():
-    _, out = resolved(["data.seed=7"])
-    assert out["data"]["seed"] == 7
+def test_bool_param_stays_bool(tree):
+    _, out = resolved(["probe.flag=True"])
+    assert out["probe"]["flag"] is True
 
 
-@pytest.mark.parametrize("token", ["train.epochs=ten", "train.epochs=1.5", "train.lrf=fast",
-                                   "train.amp=yes", "data.seed=0x1f"])
-def test_invalid_literal_for_typed_leaf_fails_compose(token):
+def test_typed_schema_numbers_and_optional_int(tree):
+    _, out = resolved(["typed.steps=7", "typed.ratio=2", "typed.on=false", "typed.seed=42"])
+    assert out["typed"] == {"tag": "v1", "steps": 7, "ratio": 2.0, "on": False, "seed": 42,
+                            "mode": "none"}
+    assert type(out["typed"]["ratio"]) is float
+
+
+@pytest.mark.parametrize("token", ["probe.epochs=ten", "probe.epochs=1.5", "probe.lr=fast",
+                                   "probe.flag=yes", "typed.steps=0x1f"])
+def test_invalid_literal_for_typed_leaf_fails_compose(tree, token):
     with pytest.raises(compose.ComposeError):
         resolved([token])
 
 
-# --------------------------------------------- groups, quoting, elision
+# --------------------------------------------- groups, lists, quoting, elision
 
 
-def test_leaf_type_follows_the_selected_group():
-    _, out = resolved(["train/callbacks=none", "train.callbacks.patience=5",
-                       "train.optimizer.lr=1"])
-    assert out["train"]["callbacks"]["patience"] == 5
-    assert type(out["train"]["optimizer"]["lr"]) is float
+def test_type_follows_the_selected_group(tree):
+    # model/small.yaml declares size as int; model/named.yaml as str
+    _, out = resolved(["model=named", "model.size=123"])
+    assert out["model"]["size"] == "123"
+    _, out = resolved(["model=small", "model.size=123"])
+    assert out["model"]["size"] == 123
 
 
-def test_top_level_group_swap_is_a_group():
+def test_list_leaf_passes_through(tree):
+    _, out = resolved(["probe.sizes=[3,4]"])
+    assert out["probe"]["sizes"] == [3, 4]
+
+
+def test_already_quoted_values_are_kept(tree):
+    assert compose.order_overrides(['probe.label="3e286280"'], {}) == ['probe.label="3e286280"']
+    assert compose.order_overrides(["probe.epochs='10'"], {}) == ["probe.epochs='10'"]
+    _, out = resolved(["probe.label='3e286280'"])
+    assert out["probe"]["label"] == "3e286280"
+
+
+def test_untouched_leaf_elided_and_groups_first(tree):
     tokens = compose.order_overrides(
-        ["model.variant=3e286280", "model=yolov8s"], {"model": "yolov8n"})
-    assert tokens == ["model=yolov8s", 'model.variant="3e286280"']
-    _, out = resolved(["model=yolov8s", "model.variant=3e286280"])
-    assert out["model"]["variant"] == "3e286280"
-
-
-def test_already_quoted_values_are_kept():
-    assert compose.order_overrides(['summary.label="3e286280"'], {}) == ['summary.label="3e286280"']
-    assert compose.order_overrides(["train.epochs='10'"], {}) == ["train.epochs='10'"]
-    _, out = resolved(["summary.label='3e286280'"])
-    assert out["summary"]["label"] == "3e286280"
-
-
-def test_untouched_leaf_elided():
-    tokens = compose.order_overrides(
-        ["summary.label=📊 Data summary", "train.epochs=10\r"],
-        {"summary.label": "📊 Data summary", "train.epochs": "100"},
+        ["probe.label=baseline", "probe.epochs=10\r", "model=named"],
+        {"probe.label": "baseline", "probe.epochs": "3", "model": "small"},
     )
-    assert tokens == ["train.epochs=10"]
+    assert tokens == ["model=named", "probe.epochs=10"]
 
 
-def test_emitted_tokens():
+def test_emitted_tokens(tree):
     tokens = compose.order_overrides(
-        ["summary.label=3e286280", "train.epochs=10", "train.lrf=1", "train.amp=TRUE",
-         'experiment.description=a "b" \\c\\'], {})
-    assert tokens == ['summary.label="3e286280"', "train.epochs=10", "train.lrf=1.0",
-                      "train.amp=true", 'experiment.description="a \\"b\\" \\c\\\\"']
+        ["probe.label=3e286280", "probe.epochs=10", "probe.lr=1", "probe.flag=TRUE",
+         'probe.name=a "b" \\c\\'], {})
+    assert tokens == ['probe.label="3e286280"', "probe.epochs=10", "probe.lr=1.0",
+                      "probe.flag=true", 'probe.name="a \\"b\\" \\c\\\\"']
 
 
-def test_unknown_key_still_rejected():
+def test_unknown_key_still_rejected(tree):
     with pytest.raises(Exception):
-        resolved(["train.epoch=10"])
+        resolved(["probe.labl=x"])

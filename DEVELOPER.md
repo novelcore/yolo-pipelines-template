@@ -289,12 +289,16 @@ in-cluster class. There is no global switch: placement is per step, per run
 (training on `meluxina-gpu`, quantization on `gpu-small`, registration
 in-cluster is a normal combination).
 
-What the platform does for an HPC-placed step: waits in the queue on your
-behalf, stages the dataset version to Lustre (cached by repository + commit), pulls the step image into an
-Apptainer SIF (cached), runs the same command the pod would run, uploads the
-step's declared outputs to lakeFS and hands them to the next step exactly as
-if it had run in the cluster. MLflow and lakeFS are reached through the
-public endpoints with a short-lived token minted per job.
+What the platform does for an HPC-placed step: the step's pod in the run is a credential-free
+*follower*. It asks the pool's HPC controller for a job (the job is named from the workflow and the step, so an Argo
+retry of the step re-attaches to the same job), prints the job's phase and the queue's pending reason, and writes the
+step's declared outputs when the job ends. The controller admits and books the job against the project's budget share,
+stages the dataset version to the HPC filesystem (cached by repository + commit), runs the same command the pod would
+run in the step image, uploads the step's declared outputs to lakeFS and hands them to the next step exactly as if it
+had run in the cluster. Cancelling or deleting the run cancels the job. A step the controller cannot serve (the pool
+has no HPC controller, or the project has no HPC budget yet) fails at once with a message naming the fix; pipelines that
+never pick an HPC class are unaffected. A GPU step with no GPU use and no new log line for 20 minutes ends as `Idle`
+(`idle_timeout` changes the window, `0` turns it off).
 
 Give long steps a wall-clock limit (default 4 h):
 
