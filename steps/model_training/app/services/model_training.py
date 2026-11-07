@@ -272,9 +272,7 @@ class TrainingService:
             # main once at the end (see _upload_to_s3 / _commit_outputs).
             self._outputs_stage = tmp_path / "outputs"
             self._outputs_stage.mkdir()
-            resume_pt = self._open_run_writer(params, tmp_path)
-            if resume_pt is not None and not params.resume_from:
-                params = params.model_copy(update={"resume_from": str(resume_pt)})
+            self._open_run_writer(params)
 
             # 1. Resolve model path (download from S3 if needed)
             model_path = self._resolve_model_path(params, tmp_path)
@@ -348,8 +346,8 @@ class TrainingService:
                     params.disk_cache_bytes // (1024 * 1024),
                 )
 
-            # An exception here leaves the run branch (every checkpoint saved so far) in place:
-            # the retried step finds it and resumes (see _open_run_writer).
+            # A step lost here is run again by the platform; the checkpoint folder it keeps
+            # (KAOS_CHECKPOINT_DIR) is what training resumes from, via kaos_lib's Ultralytics hook.
             trainer = model.train(**train_kwargs)
 
             # 6. Determine save directory
@@ -535,7 +533,11 @@ class TrainingService:
         self,
         params: TrainingParams,
     ) -> Callable[[Any], None]:
-        """Return a callback that uploads a checkpoint to S3 and logs it to MLflow every N epochs."""
+        """Return a callback that logs ``last.pt`` to MLflow every N epochs.
+
+        Resuming is not done here: the platform keeps the checkpoint folder (``KAOS_CHECKPOINT_DIR``) and
+        ``kaos_lib`` hooks Ultralytics to save into it and resume from it.
+        """
 
         def on_train_epoch_end(trainer: Any) -> None:
             try:
@@ -545,19 +547,6 @@ class TrainingService:
                 last_pt = Path(trainer.last)
                 if not last_pt.exists():
                     return
-
-                # Upload to S3
-                s3_key = f"{checkpoint_base(params)}/epoch_{epoch:04d}.pt"
-                self._upload_to_s3(
-                    local_path=last_pt,
-                    bucket=params.checkpoint_bucket,
-                    key=s3_key,
-                )
-                _logger.info(
-                    "Uploaded checkpoint to s3://%s/%s",
-                    params.checkpoint_bucket,
-                    s3_key,
-                )
 
                 # Log checkpoint as MLflow artifact
                 try:
@@ -577,7 +566,7 @@ class TrainingService:
                     )
 
             except Exception as cb_exc:  # noqa: BLE001
-                _logger.warning("S3 checkpoint upload failed: %s", cb_exc)
+                _logger.warning("Logging the checkpoint to MLflow failed: %s", cb_exc)
 
         return on_train_epoch_end
 
@@ -1459,25 +1448,18 @@ class TrainingService:
         self._logger.info("Results merged into %s main: %s", params.checkpoint_bucket, commit)
         return commit
 
-    def _open_run_writer(self, params: TrainingParams, tmp_path: Path) -> Optional[Path]:
-        """Open the run's writer on ``outputs-<app>`` and return the last checkpoint it already holds.
-
-        The branch ``run-<run>-checkpoints`` is created, or reused when this step is a retry or was
-        preempted: then ``last.pt`` is downloaded so training resumes from it instead of starting over.
-        """
+    def _open_run_writer(self, params: TrainingParams) -> None:
+        """Open the run's writer on ``outputs-<app>``: results are saved on the branch
+        ``run-<run>-checkpoints`` and merged to ``main`` once, at the end. Training never resumes from
+        it; resuming is the platform checkpoint folder's job (``KAOS_CHECKPOINT_DIR``)."""
         self._run_writer = lakefs_io.run_writer(params.checkpoint_bucket, params.experiment_name)
-        resume = self._run_writer.latest("last.pt", dest=tmp_path / "resume")
-        if resume is not None:
-            self._logger.info("Found %s on the run branch: resuming", resume.name)
-        return resume
 
     def _upload_to_s3(self, local_path: Path, bucket: str, key: str) -> None:
         """Save one result file on the run branch (a durable commit on ``run-<run>-checkpoints``).
 
         ``bucket``/``key`` keep the ``{branch}/{path}`` vocabulary of the URIs we hand to later
         steps; only the file name is used, the location comes from the run writer
-        (``checkpoints/<experiment>/<run>/<name>``). A checkpoint also becomes ``last.pt`` there,
-        which is what a resumed step starts from.
+        (``checkpoints/<experiment>/<run>/<name>``).
         """
         if self._outputs_stage is None or self._run_writer is None:
             raise TrainingError("no run writer: _upload_to_s3 outside a training run")
@@ -1485,11 +1467,6 @@ class TrainingService:
         try:
             staged = self._outputs_stage / name
             shutil.copy(local_path, staged)
-            files = [staged]
-            if name.startswith("epoch_"):
-                last = self._outputs_stage / "last.pt"
-                shutil.copy(local_path, last)
-                files.append(last)
-            self._run_writer.save(files, f"checkpoints: {name}")
+            self._run_writer.save([staged], f"checkpoints: {name}")
         except Exception as exc:  # noqa: BLE001
             raise TrainingError(f"saving {key} for {bucket} failed: {exc}") from exc

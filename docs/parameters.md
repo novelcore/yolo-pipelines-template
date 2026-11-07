@@ -62,7 +62,7 @@ The form also has `<step>-class`, `<step>-cpu`, `<step>-mem` and `<step>-disk` f
 | `train-loss-box` | float | `7.5` | > 0.0 | Weight of the box loss. |
 | `train-loss-cls` | float | `0.5` | > 0.0 | Weight of the class loss. |
 | `train-loss-dfl` | float | `1.5` | > 0.0 | Weight of the distribution-focal loss. |
-| `train-checkpointing-interval_epochs` | int | `10` | > 0 | Save a checkpoint every N epochs. A retried training resumes from the last one. |
+| `train-checkpointing-interval_epochs` | int | `10` | > 0 | Log a checkpoint to MLflow every N epochs. Resuming after a lost machine is automatic and does not depend on it. |
 | `train-checkpointing-storage_path` | text | empty |  | Where checkpoints go. Leave empty: your outputs repository is used. |
 | `train-checkpointing-resume_from` | text | empty |  | Empty starts fresh; `auto` continues from the latest checkpoint; or a full `s3://` path. |
 | `train-export-enabled` | bool | `false` |  | Also export the trained model (TensorRT or ONNX) after training. |

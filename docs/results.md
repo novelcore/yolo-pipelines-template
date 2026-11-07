@@ -57,9 +57,9 @@ Checkpoints, exports and the INT8 model are not in MLflow's charts: they are in 
 
 ```bash
 kaosctl dataset pull outputs-<pipeline>@main ./weights --prefix checkpoints/<experiment>/<run>/
-ls ./weights        # best.pt  last.pt  epoch_0010.pt ...
+ls ./weights        # best.pt  last.pt  ...
 ```
 
-The run's `kaos.outputs_path` tag gives the exact folder; the INT8 `.tflite` of a `ptq` or `qat` run is under `quantization/<experiment>/<run>/`. If a training step is retried, it resumes from its last saved checkpoint.
+The run's `kaos.outputs_path` tag gives the exact folder; the INT8 `.tflite` of a `ptq` or `qat` run is under `quantization/<experiment>/<run>/`. If a training step is run again, it resumes from the checkpoint the platform kept for it ([details](resilience.md)).
 
 Happy with a model? Go to [Promote a model](promote.md).

@@ -41,7 +41,7 @@ ckpt = os.environ.get("KAOS_CHECKPOINT_DIR", "runs/checkpoints")   # your own de
 # torch.save(state, f"{ckpt}/last.pt") at a safe point; torch.load it at start if it exists
 ```
 
-or register a save and a load function (see the kaos-lib reference). `model-training` also saves a checkpoint to your outputs repository every `train-checkpointing-interval_epochs` epochs, so **Retry** in the run view continues from it. On your laptop `KAOS_CHECKPOINT_DIR` is not set and
+or register a save and a load function (see the kaos-lib reference). This is the only resume mechanism: **Retry** in the run view uses it too. On your laptop `KAOS_CHECKPOINT_DIR` is not set and
 none of this happens.
 
 !!! note "Large checkpoints and disk"
