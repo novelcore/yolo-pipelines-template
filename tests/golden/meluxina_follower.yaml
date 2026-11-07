@@ -31,13 +31,33 @@ outputs:
   - name: slurm-job-id
     valueFrom:
       path: /tmp/slurm-job-id
-  - name: dataset-info
+  - name: data-yaml
     valueFrom:
-      path: /tmp/outputs/dataset-info.json
+      path: /tmp/outputs/data-yaml.json
+      default: '{}'
+  - name: manifest-summary
+    valueFrom:
+      path: /tmp/outputs/manifest-summary.json
       default: '{}'
   - name: params
     valueFrom:
       path: /tmp/outputs/params.json
+      default: '{}'
+  - name: qat-result
+    valueFrom:
+      path: /tmp/outputs/qat-result.json
+      default: '{}'
+  - name: quantization-result
+    valueFrom:
+      path: /tmp/outputs/quantization-result.json
+      default: '{}'
+  - name: registration-result
+    valueFrom:
+      path: /tmp/outputs/registration-result.json
+      default: '{}'
+  - name: training-result
+    valueFrom:
+      path: /tmp/outputs/training-result.json
       default: '{}'
 container:
   image: registry.example/kaos-hpc-operator:v1.2.3
