@@ -35,7 +35,7 @@ no change in your repository.
 ## Your range: `.kaos/compat.yaml`
 
 ```yaml
-kaos-lib: ">=0.4.0rc1,<0.5"
+kaos-lib: ">=0.4.0rc15,<0.5"
 ```
 
 This file says which released versions your code works with. The platform only moves your
