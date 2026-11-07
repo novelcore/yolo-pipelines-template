@@ -34,13 +34,8 @@ import yaml
 
 from app.models.training import TrainingParams, TrainingResult
 
-try:   # checkpoint-and-continue before an HPC (Slurm) wall time; absent from an older kaos-lib
-    from kaos_lib import checkpoint
-except ImportError:  # pragma: no cover
-    checkpoint = None
 from app.services import lakefs_io
 from app.services.resource_monitor import ResourceMonitor
-from app.services.resume import YoloResume, training_is_ending
 
 
 def kaos_lib_version() -> str:
@@ -304,10 +299,6 @@ class TrainingService:
             model.add_callback(
                 "on_fit_epoch_end",
                 self._make_epoch_end_callback(epoch_metrics, monitor),
-            )
-            model.add_callback(
-                "on_fit_epoch_end",
-                self._make_stop_callback(),
             )
             model.add_callback(
                 "on_train_epoch_end",
@@ -589,34 +580,6 @@ class TrainingService:
                 _logger.warning("S3 checkpoint upload failed: %s", cb_exc)
 
         return on_train_epoch_end
-
-    @staticmethod
-    def _make_stop_callback() -> Callable[[Any], None]:
-        """Return a callback that saves Ultralytics' newest ``last.pt`` when the step is asked to stop.
-
-        On HPC (Slurm) a resumable step is asked to stop shortly before its wall time. The end of an
-        epoch is a safe point: Ultralytics has just written ``last.pt`` with the full trainer state.
-        ``checkpoint.save`` hands it over and ends the step; the step continues in a new job, which
-        resumes from it (see _open_run_writer). Elsewhere no stop is requested and nothing happens.
-        """
-
-        resume = YoloResume()
-
-        def on_fit_epoch_end(trainer: Any) -> None:
-            if checkpoint is None or not checkpoint.stop_requested():
-                return
-            if training_is_ending(trainer):
-                _logger.info("Asked to stop, but training ends after this epoch: no checkpoint needed")
-                return
-            last = Path(getattr(trainer, "last", "") or "")
-            if not last.is_file():
-                _logger.warning("Asked to stop, but there is no last.pt yet: training runs on")
-                return
-            _logger.info("Asked to stop before the wall time: saving %s to continue in a new job", last)
-            resume.trainer = trainer
-            checkpoint.save(resume.save)
-
-        return on_fit_epoch_end
 
     @staticmethod
     def _make_train_end_callback(
@@ -1501,15 +1464,8 @@ class TrainingService:
 
         The branch ``run-<run>-checkpoints`` is created, or reused when this step is a retry or was
         preempted: then ``last.pt`` is downloaded so training resumes from it instead of starting over.
-        A step continued after its wall time resumes from the ``last.pt`` it saved then (the newest).
         """
         self._run_writer = lakefs_io.run_writer(params.checkpoint_bucket, params.experiment_name)
-        handed = checkpoint.resume_path() if checkpoint is not None else None
-        # load() is None for a missing or empty last.pt: then the run branch, else a fresh start.
-        saved = YoloResume().load(handed) if handed is not None else None
-        if saved is not None:
-            self._logger.info("Continuing after the wall time: resuming from the saved last.pt")
-            return saved
         resume = self._run_writer.latest("last.pt", dest=tmp_path / "resume")
         if resume is not None:
             self._logger.info("Found %s on the run branch: resuming", resume.name)

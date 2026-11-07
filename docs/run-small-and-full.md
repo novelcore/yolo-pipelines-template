@@ -39,7 +39,7 @@ If `config-validation` turns red, its log names the field to fix ([Troubleshooti
 
 3. **Do:** submit again with the real settings: `experiment-name` = `spacecraft-pose`, the same `dataset`, `model` = `yolov8s` or `yolov11x` for more accuracy, `train-epochs` = `100`, and no `data-sample_size`. Several runs can go at once.
 
-    **You should see:** the same boxes, training for hours rather than minutes. The run keeps going if you close the tab. If a training machine is reclaimed, **Retry** in Argo continues from the last saved checkpoint instead of starting over.
+    **You should see:** the same boxes, training for hours rather than minutes. The run keeps going if you close the tab. If a training machine is reclaimed, the platform runs the step again and training continues from its last checkpoint instead of starting over ([details](resilience.md)).
 
 ## Smaller INT8 model: PTQ or QAT
 

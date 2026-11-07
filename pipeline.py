@@ -29,13 +29,12 @@ with pipeline("ml-pipeline") as p:
     summary = step("data-summary", reads=["data", "dataset", "summary"], needs=[load])
     # hpc_time_limit: Slurm wall-clock when this step is placed on an HPC
     # (meluxina-*) class (DEVELOPER.md §8.1). Size it to the longest expected epoch budget.
-    # resumable: this long before the wall time the step is asked to stop; it finishes its epoch, saves
-    # last.pt and continues in a new job. The lead must cover the longest epoch plus the save and upload.
-    train = step("model-training", gpu=True, needs=[load], hpc_time_limit="12h", resumable="30m",
+    # Nothing to declare for long trainings: the platform re-runs a step lost with its machine and
+    # continues it from the checkpoints Ultralytics writes (docs/resilience.md).
+    train = step("model-training", gpu=True, needs=[load], hpc_time_limit="12h",
                  reads=["experiment", "dataset", "data", "model", "train", "image_processing", "logging"],
                  outputs=["training-result"])
-    # qat-finetune is resumable too: its epochs are short, so the default 10 minutes is plenty.
-    qat = step("qat-finetune", gpu=True, needs=[train], disk="20Gi", resumable=True,
+    qat = step("qat-finetune", gpu=True, needs=[train], disk="20Gi",
                reads=["experiment", "train", "quantization"],
                when="{{workflow.parameters.quantization-mode}} == qat",
                outputs=["qat-result"])

@@ -313,6 +313,12 @@ wait budget; a run that outlives that budget keeps running on HPC but is
 no longer observed by the pipeline. Queue time is the one variable you don't
 control — expect minutes to hours depending on the partition's load.
 
+Resilience needs nothing in `pipeline.py` or in the steps: every step gets `KAOS_CHECKPOINT_DIR`, a lost step is run
+again (at most twice, never for its own failure), and `kaos_lib` hooks Ultralytics so training saves into that folder
+and resumes from it. The platform keeps the folder safe and restores it. The steps hold no checkpoint code. Optional
+settings (`walltime`, `checkpoint_every`, `idle_timeout`, `resumable` as a lead time) and what users see:
+docs/resilience.md.
+
 ## 9. Data flow between steps
 
 **Parameters (small)**: declare `outputs=["training-result"]`, write

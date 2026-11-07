@@ -41,6 +41,10 @@ config-validation → dataset-loading → data-summary
 
 `qat-finetune` and `model-quantization` run only when `quantization-mode` is `qat` or `ptq` (`qat-finetune`: `qat` only). The whole pipeline is `pipeline.py`; **the `config/` tree is the run form**: each plain value is a field and each group folder (`config/model/`, `config/train/optimizer/`, ...) a dropdown.
 
+Long trainings are not lost: a step on a reclaimed machine, a failed node or an HPC time limit is run again by the
+platform and training continues from its last checkpoint, with nothing to declare or call
+([When a machine is lost or a time limit hits](docs/resilience.md)).
+
 ## For people changing the template
 
 ```

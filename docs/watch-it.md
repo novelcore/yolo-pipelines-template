@@ -29,7 +29,8 @@ Most early failures are caught by the first step, checking your settings, before
 
 ## Retry and resume
 
-- **Retry** (on a failed run in Argo) runs the failed steps again under the same run name. `model-training` finds the checkpoint it last saved (`last.pt` on its run branch) and continues from there instead of starting over.
+- **Retry** (on a failed run in Argo) runs the failed steps again under the same run name. `model-training` finds the checkpoint it last saved and continues from there instead of starting over.
+- **A lost machine** (a reclaimed spot node, a node failure) needs no Retry: the step is run again by itself, at most twice, and training continues from its last checkpoint. The run view shows the attempts as `model-training(1)`, `model-training(2)`. A step that fails by itself is not repeated. See [When a machine is lost](resilience.md).
 - **Resubmit** starts a new run, with a new name, from scratch.
 
 More in [cookbook 7](https://novelcore.github.io/hera-pipeline-template/cookbook/7-run-it/).
