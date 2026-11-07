@@ -109,6 +109,12 @@ computeClasses:
 hpc:
   enabled: true
   provider: "meluxina"
+  # PRD-HPC-1461 D-58, F-35: MeluXina runs only through the pool's HPC controller. When it serves the
+  # project the operator sets `controller: "serve"` plus the controller's image; each HPC step then
+  # renders as a credential-free follower. Without them the HPC twin renders as a step that fails with
+  # a message (there is no in-pod path).
+  controller: "serve"
+  followerImage: "registry.example/kaos-hpc-operator:v0.0.0"
   # account/user/scratch/home + classes are published by the k8smlapp
   # composition from the KubeProject's HPC tenancy (PRD-HPC-1231): the
   # project's own MeluXina user, the provider filesystem layout, and the
@@ -145,4 +151,6 @@ hpc:
 checkpoints:
   bucket: PLACEHOLDER-bucket
   prefix: main/checkpoints
+  # The platform-registry image of the checkpoint helper containers (the operator publishes it for every app).
+  helperImage: "registry.example/kaos-hpc-operator:v0.0.0"
 serviceAccountName: argo-workflow

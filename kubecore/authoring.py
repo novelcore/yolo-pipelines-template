@@ -64,11 +64,50 @@ _HPC_TIME_LIMIT_RE = re.compile(r"^[0-9]+[mh]?$")
 # step(resumable=True) gets the stop signal this long before its HPC wall time.
 DEFAULT_RESUMABLE_LEAD = "10m"
 HPC_RESUMABLE_ANNOTATION = "platform.kubecore.io/hpc-resumable"
+RESUMABLE_OFF = "off"   # the annotation value of resumable=False
+CHECKPOINT_EVERY_ANNOTATION = "platform.kubecore.io/checkpoint-every"
+_CHECKPOINT_EVERY_RE = re.compile(r"^([0-9]+)([mh]?)$")
+
+
+def _checkpoint_every_minutes(name, value):
+    """step(checkpoint_every=...) -> annotation value: None keeps the platform default (GPU steps copy their
+    checkpoint folder every 10 min), False -> "off", '20m' / '1h' / 20 -> minutes as text."""
+    if value is None:
+        return None
+    if value is False:
+        return "off"
+    match = _CHECKPOINT_EVERY_RE.match(str(value).strip()) if value is not True else None
+    if not match or int(match.group(1)) == 0:
+        raise AuthoringError(
+            f"step {name!r}: checkpoint_every={value!r} must be False (no copies) or minutes like '20m', '1h' "
+            f"or 20: how often the platform copies the step's checkpoint folder (KAOS_CHECKPOINT_DIR)."
+        )
+    minutes = int(match.group(1))
+    return str(minutes * 60 if match.group(2) == "h" else minutes)
+IDLE_TIMEOUT_ANNOTATION = "platform.kubecore.io/idle-timeout"
+
+
+def _idle_timeout_minutes(name, value):
+    """step(idle_timeout=...) -> annotation value (whole minutes, "0" = off): None keeps the platform rule
+    (a GPU step with GPU use below 5 % and no new log line for 20 minutes is ended as Idle), 0 or False turns
+    it off, '40m' / '1h' / 40 raise the window. Read by the pool's idle watchdog."""
+    if value is None:
+        return None
+    if value is False or (not isinstance(value, bool) and str(value).strip() == "0"):
+        return "0"
+    match = _CHECKPOINT_EVERY_RE.match(str(value).strip()) if value is not True else None
+    if not match or int(match.group(1)) == 0:
+        raise AuthoringError(
+            f"step {name!r}: idle_timeout={value!r} must be 0 (never end the step as idle) or minutes like "
+            f"'40m', '1h' or 40: how long the step may show no GPU use and no new log lines."
+        )
+    minutes = int(match.group(1))
+    return str(minutes * 60 if match.group(2) == "h" else minutes)
 
 
 class Step:
     def __init__(self, name, reads=None, gpu=False, needs=None, outputs=None, when=None, disk=None,
-                 hpc_time_limit=None, resumable=None):
+                 hpc_time_limit=None, resumable=None, checkpoint_every=None, idle_timeout=None):
         self.name = name
         self.reads = list(reads or [])
         self.gpu = gpu
@@ -78,10 +117,12 @@ class Step:
         self.disk = disk
         self.hpc_time_limit = hpc_time_limit
         self.resumable = resumable
+        self.checkpoint_every = checkpoint_every
+        self.idle_timeout = idle_timeout
 
 
 def step(name, reads=None, gpu=False, needs=None, outputs=None, when=None, disk=None,
-         hpc_time_limit=None, resumable=None) -> Step:
+         hpc_time_limit=None, resumable=None, checkpoint_every=None, idle_timeout=None) -> Step:
     if _current is None:
         raise RuntimeError("step() must be called inside `with pipeline(...):`")
     if not isinstance(name, str) or not _STEP_NAME_RE.match(name):
@@ -116,19 +157,24 @@ def step(name, reads=None, gpu=False, needs=None, outputs=None, when=None, disk=
         )
     if resumable is True:
         resumable = DEFAULT_RESUMABLE_LEAD
-    elif resumable in (None, False):
+    elif resumable is False:
+        resumable = RESUMABLE_OFF        # resumable=False: never continued from a checkpoint (opt-out)
+    elif resumable is None:
         resumable = None
     elif not (isinstance(resumable, str) and _HPC_TIME_LIMIT_RE.match(resumable) and int(resumable.rstrip("mh")) != 0):
         raise AuthoringError(
             f"step {name!r}: resumable={resumable!r} must be True or a lead time like '20m' or '1h': how long "
             f"before its HPC wall time the step is told to save its checkpoint (kaos_lib.checkpoint)."
         )
-    if resumable is not None and not gpu:
+    if resumable not in (None, RESUMABLE_OFF) and not gpu:
         raise AuthoringError(
             f"step {name!r}: resumable only applies to gpu=True steps — only GPU steps are routed to the "
             f"HPC target."
         )
-    s = Step(name, reads, gpu, needs, outputs, when, disk, hpc_time_limit, resumable)
+    checkpoint_every = _checkpoint_every_minutes(name, checkpoint_every)
+    idle_timeout = _idle_timeout_minutes(name, idle_timeout)
+    s = Step(name, reads, gpu, needs, outputs, when, disk, hpc_time_limit, resumable, checkpoint_every,
+             idle_timeout)
     _current.steps.append(s)
     return s
 
@@ -202,7 +248,9 @@ class pipeline:
                     # is told to save (kaos_lib.checkpoint).
                     annotations={k: v for k, v in (
                         ("platform.kubecore.io/hpc", s.hpc_time_limit),
-                        (HPC_RESUMABLE_ANNOTATION, s.resumable)) if v}
+                        (HPC_RESUMABLE_ANNOTATION, s.resumable),
+                        (CHECKPOINT_EVERY_ANNOTATION, s.checkpoint_every),
+                        (IDLE_TIMEOUT_ANNOTATION, s.idle_timeout)) if v}
                     or None,
                     inputs=inputs,
                     outputs=[
