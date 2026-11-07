@@ -8,7 +8,7 @@ This page has no tasks. It explains the seven steps, so the run form makes sense
 | 1 | `config-validation` | always | checks your form values fit together, and that the dataset and version you picked exist and have a `data.yaml`. If something is off it stops here, in seconds, before any GPU time is spent |
 | 2 | `dataset-loading` | always | turns your `dataset` pick (for example `dataset-cats@v1`) into one lakeFS commit, which every later step reads |
 | 3 | `data-summary` | always, alongside training | prints one line about the dataset settings (`📊 Data summary: dataset=... source=... seed=...`) |
-| 4 | `model-training` | always | trains the YOLO pose model on a GPU for `train-epochs` epochs, streaming the images from lakeFS. It saves a checkpoint every `train-checkpointing-interval_epochs` epochs, logs to MLflow, and on a retry resumes from its last checkpoint |
+| 4 | `model-training` | always | trains the YOLO pose model on a GPU for `train-epochs` epochs, streaming the images from lakeFS. It logs to MLflow (a checkpoint every `train-checkpointing-interval_epochs` epochs), and when run again (a retry, a lost machine, an HPC time limit) resumes from its last checkpoint |
 | 5 | `qat-finetune` | only when `quantization-mode` = `qat` | goes on training the model in a way that prepares it for INT8 |
 | 6 | `model-quantization` | when `quantization-mode` is `ptq` or `qat` | makes an INT8 `.tflite` model and compares it with the full model on `quantization-parity_frames` images. The result is logged to MLflow (`parity_passed`, `parity_max_abs_error`); it does not stop the run, so look at it before you use the INT8 file |
 | 7 | `model-registration` | always | registers the best checkpoint in MLflow, tags its lakeFS commit `model-<name>-v<N>`, and optionally promotes it (`registration-promote_to`) |
@@ -19,7 +19,7 @@ trains a model and registers it. That is the simple path.
 ## Where it all goes
 
 - **Weights and exports:** `outputs-<pipeline>` in lakeFS, under `checkpoints/<experiment>/<run>/`
-  (`best.pt`, `last.pt`, `epoch_NNNN.pt`). The INT8 model goes under
+  (`best.pt`, `last.pt`). The INT8 model goes under
   `quantization/<experiment>/<run>/`.
 - **Metrics, parameters, plots:** the project's MLflow, in the experiment named by
   `experiment-name`.

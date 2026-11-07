@@ -322,15 +322,15 @@ def _tree(fake, ref="main"):
     return fake.tree("outputs-yolo", fake.head("outputs-yolo", ref))
 
 
-def test_training_saves_every_checkpoint_on_the_run_branch_not_on_main(fake, client, tmp_path, monkeypatch):
+def test_training_saves_a_result_on_the_run_branch_not_on_main(fake, client, tmp_path, monkeypatch):
     mod = import_in("model_training", "app.services.model_training")
     svc = _training_service(mod, tmp_path, client, monkeypatch)
     (tmp_path / "w.pt").write_bytes(b"w10")
     main_before = fake.head("outputs-yolo")
-    svc._upload_to_s3(tmp_path / "w.pt", "outputs-yolo", "main/checkpoints/exp/run-1/epoch_0010.pt")
+    svc._upload_to_s3(tmp_path / "w.pt", "outputs-yolo", "main/checkpoints/exp/run-1/best.pt")
     assert fake.head("outputs-yolo") == main_before, "main is untouched until finish"
     tree = _tree(fake, "run-run-1-checkpoints")
-    assert set(tree) == {"checkpoints/exp/run-1/epoch_0010.pt", "checkpoints/exp/run-1/last.pt"}
+    assert set(tree) == {"checkpoints/exp/run-1/best.pt"}
 
 
 def test_training_finish_merges_one_commit_with_provenance_and_deletes_the_branch(fake, client, tmp_path, monkeypatch):
@@ -349,26 +349,17 @@ def test_training_finish_merges_one_commit_with_provenance_and_deletes_the_branc
     assert meta.get("mlflow_run_id") == "mlflow-1" and meta.get("run") == "run-1"
 
 
-def test_a_retried_step_resumes_from_the_last_checkpoint_of_the_run_branch(fake, client, connected, tmp_path, monkeypatch):
+def test_a_retried_step_does_not_resume_from_the_run_branch(fake, client, connected, tmp_path, monkeypatch):
+    """One resume mechanism: the platform checkpoint folder. A saved result on the run branch is not a resume point."""
     mod = import_in("model_training", "app.services.model_training")
     (tmp_path / "a").mkdir()
     first = _training_service(mod, tmp_path / "a", client, monkeypatch)
-    (tmp_path / "w.pt").write_bytes(b"epoch-20-state")
-    first._upload_to_s3(tmp_path / "w.pt", "outputs-yolo", "main/checkpoints/exp/run-1/epoch_0020.pt")
-    # the pod is lost here: nothing merged, the branch stays. The retry:
-    (tmp_path / "b").mkdir()
+    (tmp_path / "w.pt").write_bytes(b"state")
+    first._upload_to_s3(tmp_path / "w.pt", "outputs-yolo", "main/checkpoints/exp/run-1/last.pt")
     retry = mod.TrainingService.__new__(mod.TrainingService)
     retry._logger = mod.logging.getLogger("test")
-    resume = retry._open_run_writer(_params(), tmp_path / "b")
-    assert resume is not None and resume.name == "last.pt" and resume.read_bytes() == b"epoch-20-state"
-
-
-def test_a_first_attempt_has_nothing_to_resume(fake, client, connected, tmp_path, monkeypatch):
-    mod = import_in("model_training", "app.services.model_training")
-    monkeypatch.setenv("KUBECORE_RUN_ID", "fresh")
-    svc = mod.TrainingService.__new__(mod.TrainingService)
-    svc._logger = mod.logging.getLogger("test")
-    assert svc._open_run_writer(_params(), tmp_path) is None
+    assert retry._open_run_writer(_params()) is None
+    assert retry._run_writer is not None
 
 
 def test_training_fails_loudly_when_the_results_cannot_be_merged(fake, client, tmp_path, monkeypatch):

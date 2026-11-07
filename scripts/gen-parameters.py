@@ -88,7 +88,7 @@ D = {  # one line each; what the field does for you
     "train-loss-pose": "Weight of the keypoint loss.", "train-loss-kobj": "Weight of the keypoint-objectness loss.",
     "train-loss-box": "Weight of the box loss.", "train-loss-cls": "Weight of the class loss.",
     "train-loss-dfl": "Weight of the distribution-focal loss.",
-    "train-checkpointing-interval_epochs": "Save a checkpoint every N epochs. A retried training resumes from the last one.",
+    "train-checkpointing-interval_epochs": "Log a checkpoint to MLflow every N epochs. Resuming after a lost machine is automatic and does not depend on it.",
     "train-checkpointing-storage_path": "Where checkpoints go. Leave empty: your outputs repository is used.",
     "train-checkpointing-resume_from": "Empty starts fresh; `auto` continues from the latest checkpoint; or a full `s3://` path.",
     "train-export-enabled": "Also export the trained model (TensorRT or ONNX) after training.",

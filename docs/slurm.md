@@ -16,8 +16,8 @@
 
 Things to know:
 
-- **Time limit:** training on HPC has a 12-hour limit (`hpc_time_limit="12h"` on `model-training` in `pipeline.py`). Raise it there for longer trainings.
-- **Long trainings continue:** `model-training` is resumable (`resumable=True` in `pipeline.py`). About 10 minutes before its wall time it saves `last.pt` at the end of an epoch, and training continues from it in a new job, up to 5 times. Each new job waits in the queue again and counts against your budget.
+- **Time limit:** training on HPC has a 12-hour limit (`hpc_time_limit="12h"` on `model-training` in `pipeline.py`; `walltime` is the newer name). Raise it there for longer trainings.
+- **Long trainings continue by themselves:** when the time limit, a node failure or maintenance ends a job, training continues in a new job from its last checkpoint (up to 5 times), with the same total number of epochs and in the same MLflow run. You declare nothing. Each new job waits in the queue again and counts against your budget. A continuation that does not get past its checkpoint ends with the reason `NoProgress`; a step with no GPU use and no new log lines for 20 minutes ends as `Idle`. Details and messages: [When a machine is lost or a time limit hits](resilience.md).
 - **INT8 steps** have their own `<step>-class` fields; leave them on the cluster unless you need otherwise.
 - **Which machine otherwise:** leave the class dropdowns alone and training runs on a cluster GPU.
 

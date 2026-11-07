@@ -78,6 +78,14 @@ The labels do not match `kpt_shape` in `data.yaml` (a different number of keypoi
 
 The machines are busy, or on Slurm the job is queued. Give it a few minutes ([Run on HPC (Slurm)](slurm.md)). If it stays stuck for a long time, tell your KAOS contact.
 
+### Training restarted after a machine was reclaimed
+
+By design: the step is run again by the platform, at most twice, and training continues from its last checkpoint (the log says `continuing from the checkpoint saved at ...`). If it starts at epoch 0, no checkpoint had been saved yet. A step that failed by itself is not repeated. More: [When a machine is lost or a time limit hits](resilience.md).
+
+### A step ends with `Idle` or `NoProgress`
+
+`Idle`: no GPU use and no new log lines for 20 minutes on HPC; raise `idle_timeout` on the step if it was working. `NoProgress`: a continued job did not get past its checkpoint, so it stopped instead of repeating the same hours.
+
 ### Training is taking forever
 
 Make a test run quick: `model` = `yolov8n`, `train-epochs` = `10`, and `data-sample_size` = `50`. Prove the whole thing works, then scale up.
