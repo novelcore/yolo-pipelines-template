@@ -31,7 +31,7 @@ This template's steps import `kaos_lib`, which also hooks the training framework
 
 | framework | saved | on the repeated step |
 |---|---|---|
-| Ultralytics (YOLO), used by `model-training` | `last.pt` at the end of each epoch | training continues, same total epochs, same MLflow run |
+| Ultralytics (YOLO), used by `model-training` | `last.pt` at the end of each epoch, and `best.pt` once one exists | training continues, same total epochs, same MLflow run |
 | your own loop, through `kaos_lib.checkpoint`, used by `qat-finetune` | the model, optimizer and finished epochs at the end of each epoch | the fine-tune continues from the last finished epoch, same total epochs, same MLflow run |
 
 `qat-finetune` is a hand-written PyTorch loop, so it uses the second way. It calls `checkpoint.load("qat")` at the start

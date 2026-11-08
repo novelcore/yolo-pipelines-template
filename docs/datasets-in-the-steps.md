@@ -39,7 +39,10 @@ Training, QAT and quantization write through the package's run writer (`lakefs_i
 
 If a step raises, the branch stays, nothing reaches `main`, and the retry continues from the branch.
 `training-result` carries `best_checkpoint_s3` (`s3://outputs-<pipeline>/main/checkpoints/<experiment>/<run>/best.pt`),
-which the next steps read back with `lakefs_io.download_object`.
+which the next steps read back with `lakefs_io.download_object`. It is never empty: when a run has no `best.pt`
+(a continued run restores it through kaos-lib; without it Ultralytics writes none if no epoch after the restart beat the
+earlier best), `best_checkpoint_s3` is the `last.pt` location, and a run with no weights at all fails. `qat-finetune` and
+`model-quantization` refuse an empty checkpoint with a message that says so.
 
 ## Models in MLflow
 
