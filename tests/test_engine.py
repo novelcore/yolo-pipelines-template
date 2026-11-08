@@ -40,7 +40,7 @@ def _enhanced():
 
 def _step_templates(wft):
     """Developer step templates only — the platform's MeluXina runner
-    (`meluxina-run`, labelled compute-type=hpc, PRD-1016) is a container
+    (`hpc-follower`, labelled compute-type=hpc, PRD-1016) is a container
     template too but has no class param, no Dockerfile and no step env."""
     return [t for t in wft["spec"]["templates"] if "container" in t and
             (t.get("metadata", {}).get("labels", {})
