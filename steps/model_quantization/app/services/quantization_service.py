@@ -252,6 +252,10 @@ class QuantizationService:
 
     def _resolve_checkpoint(self, path: str, output_dir: str) -> str:
         """Return a local path to the checkpoint, downloading from S3 if needed."""
+        if not path:
+            raise QuantizationError(
+                "no FP32 checkpoint to quantize: the training result's best_checkpoint_s3 is empty"
+            )
         if not path.startswith("s3://"):
             return path
         self._logger.info("Downloading checkpoint: %s -> %s", path, output_dir)

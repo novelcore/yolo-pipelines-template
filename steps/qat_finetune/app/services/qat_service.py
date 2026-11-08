@@ -189,8 +189,14 @@ class QATService:
     def _resolve_checkpoint(self, path: str, output_dir: str) -> str:
         """Return a local path to the FP32 checkpoint.
 
-        Downloads from S3 if ``path`` starts with ``s3://``.
+        Downloads from S3 if ``path`` starts with ``s3://``. An empty path is an error: the
+        training step found no weights to hand over. (``YOLO("")`` does not fail, it yields a
+        model that is the empty string, which crashed later with "'str' object has no attribute 'to'".)
         """
+        if not path:
+            raise ValueError(
+                "no FP32 checkpoint to fine-tune: the training result's best_checkpoint_s3 is empty"
+            )
         if not path.startswith("s3://"):
             return path
 
@@ -216,6 +222,12 @@ class QATService:
         """
         yolo = YOLO(checkpoint_path)
         module: nn.Module = yolo.model  # type: ignore[assignment]
+        if not isinstance(module, nn.Module):
+            # Ultralytics keeps a str here when it was not given a loadable .pt checkpoint.
+            raise ValueError(
+                f"{checkpoint_path!r} did not load as a YOLO model (got {type(module).__name__}); "
+                "expected an Ultralytics .pt checkpoint"
+            )
         module = module.to(device)
         module.eval()
         module.model[-1].training = True  # type: ignore[index]

@@ -1397,7 +1397,10 @@ class TrainingService:
         Returns
         -------
         str
-            The s3:// URI of the uploaded best.pt.
+            The s3:// URI of the checkpoint later steps load: best.pt, or last.pt when this run
+            produced no best.pt (Ultralytics writes best.pt only when an epoch beats the best
+            fitness, so a continued run that peaked before its interruption has none unless
+            kaos-lib restored it). Never empty: a run with no weights at all raises.
         """
         base_key = checkpoint_base(params)
         best_key = f"{base_key}/best.pt"
@@ -1407,17 +1410,16 @@ class TrainingService:
         last_pt = save_dir / "weights" / "last.pt"
 
         best_uri = f"s3://{params.checkpoint_bucket}/{best_key}"
+        last_uri = f"s3://{params.checkpoint_bucket}/{last_key}"
+
+        if not best_pt.exists() and not last_pt.exists():
+            raise TrainingError(
+                f"training finished but left no weights: neither {best_pt} nor {last_pt} exists"
+            )
 
         if best_pt.exists():
             self._upload_to_s3(best_pt, params.checkpoint_bucket, best_key)
             self._logger.info("Uploaded best.pt to %s", best_uri)
-        else:
-            self._logger.warning(
-                "best.pt not found at %s; skipping S3 upload. "
-                "Downstream steps will not have a best checkpoint.",
-                best_pt,
-            )
-            best_uri = ""
 
         if last_pt.exists():
             self._upload_to_s3(last_pt, params.checkpoint_bucket, last_key)
@@ -1427,7 +1429,14 @@ class TrainingService:
                 last_key,
             )
 
-        return best_uri
+        if best_pt.exists():
+            return best_uri
+        self._logger.warning(
+            "best.pt not found at %s; downstream steps get last.pt (%s) as the checkpoint.",
+            best_pt,
+            last_uri,
+        )
+        return last_uri
 
     def _commit_outputs(self, params: TrainingParams) -> str:
         """Merge the run branch into ``main`` of ``outputs-<app>``: ONE commit per step per run,
