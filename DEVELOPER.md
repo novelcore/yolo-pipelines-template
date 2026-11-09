@@ -295,7 +295,7 @@ retry of the step re-attaches to the same job), prints the job's phase and the q
 step's declared outputs when the job ends. The controller admits and books the job against the project's budget share,
 stages the dataset version to the HPC filesystem (cached by repository + commit), runs the same command the pod would
 run in the step image, uploads the step's declared outputs to lakeFS and hands them to the next step exactly as if it
-had run in the cluster. Cancelling or deleting the run cancels the job. Only the follower runs under the platform's dedicated job-submitting account (`hpc-submitter`, set on the follower template alone), so step code cannot create HPC jobs. A step the controller cannot serve (the pool
+had run in the cluster. Cancelling or deleting the run cancels the job. Only the follower runs under the platform's dedicated job-submitting account (`hpc-submitter`, set on the follower template alone), so step code cannot create HPC jobs. The render enforces this: a pipeline that sets `serviceAccountName` or `podSpecPatch`, or names a template `hpc-follower` or `meluxina-run`, fails with a message naming the step. A step the controller cannot serve (the pool
 has no HPC controller, or the project has no HPC budget yet) fails at once with a message naming the fix; pipelines that
 never pick an HPC class are unaffected. A GPU step with no GPU use and no new log line for 20 minutes ends as `Idle`
 (`idle_timeout` changes the window, `0` turns it off).
