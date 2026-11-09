@@ -37,12 +37,12 @@ layout (the starter files above, plus the checks that `validate` and `push` run)
   first commit.
 - A repository with **no layout validates nothing**; `push` takes the files as they are.
   Pass `--layout yolo` to `push` or `validate` to get the YOLO checks anyway.
-- In Python, `kaos_lib.datasets.materialize("<repo>@<ref>")` reads any dataset you may read, `<ref>` being `vN`,
+- In Python, `kaos_lib.datasets.materialize(DatasetRef.parse("<repo>@<ref>"))` reads any dataset you may read, `<ref>` being `vN`,
   `latest`, a branch, a tag or a commit id. The run form's dropdown lists the datasets and their versions, newest first, then `@latest`, and updates within about a minute of a release.
 
 ## The commands
 
-`kaosctl` comes with kaos-lib (0.4.0rc15 at the time of writing; [install it](prepare-dataset.md#install-and-sign-in)).
+`kaosctl` comes with kaos-lib (0.4.0rc17 at the time of writing; [install it](prepare-dataset.md#install-and-sign-in)).
 
 ```bash
 kaosctl login

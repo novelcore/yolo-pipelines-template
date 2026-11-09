@@ -34,7 +34,7 @@ There is no parameter wiring anywhere else.
 **What happens on push:** push to `dev` → the platform builds your step
 images and releases a new pipeline version (~minutes).
 
-**What happens on submit:** the values you set on the Argo form are
+**What happens on submit:** the values you set on the run form are
 composed with your tree into ONE resolved `params.yaml` — by the
 pipeline's first step, before any real compute — and every step receives
 it. That file *is* the experiment: it's also archived to MLflow so any
@@ -141,15 +141,17 @@ Push. The `train-optimizer` dropdown now offers `lion`.
 complete step list from this repo:
 
 ```python
-from kubecore.authoring import pipeline, step  # platform-owned, do not edit
+from kubecore.authoring import pipeline, step  # provided by the platform, do not edit
 
-with pipeline("ml-pipeline") as p:  # platform renames to {app}-pipeline at release
-    load = step("dataset-loading", reads=["data"],
+with pipeline("ml-pipeline") as p:  # the platform renames it to {app}-pipeline at release
+    validate = step("config-validation", reads=["data", "dataset", "model"])
+    load = step("dataset-loading", reads=["data", "dataset"], needs=[validate],
                 outputs=["data-yaml", "manifest-summary"])
-    train = step("model-training", gpu=True, needs=[load],
-                 reads=["experiment", "data", "model", "train", "image_processing", "logging"],
+    summary = step("data-summary", reads=["data", "dataset", "summary"], needs=[load])
+    train = step("model-training", gpu=True, needs=[load], hpc_time_limit="12h",
+                 reads=["experiment", "dataset", "data", "model", "train", "image_processing", "logging"],
                  outputs=["training-result"])
-    qat = step("qat-finetune", gpu=True, needs=[train],
+    qat = step("qat-finetune", gpu=True, needs=[train], disk="20Gi",
                reads=["experiment", "train", "quantization"],
                when="{{workflow.parameters.quantization-mode}} == qat",
                outputs=["qat-result"])
@@ -158,7 +160,8 @@ with pipeline("ml-pipeline") as p:  # platform renames to {app}-pipeline at rele
                  when="{{workflow.parameters.quantization-mode}} != none",
                  outputs=["quantization-result"])
     register = step("model-registration", needs=[train, quant],
-                    reads=["data", "model", "registration"])
+                    reads=["dataset", "data", "model", "registration"],
+                    outputs=["registration-result"])
 ```
 
 Per step:
@@ -176,6 +179,10 @@ Per step:
 - **`when=...`** — conditional execution keyed on any form parameter
   (parameter name = config path with dashes: `quantization.mode` →
   `quantization-mode`).
+- **`disk="20Gi"`** — more scratch disk for the step (a Kubernetes size).
+- **`hpc_time_limit="12h"`** — the HPC (Slurm) time limit, GPU steps only (§8.1).
+- **`resumable=`**, **`checkpoint_every=`**, **`idle_timeout=`** — optional
+  resilience settings, see §8.1 and `docs/resilience.md`.
 
 ---
 
@@ -198,9 +205,9 @@ Three small edits — say we add `model-evaluation` after training:
 
    and register it in `config/config.yaml`'s defaults list: `- evaluation`.
 
-2. **code**: `mkdir steps/model_evaluation` with a Dockerfile and an
-   entry point that reads its slice (this is the real pattern from
-   `steps/model_training/entry.py`):
+2. **code**: `mkdir steps/model_evaluation` with a Dockerfile and
+   `app/entry.py` that reads its slice (this is the pattern of
+   `steps/model_training/app/entry.py`):
 
    ```python
    import argparse
@@ -281,43 +288,57 @@ exact section and step named (see §10) — nothing silently breaks.
 
 ### 8.1 Running steps on HPC (Slurm)
 
-When the project's pool is HPC-enabled, every step's `{step}-class` dropdown
-also offers the HPC classes (named `meluxina-*`, after the provider) — `meluxina-gpu` (4× A100-40GB), `meluxina-cpu`
-(2× EPYC 7452, 128 cores, 512 GB), `meluxina-largemem` (4 TB). Pick one for a
-step and that step runs as a Slurm job on HPC; every other step keeps its
-in-cluster class. There is no global switch: placement is per step, per run
-(training on `meluxina-gpu`, quantization on `gpu-small`, registration
-in-cluster is a normal combination).
+When your project has HPC, every step's `{step}-class` dropdown also offers the HPC classes (named `meluxina-*`,
+after today's provider): a GPU class, a CPU class and a large-memory class. Pick one for a step and that step
+runs as a Slurm job on HPC; every other step keeps its cluster class. There is no global switch: placement is per
+step, per run (training on `meluxina-gpu`, quantization on `gpu-small`, registration on the cluster is a normal
+combination).
 
-What the platform does for an HPC-placed step: the step's pod in the run is a credential-free
-*follower*. It asks the pool's HPC controller for a job (the job is named from the workflow and the step, so an Argo
-retry of the step re-attaches to the same job), prints the job's phase and the queue's pending reason, and writes the
-step's declared outputs when the job ends. The controller admits and books the job against the project's budget share,
-stages the dataset version to the HPC filesystem (cached by repository + commit), runs the same command the pod would
-run in the step image, uploads the step's declared outputs to lakeFS and hands them to the next step exactly as if it
-had run in the cluster. Cancelling or deleting the run cancels the job. Only the follower runs under the platform's dedicated job-submitting account (`hpc-submitter`, set on the follower template alone), so step code cannot create HPC jobs. The render enforces this: a pipeline that sets `serviceAccountName` or `podSpecPatch`, or names a template `hpc-follower` or `meluxina-run`, fails with a message naming the step. A step the controller cannot serve (the pool
-has no HPC controller, or the project has no HPC budget yet) fails at once with a message naming the fix; pipelines that
-never pick an HPC class are unaffected. A GPU step with no GPU use and no new log line for 20 minutes ends as `Idle`
-(`idle_timeout` changes the window, `0` turns it off).
+What happens for an HPC step: the step in the run view is a small *follower* (the template `hpc-follower`). It
+asks for a job, prints the job's phase and the queue's reason for waiting, and writes the step's declared outputs
+when the job ends. The platform checks the job against your project's HPC allocation, copies the dataset version
+to the HPC filesystem (cached by repository and commit), runs the same command the step would run in its image,
+and hands the outputs to the next step exactly as if it had run on the cluster. Cancelling or deleting the run
+cancels the job. You never name a queue or a quality of service: the platform picks the lane and, from earlier
+runs, a time limit (never above yours). A project can be blocked by its own allocation, GPU, CPU, FPGA and large
+memory each separately; the reasons you can see (`WaitingForBudget`, `BudgetBlocked`, `SiteLimit`, `SubmitLimit`,
+`GPUViolation`, `TooLongNotResumable`) are in `docs/slurm.md`.
 
-Give long steps a wall-clock limit (default 4 h):
+**What `pipeline.py` may not do.** Only the platform chooses the account steps run as and the pod settings. A
+`pipeline.py` that sets `serviceAccountName` (on the pipeline or a step), sets `podSpecPatch`, or names a step
+template `hpc-follower` fails to build with a message naming the step, and nothing is released until you remove it.
+Use `step(...)` options and the `{step}-class` / `-cpu` / `-mem` form fields instead.
+
+Give long steps a time limit (default 4 h):
 
 ```python
 train = step("model-training", gpu=True, needs=[load], hpc_time_limit="12h",
              reads=["experiment", "data", "model", "train"])
 ```
 
-`hpc_time_limit` takes minutes or hours (`"90m"`, `"12h"`, `"720"`); Slurm kills
-the job when it elapses. The platform adds a queue allowance on top for its own
-wait budget; a run that outlives that budget keeps running on HPC but is
-no longer observed by the pipeline. Queue time is the one variable you don't
-control — expect minutes to hours depending on the partition's load.
+`hpc_time_limit` takes minutes or hours (`"90m"`, `"12h"`, `"720"`) and applies to `gpu=True` steps; Slurm ends the
+job when it elapses. It is a ceiling: the platform may ask for less and runs once more at your limit if a shorter
+one cut the job. Queue time is the one variable you do not control: minutes to hours, depending on the load.
+
+**Longer than the longest HPC run.** A step whose limit is above the site's longest run (for example two days) is
+never cut silently. If it is resumable (declared with `resumable=`, or learned: an earlier continuation loaded its
+checkpoint and got further) it runs as capped attempts that continue from the checkpoint, up to 5 continuations. If
+it is not, it is refused before it is sent, with `TooLongNotResumable` and the two fixes: make it resumable or
+shorten it.
 
 Resilience needs nothing in `pipeline.py` or in the steps: every step gets `KAOS_CHECKPOINT_DIR`, a lost step is run
 again (at most twice, never for its own failure), and `kaos_lib` hooks Ultralytics so training saves into that folder
-and resumes from it. The platform keeps the folder safe and restores it. The steps hold no checkpoint code. Optional
-settings (`walltime`, `checkpoint_every`, `idle_timeout`, `resumable` as a lead time) and what users see:
-docs/resilience.md.
+and resumes from it (`best.pt` included). The platform keeps the folder safe and restores it. Optional step
+settings, all in `docs/resilience.md`:
+
+| setting | meaning |
+|---|---|
+| `resumable=True`, `"3m"` | declare the step resumable; the string is how long before the HPC time limit it is told to save (default 10 m) |
+| `resumable=False` | opt out: never continued from a checkpoint on HPC |
+| `checkpoint_every="20m"`, `False` | how often the checkpoint folder is copied; `False` turns copies off |
+| `idle_timeout="40m"`, `0` | the idle rule: no GPU use and no new log line for 20 minutes ends the step as `Idle`; `0` turns it off |
+
+---
 
 ## 9. Data flow between steps
 
@@ -344,9 +365,9 @@ its own machine with its own disk. Move data like this:
 ## 10. Local iteration loop (authoring preview only — not a way to run the pipeline)
 
 This is a **render preview**, not a run. It lets you check your DAG and see the
-resolved `params.yaml` on a laptop before you push. **Pipelines only ever run in
-the cluster, submitted from Argo Workflows** (§12) — there is no local execution
-and no local submit. No cluster needed for the preview:
+resolved `params.yaml` on a laptop before you push. **Pipelines only run on the
+platform, submitted from the run form** (§12) — there is no local execution
+and no local submit. The preview needs nothing but Python:
 
 ```bash
 ./run.sh                                  # or the commands below
@@ -362,21 +383,20 @@ can hit, verbatim:
 tree section) — fails at render, names both sides:
 
 ```
-platform.derive_tree.DeriveError: step 'model-registration' reads config section 'registration' which does not exist in the config tree (top-level sections: data, quantization, experiment, model, train, image_processing, registry, logging)
+kubecore.derive_tree.DeriveError: step 'model-quantization' reads config section 'quantizationx' which does not exist in the config tree (top-level sections: summary, data, quantization, experiment, dataset, model, train, image_processing, registration, logging)
 ```
 
 **Unknown/typo'd override key** — fails in the compose step, in
 seconds, before any compute:
 
 ```
-compose-and-validate FAILED: Could not override 'train.epochz'.
-To append to your config use +train.epochz=5
+compose-and-validate FAILED: Key 'epochz' is not in struct
 ```
 
 **Invalid value for a platform-declared dropdown**:
 
 ```
-compose-and-validate FAILED: Error merging override quantization.mode=banana
+compose-and-validate FAILED: Error merging override quantization.mode="banana"
   cause: Invalid value 'banana', expected one of [none, ptq, qat]
 ```
 
@@ -392,8 +412,8 @@ compose-and-validate FAILED: Key 'epochz' is not in struct
 compose-and-validate FAILED: ADVANCED override may not modify platform.*
 ```
 
-The same checks run in the cluster: a bad submission kills the run at
-the first step, pre-GPU.
+The same checks run when you submit: a bad submission stops the run at
+the first step, before any GPU time is spent.
 
 ---
 
@@ -429,19 +449,18 @@ with mlflow.start_run():
 ```
 
 Datasets and results go through kaos-lib (`kaos_lib`; see `docs/datasets-in-the-steps.md`):
-`datasets.materialize("<repo>@<ref>", prefix="folder/")` reads any repository at a pinned ref,
+`datasets.materialize(DatasetRef.parse("<repo>@<ref>"), prefix="folder/")` reads any repository at a pinned ref,
 `outputs.run(...)` writes results. You write no endpoint and no credential: the step's environment has
 them.
 
-When you run locally, the same `platform` section is filled from a
-local fallback file, so `python steps/model_training/entry.py --params
-"$(cat out/params.yaml)"` behaves like the real thing.
+When you preview locally, the same `platform` section is filled with
+placeholders (`kubecore/local-dev`), so the shape is right but no endpoint is real.
 
 ---
 
-## 12. Running the pipeline (from Argo Workflows only)
+## 12. Running the pipeline (from the run form only)
 
-Open the workflow template in the Argo UI, press **Submit**:
+In the console open **Pipelines** → your pipeline → **Run** (or the workflow template in Argo, then **Submit**):
 
 - **`pipeline-info`** (first field) — read-only cheat-sheet; leave it.
 - **Group dropdowns** (`model`, `train-optimizer`, `train-callbacks`,
@@ -450,22 +469,14 @@ Open the workflow template in the Argo UI, press **Submit**:
   change win over the group.
 - **Your scalar fields** — every leaf of your tree
   (`train-epochs`, `dataset`, `train-loss-pose`, …), plus dropdowns the
-  platform fills live (`cpu-class`/`gpu-class` list this cluster's node
-  classes; `dataset` is `<dataset-repo>@<version>`, default
-  `dataset-default@latest`, its choices come from the platform's dataset
-  catalog) and
+  platform fills live (`{step}-class` lists the machine classes you may use for each step;
+  `dataset` is `<dataset-repo>@<version>`, default
+  `dataset-default@latest`, its choices are your datasets and their versions) and
   fixed-choice fields it validates (`data-source`, `quantization-mode`).
 - **Per-step sizing** — `{step}-cpu` / `{step}-mem`.
 - **`config` (ADVANCED)** — normally empty. When non-empty it is an
-  override YAML merged LAST over everything above — for scripted
-  submissions:
-
-  ```bash
-  argo submit --from workflowtemplate/{app}-pipeline \
-      -p config="$(cat my-sweep-point.yaml)"
-  ```
-
-  Keys must exist in the tree — a typo in the YAML fails the run
+  override YAML merged LAST over everything above, for example
+  `train: {epochs: 5}`. Keys must exist in the tree — a typo in the YAML fails the run
   immediately (§10). The `platform:` section is off-limits: an
   ADVANCED override that touches it is rejected.
 
@@ -474,44 +485,24 @@ training run.
 
 ---
 
-## 13. What CI does for you (PR checks + per-step builds)
+## 13. What the platform does when you push
 
-You never run the render or the image builds by hand — the platform's
-**in-cluster CI (Argo Workflows)** does it and reports back on the commit.
-There are **no GitHub Actions** in this repo, and none are needed: every
-check you see on GitHub is posted by a workflow running on the cluster, and
-its link opens that run.
+You never run the render or the image builds by hand. The platform does it and reports back on the commit; there
+are no workflows to add to your repository.
 
-**On a PR to `dev`** (`wft-render` commit status):
+**On a pull request to `dev`** (the `wft-render` check): your pipeline is rendered exactly the way it will be after
+the merge, and the check gates the pull request. Green means your DAG builds, every `reads=` section exists, every
+step is declared, every step has a buildable `steps/<dir>/Dockerfile`, there are no duplicate form parameters, and
+`pipeline.py` sets no service account or pod patch (§8.1). Its link opens the run; if the render fails, the error
+is in that run's log. Nothing is released on a pull request.
 
-- The platform renders your pipeline exactly the way it will after merge
-  (`pipeline.py` → enhance with the *real* cluster context → the
-  release-hygiene gate → the step ↔ folder check).
-- The **`wft-render` status check** gates the PR: green = your DAG builds,
-  every `reads=` section exists, every step is declared, every step has a
-  buildable `steps/<dir>/Dockerfile` (or a verbatim-image annotation), no
-  duplicate form params. The check's description carries the step / form-param
-  counts; its link opens the Argo run — if the render fails, the error is in
-  that run's `hera-enhance-gate` (or `hera-render`) log.
-- Nothing is written anywhere on a PR. The gate only checks.
+**On merge to `dev`** (the `kubecore-ml-ci` status): the same render runs and the new pipeline version is
+released. Every `steps/*/` whose contents changed is built and wired in as `image-<step>`. The steps to build are
+found from the folders, so a step you add is built with no further setup.
 
-**On merge to `dev`** (`kubecore-ml-ci` commit status + `ml-ci` deployment):
-
-- The same render runs again and this time **commits** the rendered
-  WorkflowTemplate to the project's GitOps repo.
-- Every `steps/*/` whose contents changed is built (kaniko → the platform
-  registry) and wired into the WorkflowTemplate as `image-<step>`. The matrix
-  is discovered from the folders, so a step you add gets built automatically,
-  with no CI edits.
-- One **`kubecore-ml-ci`** status on the commit (pending → success/failure,
-  link = the Argo build run) and one GitHub **Deployment** (`ml-ci`) that
-  resolves to the same run. A missed webhook is caught within ~3 minutes by
-  the platform's reconciler — no build is ever lost.
-
-So the whole loop for adding a step (§5) is: add `steps/<name>/` + a config
-section + one `pipeline.py` line → **open a PR** → `wft-render` renders your
-WFT → merge → `kubecore-ml-ci` builds your step image and updates the
-WorkflowTemplate → it is ready to run in the Argo UI.
+So the whole loop for adding a step (§5) is: add `steps/<name>/` + a config section + one `pipeline.py` line →
+**open a pull request** → `wft-render` checks it → merge → `kubecore-ml-ci` builds your step image and releases the
+pipeline → it is ready to run from the form.
 
 ---
 
@@ -572,7 +563,7 @@ There are two test commands, on purpose:
 ```bash
 python -m pytest tests                             # the engine: the vendored kubecore/
 pip install "$(sed -n 's/^ARG KAOS_LIB_PACKAGE="\(.*\)"$/\1/p' steps/*/Dockerfile | head -1)" \
-    pytest boto3 psutil pydantic pydantic-settings    # once, in a virtual environment
+    pytest boto3 psutil pydantic pydantic-settings mlflow-skinny    # once, in a virtual environment
 pytest step_tests                                  # step code that imports kaos_lib
 ```
 

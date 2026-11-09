@@ -98,7 +98,7 @@ if __name__ == "__main__":
 ```
 
 **Key facts:**
-- The command that runs in the cluster is `python -m app.entry` — the same as
+- The command that runs on the platform is `python -m app.entry` — the same as
   running it locally. So keep your entry point at `app/entry.py`.
 - `--params` is a YAML string containing **every** config section, already
   resolved from the submit form. You just `cfg["your-section"]`.
@@ -125,6 +125,11 @@ COPY app/ ./app/
 ENTRYPOINT ["python", "-m", "app.entry"]
 ```
 
+If your step reads datasets or writes run outputs, copy the two `KAOS_LIB_PACKAGE` lines (`ARG ...` and
+`RUN pip install ... "${KAOS_LIB_PACKAGE}"`) from an existing step's Dockerfile, for example
+`steps/model_registration/Dockerfile`, and keep the name `KAOS_LIB_PACKAGE`: the platform fills it in when it
+builds ([docs/kaos-lib-versions.md](docs/kaos-lib-versions.md)).
+
 That's the whole Dockerfile. The platform builds it (kaniko → the registry) and
 wires the resulting image into the workflow as `image-model-evaluation`
 automatically. **You never write an image name or a registry URL.**
@@ -132,7 +137,7 @@ automatically. **You never write an image name or a registry URL.**
 > **The #1 mistake:** declaring a step in `pipeline.py` but forgetting this
 > Dockerfile. The PR render check catches it with a clear message
 > ("step 'model-evaluation': expected steps/model_evaluation/Dockerfile") — so
-> you find out at PR time, not when it `ImagePullBackOff`s in the cluster.
+> you find out at pull request time, not when the step cannot start.
 
 ---
 
@@ -147,7 +152,7 @@ evaluation:
   iou_threshold: 0.5        # IoU threshold for matching
 ```
 
-**Every scalar leaf here becomes a field on the Argo submit form**, named
+**Every scalar leaf here becomes a field on the run form**, named
 `evaluation-split`, `evaluation-iou_threshold` (section + key, dots→hyphens).
 Users can change them at submit time; you read them via `cfg["evaluation"]`.
 
@@ -203,14 +208,14 @@ with pipeline("ml-pipeline") as p:
 
 ## Step 6 — check it locally (optional but nice)
 
-You don't need a cluster. From the repo root:
+You don't need anything but Python. From the repo root:
 
 ```bash
 ./run.sh
 ```
 
 This renders your pipeline exactly the way the platform will (it does NOT run
-it — running only happens in Argo). It writes `out/workflow-template.yaml`. If
+it — running only happens from the run form). It writes `out/workflow-template.yaml` (and `out/params.yaml`, the config your steps receive). If
 your step shows up there with an `image-model-evaluation` reference and its
 config fields are in the form, you're good. If you made a mistake (missing
 config section, bad name), it fails here with a clear message.
@@ -231,15 +236,13 @@ git commit -m "add model-evaluation step"
 git push
 ```
 
-Now the platform takes over — all of it in-cluster (Argo Workflows), reported
-back to GitHub as commit statuses:
-1. **On your PR** — the `wft-render` check renders the pipeline (with the real
-   cluster context) and gates the PR: steps, form parameters, and that every
-   step has a buildable Dockerfile. Its link opens the Argo run; if anything's
-   wrong, that run's log tells you exactly what.
+Now the platform takes over and reports back to GitHub as commit statuses:
+1. **On your PR** — the `wft-render` check renders the pipeline and gates the PR:
+   steps, form parameters, and that every step has a buildable Dockerfile. Its
+   link opens the run; if anything's wrong, that run's log tells you exactly what.
 2. **On merge** — the `kubecore-ml-ci` check builds your step's image and
-   updates the workflow template (the `ml-ci` deployment on the commit resolves
-   to the same run). Your step is now on the Argo submit form, ready to run.
+   releases the new pipeline version. Your step is now on the submit form,
+   ready to run.
 
 You did not touch the platform. You did not write a registry URL, an image name,
 a credential, a node selector, or a resource request. You wrote a small Python
@@ -294,8 +297,8 @@ add a knob        -> 1 line in config/<section>.yaml            (becomes a form 
 change the DAG    -> edit needs=[...] in pipeline.py            (that's the whole DAG)
 add a step        -> mkdir steps/<name>/app + Dockerfile + 1 pipeline.py line
                      (platform auto-does: image, form fields, node, creds, CI check)
-run it            -> only from the Argo UI (Submit). ./run.sh is a local preview only.
-never edit        -> anything under kubecore/  (that's the platform engine)
+run it            -> only from the run form (console: Pipelines -> Run). ./run.sh is a local preview only.
+never edit        -> anything under kubecore/  (the platform's engine)
 ```
 
 If you remember one thing: **you describe *what* your step is (name, what it

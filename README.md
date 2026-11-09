@@ -21,7 +21,7 @@ Something failed? [When something breaks](docs/troubleshooting.md). All the run-
 ```bash
 python3 -m venv ~/.venvs/kaos && . ~/.venvs/kaos/bin/activate
 pip install --index-url https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib-rc/simple/ \
-    --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel,mlflow]==0.4.0rc15"
+    --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel,mlflow]==0.4.0rc17"
 kaosctl login                                    # inside your pipeline's folder
 kaosctl dataset create spacecraft --layout yolo --classes spacecraft   # a new dataset has no layout unless you ask
 # add images, labels and kpt_shape / flip_idx in data.yaml, then:
@@ -41,8 +41,9 @@ config-validation → dataset-loading → data-summary
 
 `qat-finetune` and `model-quantization` run only when `quantization-mode` is `qat` or `ptq` (`qat-finetune`: `qat` only). The whole pipeline is `pipeline.py`; **the `config/` tree is the run form**: each plain value is a field and each group folder (`config/model/`, `config/train/optimizer/`, ...) a dropdown.
 
-Long trainings are not lost: a step on a reclaimed machine, a failed node or an HPC time limit is run again by the
-platform and training continues from its last checkpoint, with nothing to declare or call
+Long trainings are not lost: a step on a reclaimed machine, a failed node or an HPC (Slurm) time limit is run again
+by the platform and training continues from its last checkpoint, with nothing to call. A step that is longer than
+the longest HPC run is continued in capped runs when it is resumable, and refused before it is sent otherwise
 ([When a machine is lost or a time limit hits](docs/resilience.md)).
 
 ## For people changing the template
@@ -51,12 +52,12 @@ platform and training continues from its last checkpoint, with nothing to declar
 pipeline.py            the steps
 config/                every setting: a field or a dropdown on the run form
 steps/<name>/          one folder per step (README.md in each)
-kubecore/              the platform's build engine: seeded, do not edit
+kubecore/              the platform's build engine: provided for you, do not edit
 scripts/               check-docs.sh, gen-parameters.py
 docs/                  the guide (mkdocs)
 ```
 
-[ADD-A-STEP.md](ADD-A-STEP.md), [DEVELOPER.md](DEVELOPER.md), [MECHANISMS.md](MECHANISMS.md), [PLATFORM.md](PLATFORM.md). Check the guide before a pull request: `scripts/check-docs.sh`. `docs/parameters.md` is generated: `python scripts/gen-parameters.py`.
+[ADD-A-STEP.md](ADD-A-STEP.md), [DEVELOPER.md](DEVELOPER.md). Check the guide before a pull request: `scripts/check-docs.sh`. `docs/parameters.md` is generated: `python scripts/gen-parameters.py`.
 
 ## License
 

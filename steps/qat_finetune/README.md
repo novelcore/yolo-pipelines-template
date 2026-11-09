@@ -4,6 +4,7 @@ Quantization-aware training (QAT): a short fine-tune of the trained model that p
 
 - **Runs on:** a GPU, only when `quantization-mode` is `qat`.
 - **Reads:** `experiment`, `train` (`train-qat-epochs`, `train-qat-lr`) and `quantization` from the form, and `training-result`.
+- **Input check:** an empty or unloadable `best_checkpoint_s3` from training is refused with a message that says so.
 - **Output:** `qat-result` with the TFLite location, consumed by `model-quantization`.
 - **Settings:** [docs/parameters.md](../../docs/parameters.md) (model: `app/models/quantization.py`; `calibration_frames` is at least 100).
 - **Dependencies:** the CUDA/QAT stack is pinned in `requirements-cuda.txt` and `requirements-qat.txt`.

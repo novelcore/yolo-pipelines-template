@@ -2,9 +2,9 @@
 
 Trains the YOLO pose model (YOLOv8 / YOLOv11) on the dataset commit that `dataset-loading` pinned.
 
-- **Runs on:** a GPU (`gpu=True` in `pipeline.py`); on Slurm when `model-training-class` is an HPC class (`meluxina-*`).
+- **Runs on:** a GPU (`gpu=True` in `pipeline.py`); on HPC (Slurm) when `model-training-class` is an HPC class.
 - **Reads:** the form sections `experiment`, `dataset`, `data`, `model`, `train`, `image_processing`, `logging`. Own datasets stream from the project's lakeFS S3 gateway; shared datasets and Slurm runs are materialized locally first.
-- **Writes:** checkpoints (`best.pt`, `last.pt`, exports) to `outputs-<pipeline>` under `checkpoints/<experiment>/<run>/`, metrics and a logged model `<experiment>-best` to MLflow. A step run again after a lost machine or an HPC time limit continues from its last checkpoint (nothing to call; see docs/resilience.md).
+- **Writes:** checkpoints (`best.pt`, `last.pt`, exports) to `outputs-<pipeline>` under `checkpoints/<experiment>/<run>/`, metrics and a logged model `<experiment>-best` to MLflow. A step run again after a lost machine or an HPC time limit continues from its last checkpoint (nothing to call; see docs/resilience.md), and `best.pt` survives the continuation. `training-result` always names a checkpoint: `best.pt`, or `last.pt` when a continued run wrote no `best.pt`; a run with no weights at all fails.
 - **Output:** `training-result` for the later steps.
 - **Settings:** [docs/parameters.md](../../docs/parameters.md) (bounds are the pydantic models in `app/models/training.py`).
 
