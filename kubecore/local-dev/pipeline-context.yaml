@@ -1,14 +1,11 @@
-# LOCAL-DEV pipeline-context — PLACEHOLDER values only.
+# LOCAL-DEV pipeline-context: PLACEHOLDER values only.
 #
-# This file exists ONLY so `python -m kubecore.enhance` can be exercised on a
-# laptop. In production the platform NEVER reads this copy: the k8smlapp
-# Crossplane composition writes the real pipeline-context (real endpoints, the
-# lakeFS admin secret NAME, OIDC ids, per-project compute catalog) into the
-# private gitops repo in-cluster, and `ml-ci-build` reads it at CI render time.
+# This file exists only so `python -m kubecore.enhance` can be exercised on your
+# own machine. On the platform the real pipeline-context is generated for your
+# project and used when your pipeline is built; this copy is never read there.
 #
-# PROHIBITED: real endpoints, secret names, OIDC ids, or cluster DNS in this
-# (or any) repo. Those are platform-internal and derived live from the runtime.
-# Developers must not see them. Keep everything below non-functional.
+# Never put real endpoints, secret names or sign-in ids in this file (or any
+# file of your repository). Keep every value below a non-functional placeholder.
 project: PLACEHOLDER-project
 app: PLACEHOLDER-app
 pipelineName: PLACEHOLDER-pipeline
@@ -18,8 +15,8 @@ imageRepo: PLACEHOLDER-imagerepo
 lakefs:
   endpoint: http://lakefs.internal.invalid
   repository: PLACEHOLDER-repo
-  # externalUrl is the browser/CLI-facing ingress; render-wft
-  # writes it into the app repo's .kubecore/dataset-config.yaml.
+  # externalUrl is the address you open in a browser or reach from kaosctl;
+  # the render step writes it into your repository's .kubecore/dataset-config.yaml.
   externalUrl: "https://lakefs.internal.invalid"
   adminSecret: PLACEHOLDER-lakefs-admin
   adminSecretKeys:
@@ -27,19 +24,16 @@ lakefs:
     secretKey: secretAccessKey
 mlflow:
   trackingUri: http://mlflow.internal.invalid
-  # externalUrl is the public ingress (PRD-1016 F-08): off-cluster runs
-  # (MeluXina Slurm jobs) reach MLflow here with a Zitadel bearer.
+  # externalUrl is the public address: steps that run on HPC (Slurm) reach
+  # MLflow here with a bearer token.
   externalUrl: "https://mlflow.internal.invalid"
   svcSecret: PLACEHOLDER-mlflow-svc
   oidcDomain: "oidc.internal.invalid"
   oidcProjectId: "PLACEHOLDER-oidc-project-id"
-# computeClasses.{cpu,gpu} are the pool's two ML compute classes
-# (operator-selected one-per-tier from the live KubePool every
-# reconcile → class drift propagates here automatically). render-wft
-# routes each step to gpu iff it requests nvidia.com/gpu, else cpu,
-# and sizes the step's requests with node headroom from machineType.
-# Single source of truth = the KubePool; the KubeApp declares no
-# class selection.
+# computeClasses.{cpu,gpu} are the two compute classes of your project's
+# machines. The render step routes each step to the gpu class if it needs a
+# GPU, else to the cpu class, and sizes the step's requests from the machine
+# type. You do not select a class in your pipeline.
 computeClasses:
   cpu:
     name: "cpu-standard"
@@ -50,10 +44,9 @@ computeClasses:
     maxNodeCount: 4
     diskSizeGb: 50
     description: "n2-standard-8 (8 vCPU, 32 GiB) — CPU pipeline steps (headroom for model-quantization + heavier CPU steps; scale-from-0 so cost only during a step)"
-    # allocatable = whole-node CPU/memory a sole-tenant step may
-    # request on this class (capacity − GKE reservation − margin),
-    # computed by the operator from machineType. render-wft sizes
-    # each step requests==limits from this (whole-node model).
+    # allocatable = the CPU and memory a step may request on this class
+    # (the machine's capacity less what the system keeps). The render step
+    # sizes each step's requests and limits from it.
     allocatable:
       cpu: 7
       memoryGiB: 27
@@ -69,18 +62,15 @@ computeClasses:
     guestAccelerator:
       type: "nvidia-tesla-t4"
       count: 1
-    # allocatable = whole-node CPU/memory a sole-tenant step may
-    # request on this class (capacity − GKE reservation − margin),
-    # computed by the operator from machineType. render-wft sizes
-    # each step requests==limits from this (whole-node model).
+    # allocatable = the CPU and memory a step may request on this class
+    # (the machine's capacity less what the system keeps). The render step
+    # sizes each step's requests and limits from it.
     allocatable:
       cpu: 7
       memoryGiB: 25
-  # all = the full catalog of every cpu/gpu class the pool
-  # declares (a pool may offer >1 cpu class, e.g. a heavy ML
-  # class + a small scale-to-zero lightweight class). render-wft
-  # lists these as the allowed values in the cpu-class/gpu-class
-  # field help so a developer can choose, not blind-type.
+  # all = every cpu and gpu class your project's machines offer. The
+  # render step lists them as the allowed values of a step's class setting,
+  # so you choose from a list instead of typing a name.
   all:
     - name: "cpu-standard"
       tier: "cpu"
@@ -92,7 +82,7 @@ computeClasses:
     - name: "kubecorecpu"
       tier: "cpu"
       machineType: "e2-standard-8"
-      description: "e2-standard-8 + 200GiB — CI builds (kaniko), sized for build-push req 4cpu/12Gi"
+      description: "e2-standard-8 + 200GiB — image builds"
       allocatable:
         cpu: 7
         memoryGiB: 27
@@ -109,16 +99,14 @@ computeClasses:
 hpc:
   enabled: true
   provider: "meluxina"
-  # PRD-HPC-1461 D-58, F-35: MeluXina runs only through the pool's HPC controller. When it serves the
-  # project the operator sets `controller: "serve"` plus the controller's image; each HPC step then
-  # renders as a credential-free follower. Without them the HPC twin renders as a step that fails with
-  # a message (there is no in-pod path).
+  # HPC (Slurm) steps run through the platform: each one renders as a step that
+  # holds no credentials of its own. Where the platform does not serve your
+  # project on HPC, the HPC twin of a step renders as a step that fails with a message.
   controller: "serve"
   followerImage: "registry.example/kaos-hpc-operator:v0.0.0"
-  # account/user/scratch/home + classes are published by the k8smlapp
-  # composition from the KubeProject's HPC tenancy (PRD-HPC-1231): the
-  # project's own MeluXina user, the provider filesystem layout, and the
-  # classes the operator DISCOVERED for that user. Placeholder shape only.
+  # account, user, scratch, home and classes describe your project's access to
+  # the HPC (Slurm) provider: its account and user, its file layout and the
+  # classes available to you. Placeholder shape only.
   account: "PLACEHOLDER-account"
   user: "PLACEHOLDER-user"
   scratch: "/project/scratch/PLACEHOLDER-account"
@@ -151,6 +139,6 @@ hpc:
 checkpoints:
   bucket: PLACEHOLDER-bucket
   prefix: main/checkpoints
-  # The platform-registry image of the checkpoint helper containers (the operator publishes it for every app).
+  # The platform's image of the checkpoint helper (provided for every app).
   helperImage: "registry.example/kaos-hpc-operator:v0.0.0"
 serviceAccountName: argo-workflow
