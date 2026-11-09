@@ -7,13 +7,13 @@
 ## Morning: pipeline and tools
 
 1. **Create the pipeline:** console → **Pipelines** → **New pipeline** → the yolo card. Wait for **Ready**. **You should see** it in your list ([Create a yolo pipeline](create-pipeline.md)).
-2. **Clone it** and install `kaosctl`, then sign in inside the folder. **You should see** `kaosctl 0.4.0rc15` and your browser asking you to sign in:
+2. **Clone it** and install `kaosctl`, then sign in inside the folder. **You should see** `kaosctl 0.4.0rc17` and your browser asking you to sign in:
 
     ```bash
     git clone https://github.com/<github-org>/<pipeline>.git && cd <pipeline> && git checkout dev
     python3 -m venv ~/.venvs/kaos && . ~/.venvs/kaos/bin/activate
     pip install --index-url https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib-rc/simple/ \
-        --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel,mlflow]==0.4.0rc15"
+        --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel,mlflow]==0.4.0rc17"
     kaosctl login
     ```
 

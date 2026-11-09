@@ -12,13 +12,15 @@ every kind of machine: your project's own cluster (GPU or CPU, spot included) an
 | what happened | a step that writes checkpoints | any other step |
 |---|---|---|
 | machine lost, reclaimed or drained | runs again and **continues from its last checkpoint** | runs again from the start, at most twice |
-| HPC time limit reached | continues from the last checkpoint in a new job | ends with a message that names the limit |
+| HPC time limit reached | continues from the last checkpoint in a new job (up to 5 continuations) | ends with a message that names the limit |
 | the step hangs (HPC: no GPU use and no output for 20 minutes) | ends with the reason `Idle`; with a checkpoint it continues | ends with the reason `Idle` |
 | your own code fails (a non-zero exit, out of memory, a Python error) | ends as failed: **not** repeated | ends as failed: **not** repeated |
 
 Running a step again is always safe: a step's results are published only when it succeeds.
 
-Nothing in your code or in `pipeline.py` is needed for this.
+Nothing in your code or in `pipeline.py` is needed for this. The platform also decides **by itself** that a step is
+resumable once the evidence is there: an earlier continuation loaded its checkpoint and got further than it. You can
+declare it earlier (`resumable=`) or opt out (`resumable=False`), see [Settings](#settings-all-optional).
 
 ## Checkpoints without code
 
@@ -31,8 +33,10 @@ This template's steps import `kaos_lib`, which also hooks the training framework
 
 | framework | saved | on the repeated step |
 |---|---|---|
-| Ultralytics (YOLO), used by `model-training` | `last.pt` at the end of each epoch, and `best.pt` once one exists | training continues, same total epochs, same MLflow run |
+| Ultralytics (YOLO), used by `model-training` | `last.pt` at the end of each epoch, and `best.pt` once one exists | training continues, same total epochs, same MLflow run; `best.pt` is put back, so the best checkpoint is never lost across a continuation |
 | your own loop, through `kaos_lib.checkpoint`, used by `qat-finetune` | the model, optimizer and finished epochs at the end of each epoch | the fine-tune continues from the last finished epoch, same total epochs, same MLflow run |
+
+If a run still ends with no `best.pt` (no epoch after the restart beat the earlier best), `model-training` hands `last.pt` on as the checkpoint for the next steps; a run with no weights at all fails. `qat-finetune` and `model-quantization` refuse an empty or unloadable checkpoint with a message that says so.
 
 `qat-finetune` is a hand-written PyTorch loop, so it uses the second way. It calls `checkpoint.load("qat")` at the start
 and `checkpoint.save(..., "qat")` plus `checkpoint.progress({"epoch": n})` after each epoch. When the platform asks the
@@ -76,17 +80,17 @@ Set them on the step in `pipeline.py`:
 
 ```python
 train = step("model-training", gpu=True, needs=[load],
-             walltime="12h",             # HPC time limit for this step (hpc_time_limit still works)
+             hpc_time_limit="12h",       # HPC (Slurm) time limit for this step
              checkpoint_every="20m",     # copy the checkpoint folder every 20 minutes (default: 10, adapts to size)
              idle_timeout="40m")         # raise the 20-minute idle rule; 0 turns it off
 ```
 
 | setting | meaning |
 |---|---|
-| `walltime` | the longest the step may run on HPC. The platform may ask the site for less after it has seen the step finish a few times (short steps only), and runs it again at your limit if it was cut short, so a step is never stopped where your limit would have passed. |
+| `hpc_time_limit` | the longest the step may run on HPC (GPU steps). It is a ceiling: the platform may ask the site for less after it has seen the step finish a few times, and runs it once more at your limit if it was cut at the shorter one, so a step is never stopped where your limit would have passed. You never name a queue. A limit longer than the longest HPC run is continued in capped runs if the step is resumable, and refused before it is sent (`TooLongNotResumable`) if not: [Run on HPC (Slurm)](slurm.md). |
 | `checkpoint_every` | how often the folder is copied. Saving stays near 10 % of the run time: a slow save lengthens the interval. `checkpoint_every=False` turns copies off for the step (the repeat after a lost machine stays). A CPU step is copied only if you set a value here. |
-| `idle_timeout` | how long a step may show no GPU use and no new log lines before it is ended as `Idle`. Raise it for a step with a long silent phase. |
-| `resumable` | normally not needed: a step is continued when it uses the folder. Set `resumable="30m"` only to be signalled earlier before the HPC time limit, for a large checkpoint. |
+| `idle_timeout` | how long a step may show no GPU use and no new log lines before it is ended as `Idle` (20 minutes by default; `0` turns the rule off). Raise it for a step with a long silent phase. It applies to GPU steps on your cluster and on HPC. |
+| `resumable` | a GPU step is continued when it writes into the checkpoint folder, and the platform also learns it from evidence. Declare it to be sure: `resumable=True` or a lead time such as `resumable="3m"`, which is how long before the HPC time limit the step is told to save (default 10 minutes; use a longer lead for a large checkpoint). A step declared or learned as resumable is the one a limit above the longest run is continued for. `resumable=False` opts the step out: on HPC it is never continued from a checkpoint (a lost machine still re-runs it), and a step longer than the longest run is then refused. |
 
 ## What you will see
 

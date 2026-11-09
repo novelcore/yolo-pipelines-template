@@ -7,7 +7,7 @@ your pipeline, how to hold a version, and how long a version is supported. The l
 documented in the [kaos-lib reference](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/index.html).
 
 !!! note "The minimum version"
-    The `kaosctl` command exists from **0.4.0rc5** on; the pipeline's dev channel delivers **0.4.0rc15**. Releases are on the platform's package
+    The `kaosctl` command exists from **0.4.0rc5** on; the pipeline's dev channel delivers **0.4.0rc17**. Releases are on the platform's package
     index, in two channels: *prerelease* (`kaos-lib-rc`, the `rc` versions) and *stable*
     (`kaos-lib`, which has no release yet). [Install kaosctl](https://novelcore.github.io/hera-pipeline-template/cookbook/4-install-kaosctl/) has the
     command for each.
@@ -75,7 +75,7 @@ you get a new pull request for that one, and the platform closes the older one.
 
 ## Which version is my pipeline running?
 
-- The first line of every step's log: `kaos-lib 0.4.0rc15`.
+- The first line of every step's log: `kaos-lib 0.4.0rc17`.
 - MLflow: `model-training` tags its run `kaos_lib.version`, and `model-registration` the
   model versions it registers. A new step that logs an MLflow run should do the same.
 - Each step image carries the label `io.kaos.lib` with the exact requirement it was built

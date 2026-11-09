@@ -7,7 +7,7 @@ The steps import **kaos-lib** (`kaos_lib`: datasets, run outputs), the platform 
 ```bash
 python -m pytest tests                                         # engine (vendored kubecore/)
 pip install "$(sed -n 's/^ARG KAOS_LIB_PACKAGE="\(.*\)"$/\1/p' steps/*/Dockerfile | head -1)" \
-    pytest boto3 psutil pydantic pydantic-settings
+    pytest boto3 psutil pydantic pydantic-settings mlflow-skinny
 pytest step_tests                                              # step code
 ```
 

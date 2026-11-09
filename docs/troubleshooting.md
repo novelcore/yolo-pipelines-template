@@ -76,7 +76,7 @@ The labels do not match `kpt_shape` in `data.yaml` (a different number of keypoi
 
 ### A step waits and never starts
 
-The machines are busy, or on Slurm the job is queued. Give it a few minutes ([Run on HPC (Slurm)](slurm.md)). If it stays stuck for a long time, tell your KAOS contact.
+The machines are busy, or on HPC (Slurm) the job is queued. The step's status line gives the reason: `WaitingForBudget` and `ConcurrencyLimit` clear by themselves; `BudgetBlocked`, `SiteLimit`, `SubmitLimit`, `TooLongNotResumable` and `GPUViolation` need something from you ([Why a job waits or stops](slurm.md#why-a-job-waits-or-stops)). If it stays stuck for a long time without a reason, tell your KAOS contact.
 
 ### Training restarted after a machine was reclaimed
 
@@ -84,7 +84,7 @@ By design: the step is run again by the platform, at most twice, and training co
 
 ### A step ends with `Idle` or `NoProgress`
 
-`Idle`: no GPU use and no new log lines for 20 minutes on HPC; raise `idle_timeout` on the step if it was working. `NoProgress`: a continued job did not get past its checkpoint, so it stopped instead of repeating the same hours.
+`Idle`: no GPU use and no new log lines for 20 minutes (the default); raise `idle_timeout` on the step if it was working, or set it to `0` to turn the rule off. `NoProgress`: a continued job did not get past its checkpoint, so it stopped instead of repeating the same hours.
 
 ### Training is taking forever
 
@@ -103,6 +103,10 @@ Look for the `experiment-name` you set in MLflow. Runs with the same name share 
 ### The INT8 model looks wrong
 
 Open the quantization run in MLflow and read `parity_passed` and `parity_max_abs_error`. The step does not fail on a bad comparison. Try `qat` instead of `ptq`, or more `quantization-calibration_frames`.
+
+## If `pipeline.py` is refused
+
+If you changed `pipeline.py` and the build fails with `sets a service account (serviceAccountName)`, `sets podSpecPatch` or `uses a name the platform reserves for its HPC follower`, remove it. The platform alone chooses which account every step runs as, sizes and places the pods, and owns the template names `hpc-follower`. The pipeline is not released until you do: the pull request check goes red, naming the step. To change a step's machine or size, use `step(...)` options and the `<step>-class`, `-cpu` and `-mem` fields of the run form.
 
 ## Everything else
 

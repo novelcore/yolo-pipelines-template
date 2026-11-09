@@ -8,7 +8,7 @@ Plain meanings for the words in this guide. One sentence each. Come back any tim
 
 **Dataset.** Your images and their labels, in the yolo layout, stored in lakeFS as the repository `dataset-<name>`. Its versions are tags (`v1`, `v2`, ...); you pick one in the form's `dataset` field, for example `dataset-spacecraft@v1`.
 
-**kaosctl.** The command-line tool that comes with kaos-lib (0.4.0rc15 at the time of writing): create, push, validate, release and pull datasets, and replay a run's data.
+**kaosctl.** The command-line tool that comes with kaos-lib (0.4.0rc17 at the time of writing): create, push, validate, release and pull datasets, and replay a run's data.
 
 **Epoch.** One full pass over your dataset during training. More epochs means more training.
 
