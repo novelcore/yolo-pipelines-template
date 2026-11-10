@@ -93,6 +93,7 @@ nav:
       - A day with yolo: worked-day.md
   - More on the pipeline:
       - What the pipeline does: the-pipeline.md
+      - Check and try a step on your computer: check-and-try-locally.md
       - Watch it train: watch-it.md
       - Promote a model: promote.md
       - Datasets: datasets.md
