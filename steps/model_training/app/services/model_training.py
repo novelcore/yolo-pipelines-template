@@ -84,7 +84,7 @@ _METRIC_RECALL = "metrics/recall(B)"
 _METRIC_MAP50 = "metrics/mAP50(B)"
 _METRIC_MAP50_95 = "metrics/mAP50-95(B)"
 
-# File names written by dataset_loading
+# File name of the manifest the training entry writes into dataset_dir
 _MANIFEST_FILENAME = "dataset_manifest.json"
 
 
@@ -1093,7 +1093,7 @@ class TrainingService:
         if not data_yaml.exists():
             raise TrainingError(
                 f"data.yaml not found in dataset_dir: {dataset_path}. "
-                "Run the dataset_loading step first."
+                "A local dataset_dir needs the dataset's data.yaml."
             )
         self._logger.info("Local dataset validation | data.yaml found at %s", data_yaml)
 
@@ -1207,7 +1207,7 @@ class TrainingService:
     def _write_data_yaml(self, params: TrainingParams, tmp_path: Path) -> Path:
         """Write a data.yaml to the temp directory.
 
-        If dataset_dir already contains a data.yaml (written by dataset_loading),
+        If dataset_dir already contains a data.yaml (written by the training entry),
         we copy it into the temp dir and update the ``path`` field to the
         absolute dataset_dir. Otherwise we generate a minimal pose-estimation
         template.
@@ -1239,7 +1239,7 @@ class TrainingService:
         # Always set path to the resolved absolute dataset directory
         content["path"] = str(dataset_path)
 
-        # In S3 streaming mode the dataset_loading step only downloads labels.
+        # In S3 streaming mode only data.yaml is local.
         # yolo validates that image directories exist at init time
         # (before S3PoseTrainer takes over), so we create empty stubs.
         if params.source == "s3":

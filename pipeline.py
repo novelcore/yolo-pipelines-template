@@ -14,7 +14,7 @@ See README.md / DEVELOPER.md to add a step or a parameter.
 
 from pathlib import Path
 
-from kubecore.authoring import pipeline, step  # platform-owned, do not edit
+from kubecore.authoring import pipeline, step  # the platform's engine provides this
 
 HERE = Path(__file__).parent
 
@@ -23,15 +23,12 @@ HERE = Path(__file__).parent
 # each KubeApp gets its own uniquely-named WFT (no collisions across apps in a
 # shared namespace). You don't need to change it per app.
 with pipeline("ml-pipeline") as p:
-    validate = step("config-validation", reads=["data", "dataset", "model"])
-    load = step("dataset-loading", reads=["data", "dataset"], needs=[validate],
-                outputs=["data-yaml", "manifest-summary"])
-    summary = step("data-summary", reads=["data", "dataset", "summary"], needs=[load])
+    validate = step("config-validation", reads=["data", "model", "train"])
     # hpc_time_limit: the Slurm time limit when this step is placed on an HPC class (DEVELOPER.md §8.1).
     # Size it to the longest expected training. Nothing else to declare for long trainings: the platform
     # re-runs a step lost with its machine and continues it from the checkpoints Ultralytics writes
     # (docs/resilience.md); resumable=, checkpoint_every= and idle_timeout= are optional.
-    train = step("model-training", gpu=True, needs=[load], hpc_time_limit="12h",
+    train = step("model-training", gpu=True, needs=[validate], hpc_time_limit="12h",
                  reads=["experiment", "dataset", "data", "model", "train", "image_processing", "logging"],
                  outputs=["training-result"])
     qat = step("qat-finetune", gpu=True, needs=[train], disk="20Gi",

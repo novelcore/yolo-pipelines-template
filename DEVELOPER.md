@@ -19,8 +19,7 @@ your-repo/
 │   ├── data.yaml  train.yaml  quantization.yaml  ...
 │   ├── train/optimizer/{sgd,adam,adamw}.yaml     # a config GROUP
 │   └── image_processing/{mosaic_default,...}.yaml
-├── kubecore/                # platform-owned engine (seeded — do not edit)
-├── tests/, step_tests/      # engine tests, step-code tests (two commands: §15)
+├── step_tests/              # tests of your step code (§15)
 └── steps/
     ├── model_training/      # Dockerfile + entry point (your code)
     └── ...
@@ -141,14 +140,11 @@ Push. The `train-optimizer` dropdown now offers `lion`.
 complete step list from this repo:
 
 ```python
-from kubecore.authoring import pipeline, step  # provided by the platform, do not edit
+from kubecore.authoring import pipeline, step  # the platform's engine provides this
 
 with pipeline("ml-pipeline") as p:  # the platform renames it to {app}-pipeline at release
-    validate = step("config-validation", reads=["data", "dataset", "model"])
-    load = step("dataset-loading", reads=["data", "dataset"], needs=[validate],
-                outputs=["data-yaml", "manifest-summary"])
-    summary = step("data-summary", reads=["data", "dataset", "summary"], needs=[load])
-    train = step("model-training", gpu=True, needs=[load], hpc_time_limit="12h",
+    validate = step("config-validation", reads=["data", "model", "train"])
+    train = step("model-training", gpu=True, needs=[validate], hpc_time_limit="12h",
                  reads=["experiment", "dataset", "data", "model", "train", "image_processing", "logging"],
                  outputs=["training-result"])
     qat = step("qat-finetune", gpu=True, needs=[train], disk="20Gi",
@@ -312,7 +308,7 @@ Use `step(...)` options and the `{step}-class` / `-cpu` / `-mem` form fields ins
 Give long steps a time limit (default 4 h):
 
 ```python
-train = step("model-training", gpu=True, needs=[load], hpc_time_limit="12h",
+train = step("model-training", gpu=True, needs=[validate], hpc_time_limit="12h",
              reads=["experiment", "data", "model", "train"])
 ```
 
@@ -356,7 +352,7 @@ its own machine with its own disk. Move data like this:
 | data | mechanism |
 |---|---|
 | small manifests / results | `outputs=` parameters (above) |
-| datasets | lakeFS — each dataset is its own repository `dataset-<name>` (layout at the root); the run's `dataset` = `<repo>@<version>`; `dataset-loading` pins the commit, later steps read it (its `manifest-summary`) |
+| datasets | lakeFS — each dataset is its own repository `dataset-<name>` (layout at the root); the run's `dataset` = `<repo>@<version>`; the platform pins the commit once per run and gives every step that lock (`KAOS_LIB_LOCK`), so `datasets.resolve` and `datasets.materialize` read it |
 | checkpoints | the app's outputs repository `outputs-<app>` on `main` — `cfg["platform"]["checkpoints"]["bucket"]/["prefix"]` |
 | metrics, artifacts, models | MLflow (below) |
 
@@ -370,47 +366,21 @@ platform, submitted from the run form** (§12) — there is no local execution
 and no local submit. The preview needs nothing but Python:
 
 ```bash
-./run.sh                                  # or the commands below
-python pipeline.py                        # -> out/raw-workflow-template.yaml (your DAG)
-python -m kubecore.compose --output out/params.yaml         # composed defaults
-python -m kubecore.compose train.epochs=5 train/optimizer=adamw   # try overrides
+kaosctl render --context pipeline-context.yaml     # -> out/raw-workflow-template.yaml (your DAG), with the platform's engine
+kaosctl dev                                        # one Python environment per step, from its Dockerfile
+kaosctl step run model-training --set train.epochs=5   # one step, composed params
 ```
 
-`out/params.yaml` is exactly what your steps will receive at run time. Errors you
-can hit, verbatim:
+`kaosctl render` fetches the pipeline engine the platform released for your app, so a render that passes
+here passes in the platform's CI. `kaosctl step run` composes the same params the platform composes
+and hands them to the step on `--params`, exactly what the step receives at run time (`--set key=value`
+is an override as on the run form; `--params-file` uses a params file you already have). Your app holds
+no copy of the engine. `--context` is the platform's pipeline-context file of your app; without one,
+name an engine release with `--engine-wheel` (see the kaos-lib `render` reference).
 
-**A step reads a section that doesn't exist** (typo, or you renamed a
-tree section) — fails at render, names both sides:
-
-```
-kubecore.derive_tree.DeriveError: step 'model-quantization' reads config section 'quantizationx' which does not exist in the config tree (top-level sections: summary, data, quantization, experiment, dataset, model, train, image_processing, registration, logging)
-```
-
-**Unknown/typo'd override key** — fails in the compose step, in
-seconds, before any compute:
-
-```
-compose-and-validate FAILED: Key 'epochz' is not in struct
-```
-
-**Invalid value for a platform-declared dropdown**:
-
-```
-compose-and-validate FAILED: Error merging override quantization.mode="banana"
-  cause: Invalid value 'banana', expected one of [none, ptq, qat]
-```
-
-**Unknown key inside the ADVANCED override YAML**:
-
-```
-compose-and-validate FAILED: Key 'epochz' is not in struct
-```
-
-**ADVANCED override touching the platform section** (not allowed):
-
-```
-compose-and-validate FAILED: ADVANCED override may not modify platform.*
-```
+What a mistake looks like: a step that reads a config section that does not exist, an override of a key
+that is not in the tree, or a value outside a dropdown's options each fail at render or at compose time,
+in seconds, with a message that names the key.
 
 The same checks run when you submit: a bad submission stops the run at
 the first step, before any GPU time is spent.
@@ -453,8 +423,7 @@ Datasets and results go through kaos-lib (`kaos_lib`; see `docs/datasets-in-the-
 `outputs.run(...)` writes results. You write no endpoint and no credential: the step's environment has
 them.
 
-When you preview locally, the same `platform` section is filled with
-placeholders (`kubecore/local-dev`), so the shape is right but no endpoint is real.
+When you run a step locally with `kaosctl step run`, no platform endpoint or secret is available: a step that needs one stops with its own error, or runs on its fallback.
 
 ---
 
@@ -558,22 +527,17 @@ Config is for knobs; bulk data goes through lakeFS/checkpoints (§9).
 
 ## 15. Running the tests
 
-There are two test commands, on purpose:
+One command tests your step code (`step_tests/`):
 
 ```bash
-python -m pytest tests                             # the engine: the vendored kubecore/
 pip install "$(sed -n 's/^ARG KAOS_LIB_PACKAGE="\(.*\)"$/\1/p' steps/*/Dockerfile | head -1)" \
     pytest boto3 psutil pydantic pydantic-settings mlflow-skinny    # once, in a virtual environment
-pytest step_tests                                  # step code that imports kaos_lib
+python -m pytest
 ```
 
 That installs exactly the requirement in `KAOS_LIB_PACKAGE` in the step Dockerfiles (run it from the repo root).
-
-**Why two.** The platform's engine in `kubecore/` (render, compose, enhance; it runs in CI and is never
-in a step image) is imported as `kubecore`; the step code imports kaos-lib as `kaos_lib`, installed in
-the step images at the pinned `KAOS_LIB_PACKAGE`. For one release kaos-lib also ships a deprecated
-`kubecore` import shim, so the engine tests keep their own command with the repository root first on
-the path (`python -m pytest tests`). A step image copies only its `app/` folder.
+A step image copies only its `app/` folder. `step_tests/test_repo_layout.py` fails if a `kubecore/` folder or a
+`steps/compose_and_validate/` folder comes back: the platform runs its own engine.
 
 The step tests use kaos-lib's in-memory lakeFS (`step_tests/fake_lakefs.py`, vendored at the same pin),
 so no network or cluster is needed.

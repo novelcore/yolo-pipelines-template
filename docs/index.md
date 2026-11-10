@@ -25,9 +25,7 @@ Short on time? [A day with yolo](worked-day.md) does all of it in one page.
 
 ```mermaid
 graph LR
-    A["config-validation"] --> B["dataset-loading"]
-    B --> S["data-summary"]
-    B --> C["model-training"]
+    A["config-validation"] --> C["model-training"]
     C --> D["qat-finetune (qat only)"]
     C --> E["model-quantization (ptq or qat)"]
     D --> E

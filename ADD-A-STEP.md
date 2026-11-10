@@ -32,7 +32,7 @@ your own name wherever you see it.
 Everything else — building the image, publishing it, putting it on the submit
 form, picking the compute node, injecting lakeFS/MLflow credentials, wiring the
 CI status checks — **the platform does automatically.** You never edit anything
-under `kubecore/`. That directory is the platform engine; leave it alone.
+else. Your repository holds no copy of the platform's pipeline engine.
 
 ---
 
@@ -73,7 +73,7 @@ READS = ["evaluation", "model"]
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--params", required=True,
-                        help="Resolved params.yaml content (from compose-and-validate).")
+                        help="Resolved params.yaml content (composed by the platform).")
     args, _ = parser.parse_known_args()
     cfg = yaml.safe_load(args.params)
 
@@ -179,9 +179,7 @@ run first:
 ```python
 with pipeline("ml-pipeline") as p:
     validate = step("config-validation", reads=["data", "model"])
-    load     = step("dataset-loading", reads=["data"], needs=[validate],
-                    outputs=["data-yaml", "manifest-summary"])
-    train    = step("model-training", gpu=True, needs=[load],
+    train    = step("model-training", gpu=True, needs=[validate],
                     reads=["experiment", "data", "model", "train"],
                     outputs=["training-result"])
     # 👇 YOUR NEW STEP — one line
@@ -211,13 +209,14 @@ with pipeline("ml-pipeline") as p:
 You don't need anything but Python. From the repo root:
 
 ```bash
-./run.sh
+kaosctl render --context pipeline-context.yaml
+kaosctl step run model-evaluation
 ```
 
-This renders your pipeline exactly the way the platform will (it does NOT run
-it — running only happens from the run form). It writes `out/workflow-template.yaml` (and `out/params.yaml`, the config your steps receive). If
-your step shows up there with an `image-model-evaluation` reference and its
-config fields are in the form, you're good. If you made a mistake (missing
+`kaosctl render` renders your pipeline with the same engine the platform uses (it does NOT run
+it — running only happens from the run form) and writes `out/raw-workflow-template.yaml`. If
+your step shows up there and its config fields are in the form, you're good. `kaosctl step run`
+runs your step alone on your computer, with the composed config. If you made a mistake (missing
 config section, bad name), it fails here with a clear message.
 
 To just build your step's image locally and confirm it's valid:
@@ -297,8 +296,7 @@ add a knob        -> 1 line in config/<section>.yaml            (becomes a form 
 change the DAG    -> edit needs=[...] in pipeline.py            (that's the whole DAG)
 add a step        -> mkdir steps/<name>/app + Dockerfile + 1 pipeline.py line
                      (platform auto-does: image, form fields, node, creds, CI check)
-run it            -> only from the run form (console: Pipelines -> Run). ./run.sh is a local preview only.
-never edit        -> anything under kubecore/  (the platform's engine)
+run it            -> only from the run form (console: Pipelines -> Run). kaosctl render / kaosctl step run are local previews.
 ```
 
 If you remember one thing: **you describe *what* your step is (name, what it

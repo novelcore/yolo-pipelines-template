@@ -7,12 +7,10 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Step runtime dependencies:
-#   boto3    — S3 checks of an s3:// dataset override, pretrained weights and checkpoints
-#   requests — MLflow /health liveness check
+#   boto3    — S3 checks of pretrained weights and checkpoints
 #   PyYAML   — params.yaml parsing
 RUN pip install --no-cache-dir \
     "boto3>=1.34,<2" \
-    "requests>=2.31,<3" \
     "PyYAML>=6,<7"
 
 # kaos-lib, the platform library (datasets, run outputs; formerly the kubecore package), from
