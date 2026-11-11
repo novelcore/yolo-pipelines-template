@@ -43,7 +43,7 @@ config-validation → model-training → qat-finetune → model-quantization →
 Long trainings are not lost: a step on a reclaimed machine, a failed node or an HPC (Slurm) time limit is run again
 by the platform and training continues from its last checkpoint, with nothing to call. A step that is longer than
 the longest HPC run is continued in capped runs when it is resumable, and refused before it is sent otherwise
-([When a machine is lost or a time limit hits](docs/resilience.md)).
+([Long runs: checkpoints](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/checkpoint.html)).
 
 ## For people changing the template
 
@@ -52,13 +52,23 @@ pipeline.py            the steps
 config/                every setting: a field or a dropdown on the run form
 steps/<name>/          one folder per step (README.md in each)
 step_tests/            tests of the step code (DEVELOPER.md §15)
-scripts/               check-docs.sh, gen-parameters.py
+scripts/               check-docs.sh, docs_check.py, gen-parameters.py
 docs/                  the guide (mkdocs)
 ```
 
 Your pipeline is `pipeline.py`, `config/` and `steps/`; it holds no copy of the platform's pipeline engine. On your computer, `kaosctl render --context pipeline-context.yaml` renders the pipeline with the same engine the platform uses, `kaosctl dev` sets up each step's Python environment and `kaosctl step run <step>` runs one step ([Check and try a step](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/step-run.html)).
 
 [ADD-A-STEP.md](ADD-A-STEP.md), [DEVELOPER.md](DEVELOPER.md). Check the guide before a pull request: `scripts/check-docs.sh`. `docs/parameters.md` is generated: `python scripts/gen-parameters.py`.
+
+The docs build first runs three checks (`scripts/docs_check.py`), and a finding fails it:
+
+| check | fails on |
+|---|---|
+| words | a page that names what the platform is built from: the guide is for people who use the platform |
+| removed names | a step or a folder that no longer exists |
+| links | a link that does not resolve in this guide, in the kaos-lib guide or in the hera guide, and a link from those two into this guide that does not resolve |
+
+The link check downloads the other two repositories; `DOCS_CHECK_OFFLINE=1` checks this one alone and says what it skipped, and `DOCS_CHECK_KAOS_LIB=<folder>` / `DOCS_CHECK_HERA=<folder>` read your own checkouts. One topic has one page: what is true for every pipeline (datasets, checkpoints, checking a step on your computer, kaos-lib versions) is in the [kaos-lib guide](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/index.html), and this guide holds what is specific to yolo. `scripts/docs_check.py` is the same file in kaos-lib and in the hera template: change it in all three.
 
 ## License
 

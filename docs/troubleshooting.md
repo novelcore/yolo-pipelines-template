@@ -84,7 +84,7 @@ The machines are busy, or on HPC (Slurm) the job is queued. The step's status li
 
 ### Training restarted after a machine was reclaimed
 
-By design: the step is run again by the platform, at most twice, and training continues from its last checkpoint (the log says `continuing from the checkpoint saved at ...`). If it starts at epoch 0, no checkpoint had been saved yet. A step that failed by itself is not repeated. More: [When a machine is lost or a time limit hits](resilience.md).
+By design: the step is run again by the platform, at most twice, and training continues from its last checkpoint (the log says `continuing from the checkpoint saved at ...`). If it starts at epoch 0, no checkpoint had been saved yet. A step that failed by itself is not repeated. More: [Long runs: checkpoints](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/checkpoint.html).
 
 ### A step ends with `Idle` or `NoProgress`
 

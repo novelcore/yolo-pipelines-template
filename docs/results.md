@@ -60,6 +60,6 @@ kaosctl dataset pull outputs-<pipeline>@main ./weights --prefix checkpoints/<exp
 ls ./weights        # best.pt  last.pt  ...
 ```
 
-The run's `kaos.outputs_path` tag gives the exact folder; the INT8 `.tflite` of a `ptq` or `qat` run is under `quantization/<experiment>/<run>/`. If a training step is run again, it resumes from the checkpoint the platform kept for it ([details](resilience.md)).
+The run's `kaos.outputs_path` tag gives the exact folder; the INT8 `.tflite` of a `ptq` or `qat` run is under `quantization/<experiment>/<run>/`. If a training step is run again, it resumes from the checkpoint the platform kept for it ([details](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/checkpoint.html)).
 
 Happy with a model? Go to [Promote a model](promote.md).

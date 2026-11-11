@@ -24,7 +24,7 @@ Training, QAT and quantization write through the package's run writer (`lakefs_i
 
 1. `model-training` opens the writer for `outputs-<pipeline>`, experiment, and run
    (the run's id). Training never resumes from this branch: resuming is the platform's checkpoint
-   folder (`KAOS_CHECKPOINT_DIR`), see [When a machine is lost](resilience.md).
+   folder (`KAOS_CHECKPOINT_DIR`), see [Long runs: checkpoints](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/checkpoint.html).
 2. `best.pt`, `last.pt` and exports are saved at the end. Each save is a commit on the run branch only.
 3. `finish` merges the branch into `main`: **one commit**, `checkpoints: <experiment>/<run>`, with
    `dataset_ref`, `dataset_commit` and `mlflow_run_id` in its details, and deletes the branch.

@@ -128,7 +128,7 @@ ENTRYPOINT ["python", "-m", "app.entry"]
 If your step reads datasets or writes run outputs, copy the two `KAOS_LIB_PACKAGE` lines (`ARG ...` and
 `RUN pip install ... "${KAOS_LIB_PACKAGE}"`) from an existing step's Dockerfile, for example
 `steps/model_registration/Dockerfile`, and keep the name `KAOS_LIB_PACKAGE`: the platform fills it in when it
-builds ([docs/kaos-lib-versions.md](docs/kaos-lib-versions.md)).
+builds ([kaos-lib versions](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/support-window.html)).
 
 That's the whole Dockerfile. The platform builds it (kaniko → the registry) and
 wires the resulting image into the workflow as `image-model-evaluation`

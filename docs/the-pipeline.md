@@ -14,6 +14,20 @@ This page has no tasks. It explains the five steps, so the run form makes sense.
 With `quantization-mode` = `none`, the default, steps 3 and 4 show as *skipped*. The pipeline
 trains a model and registers it. That is the simple path.
 
+## When a step is run again
+
+A step whose machine is lost, or whose HPC (Slurm) time limit is reached, is run again by the platform and continues
+from its checkpoint. How that works, the settings and the log messages are in the kaos-lib guide:
+[Long runs: checkpoints](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/checkpoint.html). What each step of this pipeline keeps:
+
+| step | kept | when it is run again |
+|---|---|---|
+| `model-training` | `last.pt` at the end of each epoch, and `best.pt` once one exists | training continues with the same total epochs, in the same MLflow run; `best.pt` is put back, so the best checkpoint is never lost. If the run still ends with no `best.pt`, `last.pt` is handed to the next steps; a run with no weights at all fails |
+| `qat-finetune` | the model, the optimizer and the number of finished epochs, at the end of each epoch | the fine-tune continues from the last finished epoch, with the same total epochs, in the same MLflow run |
+| `model-quantization` | nothing: it is one short export | it simply runs again |
+
+`qat-finetune` and `model-quantization` refuse an empty or unloadable checkpoint with a message that says so.
+
 ## Where it all goes
 
 - **Weights and exports:** `outputs-<pipeline>` in lakeFS, under `checkpoints/<experiment>/<run>/`
