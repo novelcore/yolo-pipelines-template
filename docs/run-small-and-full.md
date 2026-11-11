@@ -6,7 +6,7 @@
 
 ## The run form
 
-1. **Do:** console → **Pipelines** → your pipeline → **Run** (or in Argo: **Workflow Templates** → `<pipeline>-pipeline` → **Submit**).
+1. **Do:** console → **Pipelines** → your pipeline → **Run**.
 
     **You should see:** a form with many fields. Every field has a default; you only have to set `dataset`. [All the fields](parameters.md) are listed with their allowed values.
 
@@ -39,7 +39,7 @@ If `config-validation` turns red, its log names the field to fix ([Troubleshooti
 
 3. **Do:** submit again with the real settings: `experiment-name` = `spacecraft-pose`, the same `dataset`, `model` = `yolov8s` or `yolov11x` for more accuracy, `train-epochs` = `100`, and no `data-sample_size`. Several runs can go at once.
 
-    **You should see:** the same boxes, training for hours rather than minutes. The run keeps going if you close the tab. If a training machine is reclaimed, the platform runs the step again and training continues from its last checkpoint instead of starting over ([details](resilience.md)).
+    **You should see:** the same boxes, training for hours rather than minutes. The run keeps going if you close the tab. If a training machine is reclaimed, the platform runs the step again and training continues from its last checkpoint instead of starting over ([details](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/checkpoint.html)).
 
 ## Smaller INT8 model: PTQ or QAT
 

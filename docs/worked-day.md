@@ -26,7 +26,7 @@
 
 5. **Train A:** **Run** → `experiment-name` = `spacecraft-pose`, `dataset` = `dataset-spacecraft@v1`, `model` = `yolov8n`, `train-epochs` = `50` → **Submit**.
 6. **Train B:** the same with `train-epochs` = `100`. Or release other data as `v2` and pick `dataset-spacecraft@v2`. Both runs can go at once.
-7. **Watch** them in Argo. **You should see** `qat-finetune` and `model-quantization` *skipped*, which is normal ([Watch it train](watch-it.md)).
+7. **Watch** them on the run page. **You should see** `qat-finetune` and `model-quantization` *skipped*, which is normal ([Watch it train](watch-it.md)).
 
 Keep the same `experiment-name` for runs you want to compare: they then sit in one MLflow experiment, and their weights sit side by side under `checkpoints/spacecraft-pose/`.
 

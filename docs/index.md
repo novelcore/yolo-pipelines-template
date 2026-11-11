@@ -37,4 +37,4 @@ graph LR
 
 ## Reference
 
-[Datasets](datasets.md), [kaos-lib versions](kaos-lib-versions.md), [Word list](glossary.md), and, optional, [how the steps read data and write results](datasets-in-the-steps.md). To change the steps themselves, follow the [hera cookbook](https://novelcore.github.io/hera-pipeline-template/).
+[Datasets](datasets.md), [kaos-lib versions](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/support-window.html), [Word list](glossary.md), and, optional, [how the steps read data and write results](datasets-in-the-steps.md). To change the steps themselves, follow the [hera cookbook](https://novelcore.github.io/hera-pipeline-template/).

@@ -178,7 +178,7 @@ Per step:
 - **`disk="20Gi"`** — more scratch disk for the step (a Kubernetes size).
 - **`hpc_time_limit="12h"`** — the HPC (Slurm) time limit, GPU steps only (§8.1).
 - **`resumable=`**, **`checkpoint_every=`**, **`idle_timeout=`** — optional
-  resilience settings, see §8.1 and `docs/resilience.md`.
+  resilience settings, see §8.1 and [Long runs: checkpoints](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/checkpoint.html).
 
 ---
 
@@ -325,7 +325,7 @@ shorten it.
 Resilience needs nothing in `pipeline.py` or in the steps: every step gets `KAOS_CHECKPOINT_DIR`, a lost step is run
 again (at most twice, never for its own failure), and `kaos_lib` hooks Ultralytics so training saves into that folder
 and resumes from it (`best.pt` included). The platform keeps the folder safe and restores it. Optional step
-settings, all in `docs/resilience.md`:
+settings, all in [Long runs: checkpoints](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/checkpoint.html):
 
 | setting | meaning |
 |---|---|

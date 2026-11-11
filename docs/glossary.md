@@ -2,8 +2,6 @@
 
 Plain meanings for the words in this guide. One sentence each. Come back any time.
 
-**Argo Workflows.** The tool that runs your pipeline on real machines and shows each step. The console's **Pipelines** page links to it.
-
 **Artifact.** A file a run produces, such as the trained model or an example output.
 
 **Dataset.** Your images and their labels, in the yolo layout, stored in lakeFS as the repository `dataset-<name>`. Its versions are tags (`v1`, `v2`, ...); you pick one in the form's `dataset` field, for example `dataset-spacecraft@v1`.

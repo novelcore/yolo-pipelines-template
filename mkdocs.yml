@@ -89,11 +89,9 @@ nav:
       - "5. Results, weights and models": results.md
       - "6. Use a shared dataset": shared-dataset.md
       - "7. Run on HPC (Slurm)": slurm.md
-      - "8. When a machine is lost": resilience.md
       - A day with yolo: worked-day.md
   - More on the pipeline:
       - What the pipeline does: the-pipeline.md
-      - Check and try a step on your computer: check-and-try-locally.md
       - Watch it train: watch-it.md
       - Promote a model: promote.md
       - Datasets: datasets.md
@@ -102,8 +100,13 @@ nav:
   - Help:
       - When something breaks: troubleshooting.md
       - Word list: glossary.md
-      - kaos-lib versions: kaos-lib-versions.md
-  - kaos-lib reference: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/index.html
+  - kaos-lib guide:   # what is true for every pipeline is explained once, there
+      - Datasets: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/datasets.html
+      - Check your pipeline: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/lint.html
+      - Run a step locally: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/step-run.html
+      - Long runs and checkpoints: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/checkpoint.html
+      - Versions and upgrades: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/support-window.html
+      - Everything else: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/index.html
   - Cookbook (hera): https://novelcore.github.io/hera-pipeline-template/
 
 copyright: "Copyright &copy; 2026 Novelcore"

@@ -43,7 +43,7 @@ config-validation → model-training → qat-finetune → model-quantization →
 Long trainings are not lost: a step on a reclaimed machine, a failed node or an HPC (Slurm) time limit is run again
 by the platform and training continues from its last checkpoint, with nothing to call. A step that is longer than
 the longest HPC run is continued in capped runs when it is resumable, and refused before it is sent otherwise
-([When a machine is lost or a time limit hits](docs/resilience.md)).
+([Long runs: checkpoints](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/checkpoint.html)).
 
 ## For people changing the template
 
@@ -59,6 +59,18 @@ docs/                  the guide (mkdocs)
 Your pipeline is `pipeline.py`, `config/` and `steps/`; it holds no copy of the platform's pipeline engine. On your computer, `kaosctl render --context pipeline-context.yaml` renders the pipeline with the same engine the platform uses, `kaosctl dev` sets up each step's Python environment and `kaosctl step run <step>` runs one step ([Check and try a step](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/step-run.html)).
 
 [ADD-A-STEP.md](ADD-A-STEP.md), [DEVELOPER.md](DEVELOPER.md). Check the guide before a pull request: `scripts/check-docs.sh`. `docs/parameters.md` is generated: `python scripts/gen-parameters.py`.
+
+`scripts/check-docs.sh` is for the maintainers of the template. Before the strict build it runs three checks:
+
+| check | fails on |
+|---|---|
+| words | a page that names what the platform is built from: the guide is for people who use the platform |
+| removed names | a step or a folder that no longer exists |
+| links | a link that does not resolve in this guide, in the kaos-lib guide or in the hera guide, and a link from those two into this guide that does not resolve |
+
+The checks are kaos-lib's `docs_check.py`; this repository holds no copy. The script downloads kaos-lib and the hera template at their trunk, and stops with a message when a download fails. `DOCS_CHECK_KAOS_LIB=<folder>` and `DOCS_CHECK_HERA=<folder>` read your own checkouts; `DOCS_CHECK_OFFLINE=1` checks this repository alone and prints what it skipped. In a pipeline created from this template the script checks nothing: it says so and ends.
+
+One topic has one page: what is true for every pipeline (datasets, checkpoints, checking a step on your computer, kaos-lib versions) is in the [kaos-lib guide](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/index.html), and this guide holds what is specific to yolo.
 
 ## License
 
