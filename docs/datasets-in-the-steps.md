@@ -8,9 +8,8 @@ only its own `app/`.
 
 | step | what it does with the dataset |
 |---|---|
-| `config-validation` | parses the pick with `DatasetRef.parse`, resolves it (`datasets.resolve`) and checks the commit has a `data.yaml`; says which versions exist when the pick is wrong |
-| `dataset-loading` | resolves the pick **once** to a commit, and outputs it in `manifest-summary` as `dataset_commit` (and `data-yaml`) |
-| `model-training` | for your own dataset in the cluster, streams images and labels from the project's lakeFS S3 gateway at that commit (no full copy); for a **shared** dataset (`<owner>/dataset-x@v1`, which lives in the owner's lakeFS) and on Slurm, materializes the data locally first through the package (`lakefs_io.materialize`) |
+| `config-validation` | does not read the dataset |
+| `model-training` | at its start resolves the pick with `datasets.resolve`, which returns the one commit the platform pinned for the run (the run's data lock, `KAOS_LIB_LOCK`), and reads the dataset's `data.yaml` at that commit. For your own dataset in the cluster, streams images and labels from the project's lakeFS S3 gateway at that commit (no full copy); for a **shared** dataset (`<owner>/dataset-x@v1`, which lives in the owner's lakeFS) and on Slurm, materializes the data locally first through the package (`lakefs_io.materialize`) |
 | `qat-finetune`, `model-quantization` | read the dataset as local files for calibration and parity, with `lakefs_io.materialize(dataset_ref, dataset_commit, dest)`, using the `dataset_ref` and `dataset_commit` that training recorded in `training-result` |
 
 `lakefs_io.materialize` is `datasets.materialize` with the ref pinned to the commit
@@ -69,6 +68,5 @@ warning. `last.pt` is registered from its lakeFS path, without a tag. A run with
 
 - Keep `lakefs_io.py` identical in the three steps that have it (a test checks it): each image
   carries only its own `app/`.
-- Never copy the repository's `kubecore/` folder into a step image: it is the build engine the platform seeds into your repository, not the library the steps use (that is `kaos_lib`).
-- Step tests live in `step_tests/` and run with the `pytest` command with the package installed
+- Step tests live in `step_tests/` and run with `python -m pytest` with the package installed
   (DEVELOPER.md §15).

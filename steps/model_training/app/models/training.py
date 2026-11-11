@@ -219,7 +219,7 @@ class TrainingParams(BaseModel):
     )
     lakefs_commit: Optional[str] = Field(
         default=None,
-        description="LakeFS commit the dataset version resolved to (pinned by dataset-loading).",
+        description="LakeFS commit the dataset version resolved to (pinned for the run).",
     )
     config_hash: Optional[str] = Field(
         default=None,

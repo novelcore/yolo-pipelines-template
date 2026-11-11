@@ -3,7 +3,7 @@
 Three jobs, one place, and the file is IDENTICAL in model-training, qat-finetune and
 model-quantization (each step image carries only its own app/):
 
-- ``materialize``: the run's dataset at the commit dataset-loading pinned, as local files
+- ``materialize``: the run's dataset at the commit the run pinned, as local files
   (the package's yolo consumer: one download, or the copy staged on HPC via
   ``KUBECORE_STAGED_DIR``). data.yaml comes back with ``path:`` already pointing at it.
 - ``download_object``: one object of ``s3://<repo>/<ref>/<path>`` (a checkpoint, the qat tflite).

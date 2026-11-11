@@ -1,6 +1,6 @@
 # model-training
 
-Trains the YOLO pose model (YOLOv8 / YOLOv11) on the dataset commit that `dataset-loading` pinned.
+Trains the YOLO pose model (YOLOv8 / YOLOv11) on the dataset commit the platform pinned for the run (kaos-lib's data lock). It builds the dataset location itself at its start: the dataset repository, the commit as prefix, and the dataset's `data.yaml` read at that commit.
 
 - **Runs on:** a GPU (`gpu=True` in `pipeline.py`); on HPC (Slurm) when `model-training-class` is an HPC class.
 - **Reads:** the form sections `experiment`, `dataset`, `data`, `model`, `train`, `image_processing`, `logging`. Own datasets stream from the project's lakeFS S3 gateway; shared datasets and Slurm runs are materialized locally first.

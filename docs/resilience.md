@@ -79,7 +79,7 @@ none of this happens.
 Set them on the step in `pipeline.py`:
 
 ```python
-train = step("model-training", gpu=True, needs=[load],
+train = step("model-training", gpu=True, needs=[validate],
              hpc_time_limit="12h",       # HPC (Slurm) time limit for this step
              checkpoint_every="20m",     # copy the checkpoint folder every 20 minutes (default: 10, adapts to size)
              idle_timeout="40m")         # raise the 20-minute idle rule; 0 turns it off

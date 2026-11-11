@@ -29,7 +29,7 @@
 
     Then **Submit**.
 
-    **You should see:** a live view of your run as boxes: `config-validation` and `dataset-loading` finish in seconds, `model-training` is the long one, `model-registration` ends it. `qat-finetune` and `model-quantization` show as *skipped*, which is normal ([Watch it train](watch-it.md)).
+    **You should see:** a live view of your run as boxes: `config-validation` finishes in seconds, `model-training` is the long one, `model-registration` ends it. `qat-finetune` and `model-quantization` show as *skipped*, which is normal ([Watch it train](watch-it.md)).
 
     ![The key fields set](img/form-fields.png)
 

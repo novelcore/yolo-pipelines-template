@@ -171,8 +171,7 @@ class S3YoloDataset(_UltralyticsYOLODataset):  # type: ignore[misc]
         is fetched from S3 in ``cache_labels()``.
 
         Otherwise returns the path ``<local_labels_root>/<split>/<stem>.txt``
-        for each image URI, which is where ``dataset_loading`` placed the
-        label files.
+        for each image URI, which is where the label files are placed.
         """
         label_paths: list[str] = []
         for uri in img_paths:

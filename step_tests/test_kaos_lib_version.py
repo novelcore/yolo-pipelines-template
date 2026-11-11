@@ -14,9 +14,8 @@ import yaml
 from conftest import ROOT, import_in
 from test_models_linked import LINKED, FakeMlflow, _install, _merged_commit, _register
 
-PACKAGE_STEPS = ["config_validation", "dataset_loading", "model_quantization", "model_registration",
+PACKAGE_STEPS = ["config_validation", "model_quantization", "model_registration",
                  "model_training", "qat_finetune"]
-NO_PACKAGE = ["compose_and_validate", "data_summary"]  # the vendored engine / PyYAML only
 # The ARG holds the whole requirement: name[extras] then ==X.Y.Z or " @ <url>".
 SPEC_RE = re.compile(r'^ARG KAOS_LIB_PACKAGE="([A-Za-z0-9._-]+(?:\[[A-Za-z0-9,._-]+\])?(?: ?==\S+| @ https://\S+))"$', re.M)
 INSTALLED = version("kaos-lib")  # the installed package, as the step images pin it
@@ -29,11 +28,6 @@ def test_every_package_step_takes_the_platform_spec(step):
     assert 'RUN pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"' in text
     assert SPEC_RE.search(text).group(1).startswith("kaos-lib[zitadel] @ "), "the default names the package and its extras"
     assert "KUBECORE_PKG_COMMIT" not in text
-
-
-@pytest.mark.parametrize("step", NO_PACKAGE)
-def test_steps_without_the_package_take_no_spec(step):
-    assert "KAOS_LIB_PACKAGE" not in (ROOT / "steps" / step / "Dockerfile").read_text()
 
 
 def test_every_step_installs_the_same_default():

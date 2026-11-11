@@ -5,12 +5,11 @@ The steps import **kaos-lib** (`kaos_lib`: datasets, run outputs), the platform 
 (`KAOS_LIB_PACKAGE` in the step Dockerfiles), then run:
 
 ```bash
-python -m pytest tests                                         # engine (vendored kubecore/)
 pip install "$(sed -n 's/^ARG KAOS_LIB_PACKAGE="\(.*\)"$/\1/p' steps/*/Dockerfile | head -1)" \
     pytest boto3 psutil pydantic pydantic-settings mlflow-skinny
-pytest step_tests                                              # step code
+python -m pytest
 ```
 
 `fake_lakefs.py` is kaos-lib's in-memory lakeFS (`tests/fake_lakefs.py` there), vendored at the same pin.
-Keep the two runs apart: kaos-lib still ships a deprecated `kubecore` import shim for one release, and the
-engine tests must import the vendored `kubecore/` engine, not that shim.
+`test_repo_layout.py` fails if `kubecore/` or `steps/compose_and_validate/` comes back: the platform runs its own
+pipeline engine, so an app holds only `pipeline.py`, `config/` and `steps/`.

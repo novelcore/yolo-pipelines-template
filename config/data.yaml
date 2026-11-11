@@ -1,5 +1,4 @@
 data:
   source: "lakefs" # 'lakefs' or 's3'
-  path_override: "" # optional s3:// override; empty = use the picked dataset
   sample_size: "" # integer sample size for reproducible subsets; empty = full dataset
   seed: 42 # random seed for reproducible dataset sampling

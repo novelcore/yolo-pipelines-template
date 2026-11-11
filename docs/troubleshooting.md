@@ -44,17 +44,21 @@ The dataset belongs to another project that has not shared it with yours. Ask it
 
 The name is wrong, or the dataset is in another project: check `kaosctl dataset list` and `kaosctl dataset list --shared`.
 
-## Stops at the first step (`config-validation`)
+## Stops on the dataset you picked
 
-This step checks your form before any training time is spent; its message names what to fix.
+The platform pins the dataset you picked to one commit when the run starts, and `model-training` reads it first thing; the message names what to fix.
 
 ### `dataset ... has no data.yaml at the root of its repository - a valid yolo dataset has data.yaml, images/ and labels/.`
 
 The version you picked has no data: usually the form's default `dataset-default@latest`, which is empty in a new project. Pick your own released version ([step 2](release-a-version.md)). Also check in lakeFS that your pull request was merged and `data.yaml`, `images` and `labels` are at the root.
 
-### `dataset dataset-spacecraft@v3: dataset-spacecraft has no version v3. Available: v1, v2.`
+### `dataset-spacecraft has no version v3. Available: v1, v2.`
 
 That version does not exist. Pick one it lists, or release a new one. A version you just released can take about a minute to reach the dropdown.
+
+## Stops at the first step (`config-validation`)
+
+This step checks your form before any training time is spent; its message names what to fix.
 
 ### `pretrained weights not found: s3://...` or `model.pretrained_weights must be null or an s3:// path`
 

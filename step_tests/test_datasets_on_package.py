@@ -1,9 +1,9 @@
 """PRD novelcore/kaos#1283 F-07 / F-14: the steps read datasets and write results through kaos-lib (kaos_lib).
 
-A run picks `<dataset-repo>@<version>`; dataset-loading resolves it to ONE commit; training, qat and
-quantization read that commit (consumer) and write to `outputs-<app>` (write_run).
+A run picks `<dataset-repo>@<version>`; the platform pins it to ONE commit (the data lock); training builds its
+dataset location from that commit, and training, qat and quantization read it (consumer) and write to
+`outputs-<app>` (write_run).
 """
-import importlib
 import json
 import re
 from pathlib import Path
@@ -19,172 +19,88 @@ MALFORMED = ["", "dataset-default", "dataset-default@", "@latest", "dataset-Cats
              "dataset-cats@latest@v1", "dataset-cats @v1"]
 
 
-# ---------------------------------------------------------------- dataset-loading
+# ---------------------------------------------------------------- training builds its dataset location
 
-def test_should_pin_latest_to_the_head_of_main_and_a_version_to_its_tag(client, fake):
-    entry = import_in("dataset_loading", "app.entry")
-    cfg = {"data": {"source": "lakefs"}}
-    head = fake.head("dataset-cats")
-    p = entry._resolve_dataset_params({**cfg, "dataset": "dataset-cats@latest"}, client)
-    assert (p["lakefs_repo"], p["lakefs_ref"], p["version"]) == ("dataset-cats", head, "dataset-cats@latest")
-    p = entry._resolve_dataset_params({**cfg, "dataset": "dataset-cats@v1"}, client)
-    assert p["lakefs_ref"] == head, "v1 is a tag on that commit"
+def _lock(commit, repo="dataset-cats", ref="latest"):
+    return json.dumps({"version": 1, "reads": [{"repo": repo, "ref": ref, "commit": commit}]})
 
 
-def test_should_stop_the_run_when_the_version_does_not_exist(client):
-    entry = import_in("dataset_loading", "app.entry")
+def _move_latest(fake):
+    """Someone merges a new dataset version: `latest` now points at a commit with another data.yaml."""
+    r = fake.repos["dataset-cats"]
+    old = r["branches"]["main"]["commit"]
+    moved = dict(r["commits"][old])
+    moved["data.yaml"] = b"path: .\ntrain: images/train\nval: images/val\nnc: 2\nnames:\n  0: a\n  1: b\n"
+    r["commits"][NEW] = moved
+    r["branches"]["main"]["commit"] = NEW
+    return old
+
+
+NEW = "b" * 40
+
+
+def test_training_builds_its_dataset_location_from_the_lock_even_when_latest_moves(fake, client, monkeypatch):
+    entry = import_in("model_training", "app.entry")
+    locked = _move_latest(fake)
+    monkeypatch.setenv("KAOS_LIB_LOCK", _lock(locked))
+    loc = entry._dataset_location({"dataset": "dataset-cats@latest"}, client)
+    assert loc == {"bucket": "dataset-cats", "prefix": f"{locked}/", "dataset_commit": locked,
+                   "ref": "dataset-cats@latest", "repo": "dataset-cats", "version": "latest", "shared": False}
+    assert entry._dataset_yaml("dataset-cats", locked, client) == DATA_YAML.decode(), "data.yaml of the locked commit"
+
+
+def test_training_reads_the_head_of_the_pick_when_the_run_has_no_lock(fake, client):
+    entry = import_in("model_training", "app.entry")
+    first = _move_latest(fake)
+    loc = entry._dataset_location({"dataset": "dataset-cats@latest"}, client)
+    assert loc["dataset_commit"] == NEW and loc["prefix"] == NEW + "/"
+    assert "nc: 2" in entry._dataset_yaml("dataset-cats", NEW, client)
+    loc = entry._dataset_location({"dataset": "dataset-cats@v1"}, client)
+    assert loc["dataset_commit"] == first, "v1 is a tag on the first commit"
+
+
+def test_training_stops_when_the_version_does_not_exist(client):
+    entry = import_in("model_training", "app.entry")
     with pytest.raises(DatasetError, match="no version v7.*Available: v1"):
-        entry._resolve_dataset_params({"dataset": "dataset-cats@v7", "data": {"source": "lakefs"}}, client)
+        entry._dataset_location({"dataset": "dataset-cats@v7"}, client)
     with pytest.raises(DatasetError, match="does not exist"):
-        entry._resolve_dataset_params({"dataset": "dataset-dogs@v1", "data": {"source": "lakefs"}}, client)
+        entry._dataset_location({"dataset": "dataset-dogs@v1"}, client)
 
 
 @pytest.mark.parametrize("value", MALFORMED)
-def test_should_refuse_a_malformed_dataset_with_a_clear_message(client, value):
-    entry = import_in("dataset_loading", "app.entry")
+def test_training_refuses_a_malformed_dataset_with_a_clear_message(client, value):
+    entry = import_in("model_training", "app.entry")
     with pytest.raises(DatasetError):
-        entry._resolve_dataset_params({"dataset": value, "data": {"source": "lakefs"}}, client)
+        entry._dataset_location({"dataset": value}, client)
 
 
-def test_should_not_resolve_a_commit_for_an_s3_override(client):
-    entry = import_in("dataset_loading", "app.entry")
-    p = entry._resolve_dataset_params(
-        {"dataset": "dataset-cats@latest", "data": {"source": "lakefs", "path_override": "s3://b/p/"}}, client)
-    assert "lakefs_ref" not in p and p["path_override"] == "s3://b/p/"
+def test_training_refuses_an_s3_path_override_instead_of_ignoring_it(client):
+    entry = import_in("model_training", "app.entry")
+    with pytest.raises(SystemExit, match="path_override is not read any more"):
+        entry._dataset_location({"dataset": "dataset-cats@v1", "data": {"path_override": "s3://b/p/"}}, client)
+    entry._dataset_location({"dataset": "dataset-cats@v1", "data": {"path_override": ""}}, client)
 
 
-def test_should_emit_dataset_and_the_commit_every_later_step_reads(tmp_path, monkeypatch):
-    entry = import_in("dataset_loading", "app.entry")
-    monkeypatch.setattr(entry, "DATASET_DIR", str(tmp_path))
-    monkeypatch.setattr(entry, "OUTPUT_DIR", tmp_path / "out")
-    (tmp_path / "data.yaml").write_text("kpt_shape: [4, 3]\n")
-    (tmp_path / "dataset_manifest.json").write_text(json.dumps(
-        {"bucket": "dataset-cats", "prefix": "c0ffee/", "label_keys": {"train": ["x"]}, "lakefs_commit": "c0ffee"}))
-    entry._write_outputs({"dataset": "dataset-cats@v2"})
-    summary = json.loads((tmp_path / "out" / "manifest-summary.json").read_text())
-    assert summary == {"bucket": "dataset-cats", "prefix": "c0ffee/", "label_keys": {"_present": True},
-                       "ref": "dataset-cats@v2", "repo": "dataset-cats", "version": "v2",
-                       "dataset_commit": "c0ffee"}
-
-
-class _S3:
-    """head_object over a fixed key set (the lakeFS S3 gateway: bucket = repository)."""
-
-    def __init__(self, keys):
-        self.keys = set(keys)
-
-    def head_object(self, Bucket, Key):
-        if f"{Bucket}/{Key}" not in self.keys:
-            raise KeyError(Key)
-        return {}
-
-
-def _loading_service():
-    mod = import_in("dataset_loading", "app.services.dataset_loading")
-    svc = mod.DatasetLoadingService.__new__(mod.DatasetLoadingService)
-    svc._logger = mod.logging.getLogger("test")
-    return mod, svc
-
-
-def _resolve_source(keys, commit="c0ffee"):
-    with step_app("dataset_loading"):
-        models = import_in("dataset_loading", "app.models.dataset")
-        _, svc = _loading_service()
-        svc._s3 = _S3(keys)
-        params = models.YoloDatasetParams(version="dataset-cats@latest", source="lakefs", output_dir="/tmp/x",
-                                          lakefs_repo="dataset-cats", lakefs_ref=commit)
-        return svc._resolve_source(params, commit)
-
-
-def test_should_read_the_pinned_commit_at_the_repository_root():
-    assert _resolve_source({"dataset-cats/c0ffee/data.yaml"}) == ("dataset-cats", "c0ffee/")
-
-
-@pytest.mark.parametrize("keys", [
-    set(),
-    {"dataset-cats/c0ffee/dataset/data.yaml"},         # the old {ref}/dataset/ layout is not read any more
-    {"dataset-cats/c0ffee/dataset/cats/data.yaml"},
-    {"dataset-cats/c0ffee/images/train/a.jpg"},         # no data.yaml
-])
-def test_should_have_no_legacy_layout_fallback(keys):
-    with pytest.raises(Exception, match="no data.yaml at s3://dataset-cats/c0ffee/") as exc:
-        _resolve_source(keys)
-    assert type(exc.value).__name__ == "DatasetLoadingError"
-
-
-def test_dataset_loading_has_no_lakefs_commit_lookup_of_its_own():
-    src = (ROOT / "steps/dataset_loading/app/services/dataset_loading.py").read_text()
-    assert "_fetch_lakefs_commit" not in src and "import requests" not in src
-
-
-# ---------------------------------------------------------------- config-validation
-
-def _validation():
-    mod = import_in("config_validation", "app.services.config_validation")
-    return mod, mod.ConfigValidationService()
-
-
-def test_should_accept_a_dataset_version_with_data_yaml(client):
-    mod, svc = _validation()
-    from kaos_lib import datasets
-    svc._check_dataset(datasets.DatasetRef.parse("dataset-cats@v1"), client)
-    svc._check_dataset(datasets.DatasetRef.parse("dataset-cats@latest"), client)
-
-
-def test_should_say_which_versions_exist(client):
-    mod, svc = _validation()
-    from kaos_lib import datasets
-    with pytest.raises(mod.ConfigValidationError, match="no version v9.*Available: v1"):
-        svc._check_dataset(datasets.DatasetRef.parse("dataset-cats@v9"), client)
-    with pytest.raises(mod.ConfigValidationError, match="does not exist"):
-        svc._check_dataset(datasets.DatasetRef.parse("dataset-dogs@v1"), client)
-
-
-def test_should_refuse_a_dataset_without_data_yaml(fake, client):
-    mod, svc = _validation()
-    from kaos_lib import datasets
+def test_training_stops_on_a_dataset_without_data_yaml(fake, client):
+    entry = import_in("model_training", "app.entry")
     fake.add_repo("dataset-empty", files={"README.md": b"x"})
-    fake.tag("dataset-empty", "v1")
-    with pytest.raises(mod.ConfigValidationError, match="has no data.yaml"):
-        svc._check_dataset(datasets.DatasetRef.parse("dataset-empty@v1"), client)
+    with pytest.raises(SystemExit, match="has no data.yaml"):
+        entry._dataset_yaml("dataset-empty", fake.head("dataset-empty"), client)
 
 
-def _shared_world(monkeypatch, owner_has_yaml=True):
-    """A consumer lakeFS WITHOUT the dataset and an owner lakeFS WITH it; `datasets.source` routes a
-    ref carrying an owner to the owner's client, as kaos-lib does through the peers."""
-    from fake_lakefs import FakeLakeFS
-    from kaos_lib import datasets
-    consumer, owner = FakeLakeFS(), FakeLakeFS()
-    owner.add_repo("dataset-x", files={"data.yaml": DATA_YAML} if owner_has_yaml else {"README.md": b"x"})
-    owner.tag("dataset-x", "v1")
-    owner_client = owner.client()
-    monkeypatch.setattr(datasets, "source", lambda ref, client=None: (
-        (ref, owner_client) if ref.owner else (ref, client)))
-    return consumer.client()
+def test_training_marks_a_shared_dataset(monkeypatch):
+    """A dataset another project shares: training materializes it through kaos-lib instead of streaming bucket/prefix."""
+    entry = import_in("model_training", "app.entry")
+    _, owner, owner_client = _owner_world(monkeypatch)
+    loc = entry._dataset_location({"dataset": "acme/dataset-x@v1"})
+    assert loc["shared"] is True and loc["ref"] == "acme/dataset-x@v1"
+    assert loc["bucket"] == "dataset-x" and loc["dataset_commit"] == owner.head("dataset-x")
 
 
-def test_should_read_a_shared_dataset_from_the_owners_lakefs(monkeypatch):
-    mod, svc = _validation()
-    from kaos_lib import datasets
-    consumer = _shared_world(monkeypatch)
-    svc._check_dataset(datasets.DatasetRef.parse("acme/dataset-x@v1"), consumer)
-
-
-def test_should_refuse_a_shared_dataset_without_data_yaml_on_the_owners_lakefs(monkeypatch):
-    mod, svc = _validation()
-    from kaos_lib import datasets
-    consumer = _shared_world(monkeypatch, owner_has_yaml=False)
-    with pytest.raises(mod.ConfigValidationError, match="has no data.yaml"):
-        svc._check_dataset(datasets.DatasetRef.parse("acme/dataset-x@v1"), consumer)
-
-
-@pytest.mark.parametrize("value", MALFORMED)
-def test_should_reject_a_malformed_dataset_even_without_credentials(monkeypatch, value):
-    mod, svc = _validation()
-    for var in ("LAKEFS_ENDPOINT", "MLFLOW_TRACKING_URI"):
-        monkeypatch.delenv(var, raising=False)
-    with pytest.raises(mod.ConfigValidationError):
-        svc.run({"dataset": value, "data": {}, "model": {}, "platform": {}})
+def test_no_step_reads_what_dataset_loading_used_to_hand_over():
+    for step in ("model_training", "qat_finetune", "model_quantization", "model_registration"):
+        src = (ROOT / "steps" / step / "app" / "entry.py").read_text()
+        assert "--manifest-summary" not in src and "--data-yaml" not in src and "--dataset-info" not in src, step
 
 
 # ---------------------------------------------------------------- one pinned read for qat / quantization / MeluXina
@@ -263,14 +179,6 @@ def test_training_uses_the_consumer_only_when_a_copy_is_staged(monkeypatch):
     assert entry._staged() is False
     monkeypatch.setenv("KUBECORE_STAGED_DIR", "/kubecore/dataset")
     assert entry._staged() is True
-
-
-def test_training_location_is_the_pinned_manifest_summary():
-    entry = import_in("model_training", "app.entry")
-    summary = {"bucket": "dataset-cats", "prefix": "c0ffee/", "dataset_commit": "c0ffee", "ref": "dataset-cats@v2"}
-    assert entry._dataset_location(summary) == ("dataset-cats", "c0ffee/", "c0ffee")
-    with pytest.raises(SystemExit, match="no pinned dataset commit"):  # never guess a location
-        entry._dataset_location({})
 
 
 # ---------------------------------------------------------------- results: outputs-<app>, main, one commit
@@ -416,7 +324,7 @@ def test_training_provenance_logs_dataset_repo_version_and_commit():
 
 def test_step_images_install_kaos_lib_and_not_the_vendored_engine():
     specs = set()
-    for step in ("dataset_loading", "config_validation", "model_training", "qat_finetune", "model_quantization",
+    for step in ("config_validation", "model_training", "qat_finetune", "model_quantization",
                  "model_registration"):
         text = (ROOT / "steps" / step / "Dockerfile").read_text()
         assert 'pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"' in text, step   # the WHOLE requirement
@@ -427,19 +335,7 @@ def test_step_images_install_kaos_lib_and_not_the_vendored_engine():
     assert re.fullmatch(r'"kaos-lib\[zitadel\] @ https://github\.com/kaos-io/kaos-lib/archive/[0-9a-f]{40}\.zip"', spec), spec
 
 
-def test_should_pin_a_branch_pick_to_its_commit_too(client, fake):
-    entry = import_in("dataset_loading", "app.entry")
-    p = entry._resolve_dataset_params({"dataset": "dataset-cats@main", "data": {"source": "lakefs"}}, client)
-    assert p["lakefs_ref"] == fake.head("dataset-cats"), "a moving branch is resolved once, to a commit"
-
-
-# ---------------------------------------------------------------- shared datasets: dataset-loading -> training
-
-class _NoGateway:
-    """The consumer's S3 gateway: the shared dataset is not there, and any call is a failure."""
-    def __getattr__(self, name):
-        raise AssertionError(f"consumer S3 gateway used: {name}")
-
+# ---------------------------------------------------------------- shared datasets: training
 
 POSE_YAML = b"path: .\ntrain: images/train\nval: images/val\nnc: 1\nnames:\n  0: ship\nkpt_shape: [1, 3]\n"
 POSE_LABEL = b"0 0.5 0.5 0.1 0.1 0.5 0.5 2\n"
@@ -458,80 +354,6 @@ def _owner_world(monkeypatch):
     monkeypatch.setattr(datasets, "source", lambda ref, client=None: (
         (ref, owner_client) if ref.owner else (ref, client or consumer.client())))
     return consumer, owner, owner_client
-
-
-def test_should_serve_list_head_and_download_from_the_owners_lakefs(monkeypatch, tmp_path):
-    _, owner, oc = _owner_world(monkeypatch)
-    objects = import_in("dataset_loading", "app.services.owner_objects").OwnerObjects(oc)
-    commit = owner.head("dataset-x")
-    keys = [o["Key"] for page in objects.get_paginator("list_objects_v2").paginate(
-        Bucket="dataset-x", Prefix=f"{commit}/") for o in page["Contents"]]
-    assert sorted(keys) == [f"{commit}/{p}" for p in (
-        "data.yaml", "images/train/a.jpg", "images/val/b.jpg", "labels/train/a.txt", "labels/val/b.txt")]
-    objects.head_object(Bucket="dataset-x", Key=f"{commit}/data.yaml")
-    with pytest.raises(Exception):
-        objects.head_object(Bucket="dataset-x", Key=f"{commit}/missing.yaml")
-    objects.download_file("dataset-x", f"{commit}/labels/train/a.txt", str(tmp_path / "x" / "a.txt"))
-    assert (tmp_path / "x" / "a.txt").read_bytes() == POSE_LABEL
-
-
-def test_should_load_a_shared_dataset_without_the_consumers_s3_gateway(monkeypatch, tmp_path):
-    _, owner, oc = _owner_world(monkeypatch)
-    entry = import_in("dataset_loading", "app.entry")
-    with step_app("dataset_loading"):
-        svc_mod = importlib.import_module("app.services.dataset_loading")
-        models = importlib.import_module("app.models.dataset")
-    cfg = {"dataset": "acme/dataset-x@v1", "data": {"source": "lakefs"}}
-    objects = entry._owner_objects(cfg)
-    assert objects is not None
-    params = entry._resolve_dataset_params(cfg)
-    assert params["lakefs_ref"] == owner.head("dataset-x")
-    params["output_dir"] = str(tmp_path / "out")
-    svc = svc_mod.DatasetLoadingService(s3_client=objects)
-    svc.run(models.YoloDatasetParams(**params))
-    assert yaml.safe_load((tmp_path / "out" / "data.yaml").read_text())["kpt_shape"] == [1, 3]
-    manifest = json.loads((tmp_path / "out" / "dataset_manifest.json").read_text())
-    assert manifest["bucket"] == "dataset-x" and manifest["prefix"] == owner.head("dataset-x") + "/"
-    assert manifest["total_images"] == 2
-
-
-def test_should_keep_the_s3_gateway_for_the_projects_own_dataset(fake, client):
-    entry = import_in("dataset_loading", "app.entry")
-    assert entry._owner_objects({"dataset": "dataset-cats@v1", "data": {"source": "lakefs"}}, client) is None
-    # an s3 source or an explicit override never goes through lakeFS
-    assert entry._owner_objects({"dataset": "acme/dataset-x@v1", "data": {"source": "s3"}}, client) is None
-    assert entry._owner_objects({"dataset": "acme/dataset-x@v1",
-                                 "data": {"source": "lakefs", "path_override": "s3://b/p/"}}, client) is None
-
-
-def test_should_use_the_gateway_service_path_for_an_own_dataset(fake, client, tmp_path):
-    """Regression: with no owner client the service still reads through the injected S3 client."""
-    with step_app("dataset_loading"):
-        svc_mod = importlib.import_module("app.services.dataset_loading")
-    calls = []
-
-    class Gateway:
-        def head_object(self, Bucket, Key):
-            calls.append(("head", Bucket, Key))
-        def get_paginator(self, op):
-            calls.append(("paginator", op))
-            raise RuntimeError("stop after the gateway was used")
-    svc = svc_mod.DatasetLoadingService(s3_client=Gateway())
-    assert svc._key_exists("dataset-cats", "c1/data.yaml") is True
-    assert calls == [("head", "dataset-cats", "c1/data.yaml")]
-
-
-def test_dataset_loading_marks_a_shared_dataset_for_training(tmp_path, monkeypatch):
-    entry = import_in("dataset_loading", "app.entry")
-    monkeypatch.setattr(entry, "DATASET_DIR", str(tmp_path))
-    monkeypatch.setattr(entry, "OUTPUT_DIR", tmp_path / "out")
-    (tmp_path / "data.yaml").write_text("kpt_shape: [4, 3]\n")
-    (tmp_path / "dataset_manifest.json").write_text(json.dumps(
-        {"bucket": "dataset-x", "prefix": "c0ffee/", "lakefs_commit": "c0ffee", "label_keys": {"a": 1}}))
-    entry._write_outputs({"dataset": "acme/dataset-x@v1"}, shared=True)
-    assert json.loads((tmp_path / "out" / "manifest-summary.json").read_text())["shared"] is True
-    entry._write_outputs({"dataset": "dataset-x@v1"})
-    assert "shared" not in json.loads((tmp_path / "out" / "manifest-summary.json").read_text())
 
 
 def test_training_reads_a_shared_dataset_through_kaos_lib_not_s3(monkeypatch, tmp_path):

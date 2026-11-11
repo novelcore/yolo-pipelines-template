@@ -32,7 +32,6 @@ AUG = load("steps/model_training/app/models/training.py", "m_train").Augmentatio
 QUANT = load("steps/model_quantization/app/models/quantization.py", "m_quant").QuantizationParams
 QAT = load("steps/qat_finetune/app/models/quantization.py", "m_qat").QATParams
 REG = load("steps/model_registration/app/models/registration.py", "m_reg").RegistrationParams
-DSET = load("steps/dataset_loading/app/models/dataset.py", "m_ds").YoloDatasetParams
 
 # form field -> (model, model field). Fields not listed here have no model-side bounds.
 MODEL = {
@@ -54,7 +53,6 @@ MODEL = {
     "quantization-parity_frames": (QUANT, "parity_frames"),
     "quantization-parity_max_abs_error": (QUANT, "parity_max_abs_error"),
     "registration-promote_to": (REG, "promote_to"),
-    "data-sample_size": (DSET, "sample_size"), "data-seed": (DSET, "seed"),
 }
 for _f in AUG.model_fields:
     MODEL[f"image_processing-{_f}"] = (AUG, _f)
@@ -67,7 +65,6 @@ D = {  # one line each; what the field does for you
     "model-variant": "The model file behind the dropdown (set by `model`).",
     "model-pretrained_weights": "An `s3://` path to your own weights to start from (weights only, training starts at epoch 0). Empty uses the bundled ones.",
     "data-source": "Where the data comes from. Leave on `lakefs`.",
-    "data-path_override": "An `s3://` folder to read instead of the picked dataset. Leave empty.",
     "data-sample_size": "Train on this many image and label pairs per split, to make a quick test. Empty uses all of it.",
     "data-seed": "Random seed for the sampling above.",
     "train-epochs": "Training rounds.",
@@ -111,7 +108,6 @@ D = {  # one line each; what the field does for you
     "registration-registered_model_name": "MLflow model name. Empty uses `object-pose-yolo`.",
     "registration-promote_to": "Give the registered version this alias: `champion` or `challenger`. Empty gives none.",
     "logging-level": "Log level of the steps.", "logging-log_artifacts": "Upload plots and example images to MLflow.",
-    "summary-label": "Text printed by the `data-summary` step.",
 }
 for _f in AUG.model_fields:
     D.setdefault(f"image_processing-{_f}", f"Augmentation `{_f}`.")
@@ -121,10 +117,10 @@ D.update({"image_processing-degrees": "Rotation augmentation in degrees. Keep 0 
           "image_processing-fliplr": "Probability of a left-right flip (needs `flip_idx` in `data.yaml`)."})
 
 ORDER = ["experiment", "dataset", "model", "data", "train", "image_processing", "quantization",
-         "registration", "logging", "summary"]
+         "registration", "logging"]
 SECTION = {"experiment": "Run", "dataset": "Dataset", "model": "Model", "data": "Data loading", "train": "Training",
            "image_processing": "Augmentation", "quantization": "INT8 (quantization)",
-           "registration": "Registration", "logging": "Logging", "summary": "Summary"}
+           "registration": "Registration", "logging": "Logging"}
 
 
 def leaves(node, prefix):
@@ -174,7 +170,7 @@ def build():
               "train/callbacks": "train-callbacks", "train/qat": "train-qat"}
     for f in sorted(cfg.glob("*.yaml")):
         sec = f.stem
-        if sec not in ORDER or sec == "summary":
+        if sec not in ORDER:
             continue
         for name, v in leaves(yaml.safe_load(f.read_text()), ""):
             rows[sec].append((name, v, ""))

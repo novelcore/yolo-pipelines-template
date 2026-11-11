@@ -28,6 +28,6 @@ A *version* is a name (`v1`, `v2`, ...) for the exact state of the dataset at on
     **You should see:** the run trains on exactly the data of `v1`, even if you merge more data while it runs.
 
 !!! note "Not `dataset-default`"
-    The form starts on `dataset-default@latest`, which is empty in a new project. A run on it stops at the first step with "has no data.yaml at the root of its repository". Always pick your own version.
+    The form starts on `dataset-default@latest`, which is empty in a new project. A run on it stops in `model-training` with "has no data.yaml at the root of its repository". Always pick your own version.
 
 A dataset shared with you by another project appears in the same dropdown: [Use a shared dataset](shared-dataset.md).

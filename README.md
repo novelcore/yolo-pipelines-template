@@ -35,8 +35,7 @@ Then pick `dataset-spacecraft@v1` in the pipeline's **Run** form. `kaosctl` come
 ## The pipeline
 
 ```
-config-validation → dataset-loading → data-summary
-                                    → model-training → qat-finetune → model-quantization → model-registration
+config-validation → model-training → qat-finetune → model-quantization → model-registration
 ```
 
 `qat-finetune` and `model-quantization` run only when `quantization-mode` is `qat` or `ptq` (`qat-finetune`: `qat` only). The whole pipeline is `pipeline.py`; **the `config/` tree is the run form**: each plain value is a field and each group folder (`config/model/`, `config/train/optimizer/`, ...) a dropdown.
@@ -52,10 +51,12 @@ the longest HPC run is continued in capped runs when it is resumable, and refuse
 pipeline.py            the steps
 config/                every setting: a field or a dropdown on the run form
 steps/<name>/          one folder per step (README.md in each)
-kubecore/              the platform's build engine: provided for you, do not edit
+step_tests/            tests of the step code (DEVELOPER.md §15)
 scripts/               check-docs.sh, gen-parameters.py
 docs/                  the guide (mkdocs)
 ```
+
+Your pipeline is `pipeline.py`, `config/` and `steps/`; it holds no copy of the platform's pipeline engine. On your computer, `kaosctl render --context pipeline-context.yaml` renders the pipeline with the same engine the platform uses, `kaosctl dev` sets up each step's Python environment and `kaosctl step run <step>` runs one step ([Check and try a step](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/step-run.html)).
 
 [ADD-A-STEP.md](ADD-A-STEP.md), [DEVELOPER.md](DEVELOPER.md). Check the guide before a pull request: `scripts/check-docs.sh`. `docs/parameters.md` is generated: `python scripts/gen-parameters.py`.
 

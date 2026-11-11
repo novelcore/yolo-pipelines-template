@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # fake_lakefs.py
 
 try:
     import kaos_lib  # noqa: E402,F401
+    import kaos_lib.lock  # noqa: E402,F401
 except ImportError:
     raise pytest.UsageError("step tests need kaos-lib: see step_tests/README.md for the pip install line") from None
 
@@ -23,7 +24,8 @@ from fake_lakefs import FakeLakeFS  # noqa: E402
 
 ENV_VARS = ("LAKEFS_ENDPOINT", "LAKEFS_URL", "LAKEFS_ACCESS_KEY", "LAKEFS_SECRET_KEY", "LAKEFS_BEARER_TOKEN",
             "KUBECORE_STAGED_DIR", "KUBECORE_CACHE_DIR", "KUBECORE_DATASET_CONFIG", "CHECKPOINT_BUCKET",
-            "CHECKPOINT_PREFIX", "KUBECORE_RUN_ID", "KUBECORE_WORKFLOW_NAME", "KUBECORE_DATASET_DIR")
+            "CHECKPOINT_PREFIX", "KUBECORE_RUN_ID", "KUBECORE_WORKFLOW_NAME", "KUBECORE_DATASET_DIR", "KAOS_LIB_LOCK", "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY", "S3_ENDPOINT_URL")
 
 DATA_YAML = b"path: .\ntrain: images/train\nval: images/val\nnc: 1\nnames:\n  0: ship\n"
 
@@ -51,6 +53,7 @@ def import_in(step, module):
 
 @pytest.fixture(autouse=True)
 def clean_env(tmp_path, monkeypatch):
+    kaos_lib.lock.reset()  # the data lock is process-wide: no test sees another's reads
     for var in ENV_VARS:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("KUBECORE_CACHE_DIR", str(tmp_path / "cache"))

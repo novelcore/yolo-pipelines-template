@@ -34,8 +34,7 @@ The form also has `<step>-class`, `<step>-cpu`, `<step>-mem` and `<step>-disk` f
 | field | type | default | allowed | what it does |
 |---|---|---|---|---|
 | `data-source` | text | `lakefs` |  | Where the data comes from. Leave on `lakefs`. |
-| `data-path_override` | text | empty |  | An `s3://` folder to read instead of the picked dataset. Leave empty. |
-| `data-sample_size` | int or empty | empty | >= 1 | Train on this many image and label pairs per split, to make a quick test. Empty uses all of it. |
+| `data-sample_size` | int or empty | empty |  | Train on this many image and label pairs per split, to make a quick test. Empty uses all of it. |
 | `data-seed` | int | `42` |  | Random seed for the sampling above. |
 
 ## Training

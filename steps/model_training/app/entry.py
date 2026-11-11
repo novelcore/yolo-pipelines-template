@@ -9,10 +9,10 @@ automatically (field names match).
 
 Dataset: the cluster is manifest-only (no shared FS between step pods), so we use
 the kubeline S3-streaming mode — the trainer streams images/labels straight from
-the lakeFS S3 gateway at the bucket/prefix dataset-loading resolved
-(``--manifest-summary``): ``{commit}/`` of the dataset repository (the layout
-sits at the repository root), pinned to the commit the picked
-``<dataset-repo>@<version>`` pointed at when the run started.
+the lakeFS S3 gateway at the bucket/prefix this step builds first (``_dataset_location``):
+``{commit}/`` of the dataset repository (the layout sits at the repository root). The
+commit is the one kaos-lib resolves for the picked ``<dataset-repo>@<version>``: the
+run's data lock (``KAOS_LIB_LOCK``), which the platform pins once per run.
 
 MLflow auth (Zitadel machine JWT) is NOT injected by the platform yet, so MLflow
 logging is made NON-FATAL: with no auth present we disable yolo's built-in
@@ -23,11 +23,15 @@ fully functional. It re-enables automatically once auth is wired.
 import argparse
 import json
 import os
+import tempfile
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from pathlib import Path
 
 import yaml
+from kaos_lib import datasets
+from kaos_lib.errors import NotFoundError
+from kaos_lib.lakefs import LakeFS
 
 from app.services import lakefs_io
 
@@ -57,15 +61,28 @@ def _mlflow_auth_present() -> bool:
     )
 
 
-def _dataset_location(summary: dict) -> tuple[str, str, str]:
-    """(bucket, prefix, commit) of this run's dataset: what dataset-loading
-    resolved and pinned (its manifest-summary). Without it there is no pinned
-    commit to read, so the step stops rather than guess a location."""
-    bucket, prefix = str(summary.get("bucket") or ""), str(summary.get("prefix") or "")
-    if not (bucket and prefix):
-        raise SystemExit("[model-training] no dataset location: --manifest-summary from "
-                         "dataset-loading is empty, so there is no pinned dataset commit to read.")
-    return bucket, prefix if prefix.endswith("/") else prefix + "/", str(summary.get("dataset_commit") or "")
+def _dataset_location(cfg: dict, client=None) -> dict:
+    """The run's dataset, built at the start of this step: bucket = the dataset repository,
+    prefix = ``<commit>/``. The commit is what kaos-lib resolves (the run's data lock, when the
+    platform set ``KAOS_LIB_LOCK``). ``shared`` is true only for another project's dataset."""
+    if str((cfg.get("data") or {}).get("path_override") or "").strip():
+        raise SystemExit("[model-training] data.path_override is not read any more: pick the data with `dataset`.")
+    ref = datasets.DatasetRef.parse(cfg.get("dataset"))  # DatasetError names what is wrong and what is valid
+    commit = datasets.resolve(ref, client)
+    shared = bool(ref.owner) and bool(datasets.source(ref, client)[0].owner)  # an owner that is this project is not shared
+    return {"bucket": ref.repo, "prefix": f"{commit}/", "dataset_commit": commit, "ref": str(ref),
+            "repo": ref.repo, "version": ref.version, "shared": shared}
+
+
+def _dataset_yaml(repo: str, commit: str, client=None) -> str:
+    """The dataset's data.yaml at ``commit``, verbatim."""
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            (client or LakeFS.connect()).download_object(repo, commit, "data.yaml", Path(tmp) / "data.yaml")
+        except NotFoundError:
+            raise SystemExit(f"[model-training] dataset {repo} (commit {commit[:12]}) has no data.yaml at the root "
+                             "of its repository - a valid yolo dataset has data.yaml, images/ and labels/.") from None
+        return (Path(tmp) / "data.yaml").read_text()
 
 
 def _staged() -> bool:
@@ -143,13 +160,7 @@ def main() -> None:
     print(f"kaos-lib {kaos_lib_version()}", flush=True)  # the package this image runs
     parser = argparse.ArgumentParser()
     parser.add_argument("--params", required=True,
-                        help="Resolved params.yaml content (from compose-and-validate).")
-    parser.add_argument("--data-yaml", default="",
-                        help="The dataset's data.yaml (verbatim) emitted by dataset-loading: "
-                             "kpt_shape / names / flip_idx, so training matches THIS dataset.")
-    parser.add_argument("--manifest-summary", default="",
-                        help="dataset-loading's {bucket, prefix, ref, commit}: the pinned "
-                             "location every step of this run reads.")
+                        help="Resolved params.yaml content (composed by the platform).")
     args, _ = parser.parse_known_args()
     cfg = yaml.safe_load(args.params)
 
@@ -165,15 +176,10 @@ def main() -> None:
     ckpt = train.get("checkpointing", {})
     export = train.get("export", {})
 
-    try:
-        summary = json.loads(args.manifest_summary or "{}") or {}
-    except ValueError:
-        summary = {}
-    bucket, prefix, commit = _dataset_location(summary)
-    # What the run picked (`<dataset-repo>@<version>`), as dataset-loading recorded it.
-    ds_repo = str(summary.get("repo") or bucket)
-    ds_version = str(summary.get("version") or "")
-    ds_ref = str(summary.get("ref") or cfg.get("dataset") or "")
+    summary = _dataset_location(cfg)
+    bucket, prefix, commit = summary["bucket"], summary["prefix"], summary["dataset_commit"]
+    # What the run picked (`<dataset-repo>@<version>`).
+    ds_repo, ds_version, ds_ref = summary["repo"], summary["version"], summary["ref"]
     print(f"[model-training] dataset s3://{bucket}/{prefix} (dataset={ds_ref} "
           f"commit={commit or 'unresolved'})", flush=True)
 
@@ -186,7 +192,7 @@ def main() -> None:
     # (No data.yaml needed: the service generates the correct pose default when
     # dataset_dir has none — kpt_shape [11,3], names {0: spacecraft}.)
     os.makedirs(RUNS_DIR, exist_ok=True)
-    shared = bool(summary.get("shared"))
+    shared = summary["shared"]
     if _staged() or shared:
         # Local mode: the pinned commit is on the node (HPC), or the dataset is another
         # project's, which this project's S3 gateway does not hold: kaos-lib downloads it from the
@@ -199,25 +205,25 @@ def main() -> None:
     else:
         dataset_dir, source = DATASET_DIR, "s3"
         os.makedirs(os.path.join(DATASET_DIR, "labels"), exist_ok=True)
-        # Honour the dataset's OWN data.yaml (kpt_shape / names / flip_idx), handed
-        # over by dataset-loading as --data-yaml. Without it the service falls back
+        # Honour the dataset's OWN data.yaml (kpt_shape / names / flip_idx), read from
+        # the dataset at the commit. Without it the service falls back
         # to the spacecraft default (kpt_shape [11,3], names {0: spacecraft}), so a
         # dataset with any other keypoint count has EVERY label rejected and
         # yolo dies with "No valid labels found in labels/train.cache"
         # (live gke-dev/prd1124yolo, 4-keypoint toy dataset, 2026-08-27). The
         # service copies this file into its temp dir and fixes `path` itself.
-        data_yaml_text = (args.data_yaml or "").strip()
+        data_yaml_text = _dataset_yaml(ds_repo, commit).strip()
         if data_yaml_text:
             try:
                 ds_yaml = yaml.safe_load(data_yaml_text) or {}
             except yaml.YAMLError as exc:  # keep the run alive; the default may still fit
-                print(f"[model-training] WARN --data-yaml is not valid YAML ({exc}); using the service default")
+                print(f"[model-training] WARN the dataset's data.yaml is not valid YAML ({exc}); using the service default")
                 ds_yaml = {}
             if isinstance(ds_yaml, dict) and ds_yaml:
                 ds_yaml["path"] = DATASET_DIR
                 with open(os.path.join(DATASET_DIR, "data.yaml"), "w") as fh:
                     yaml.safe_dump(ds_yaml, fh, sort_keys=False)
-                print(f"[model-training] data.yaml from dataset-loading written to {DATASET_DIR} "
+                print(f"[model-training] data.yaml of the dataset written to {DATASET_DIR} "
                       f"(kpt_shape={ds_yaml.get('kpt_shape')}, names={ds_yaml.get('names')})")
         # Enable manifest-only S3 streaming so BOTH images and labels stream from lakeFS
         # (no shared FS holds local labels). The service reads this manifest and sets
