@@ -18,7 +18,7 @@ A *pipeline* here is a ready-made set of steps (check settings, load data, train
 
     **You should see:** the folder with `config/`, `steps/`, `pipeline.py` and `docs/`. This is where you run `kaosctl login` ([step 1](prepare-dataset.md#install-and-sign-in)).
 
-3. **Do:** look at the tools on the pipeline's row: **Run**, the link to its runs, **MLflow**, **Outputs**, **Datasets**.
+3. **Do:** look at the tools on the pipeline's row: **Run**, and in the **⋯** menu next to it the runs link (the first entry), **MLflow**, **Outputs**, **Datasets**.
 
     **You should see:** each opens in a new tab. The *run page* shows your runs as boxes. *MLflow* keeps the numbers and charts of every run. *Outputs* is the lakeFS repository `outputs-<pipeline>` where the weights land.
 

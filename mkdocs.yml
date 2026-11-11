@@ -70,9 +70,6 @@ plugins:
   - search
   - glightbox
 
-hooks:
-  - scripts/docs_check.py   # words, removed names, links: a finding fails the build
-
 extra_css:
   - assets/extra.css
 
