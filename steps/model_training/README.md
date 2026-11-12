@@ -1,20 +1,20 @@
 # model-training
 
-Trains the YOLO pose model (YOLOv8 / YOLOv11) on the dataset commit the platform pinned for the run (kaos-lib's data lock). It builds the dataset location itself at its start: the dataset repository, the commit as prefix, and the dataset's `data.yaml` read at that commit.
+Trains the YOLO pose model (YOLOv8 / YOLOv11) on the dataset version `prepare-data` wrote in the same run.
 
 - **Runs on:** a GPU (`gpu=True` in `pipeline.py`); on HPC (Slurm) when `model-training-class` is an HPC class.
-- **Reads:** the form sections `experiment`, `dataset`, `data`, `model`, `train`, `image_processing`, `logging`. Own datasets stream from the project's lakeFS S3 gateway; shared datasets and Slurm runs are materialized locally first.
-- **Writes:** checkpoints (`best.pt`, `last.pt`, exports) to `outputs-<pipeline>` under `checkpoints/<experiment>/<run>/`, metrics and a logged model `<experiment>-best` to MLflow. A step run again after a lost machine or an HPC time limit continues from its last checkpoint (nothing to call; see docs/the-pipeline.md), and `best.pt` survives the continuation. `training-result` always names a checkpoint: `best.pt`, or `last.pt` when a continued run wrote no `best.pt`; a run with no weights at all fails.
-- **Output:** `training-result` for the later steps.
+- **Reads:** the settings `experiment`, `model`, `train`, `image_processing`, `logging`, and `step.input("prepared")`: the dataset version `prepare-data` wrote, as files on the machine.
+- **Writes:** the model `checkpoints` (`best.pt`, `last.pt`, exports), saved in `outputs-<pipeline>` under `checkpoints/<experiment>/<run>/`; metrics to MLflow. A step run again after a lost machine or an HPC time limit continues from its last checkpoint (nothing to call; see docs/the-pipeline.md), and `best.pt` survives the continuation. The result always names a checkpoint: `best.pt`, or `last.pt` when a continued run wrote no `best.pt`; a run with no weights at all fails.
+- **Hands on:** the MLflow run, the checkpoint's file name, the epochs completed, the final validation metrics and the exports.
 - **Settings:** [docs/parameters.md](../../docs/parameters.md) (bounds are the pydantic models in `app/models/training.py`).
 
 ```
 steps/model_training/
-  app/entry.py        reads the composed params and calls the manager
+  app/entry.py        reads the settings and the dataset and calls the manager
   app/manager.py      orchestrates one run
   app/models/         pydantic models: TrainingParams, TrainingResult
-  app/services/       training, the S3 streaming dataset, lakeFS I/O, resource monitor
+  app/services/       the training service
   Dockerfile          the image (installs kaos-lib at KAOS_LIB_PACKAGE)
 ```
 
-Tests: `step_tests/` ([DEVELOPER.md](../../DEVELOPER.md) section 15). How data and results move: [docs/datasets-in-the-steps.md](../../docs/datasets-in-the-steps.md).
+Tests: `step_tests/` (`step_tests/README.md`), including a real one-epoch run on the CPU. How data and results move: [the guide](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/produce-a-dataset.html).

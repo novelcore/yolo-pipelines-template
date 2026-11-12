@@ -2,30 +2,28 @@
 
 Responsibilities
 ----------------
-1. Auto-detect dataset source mode from dataset_manifest.json when present.
-2. Validate that --pretrained-weights and --resume-from are not both set.
-3. In local mode, validate that data.yaml and image directories exist.
-4. Download weights / resume checkpoint from S3 to a temp dir when needed.
-5. Write data.yaml to a temp dir (always deleted in a finally block).
-6. Set MLFLOW_TRACKING_URI and MLFLOW_EXPERIMENT_NAME env vars so that
-   the yolo built-in MLflow callback handles all logging.
-7. Register yolo callbacks for per-epoch metric + system resource
-   logging, console output, and periodic S3 checkpoint uploads.
-8. Call model.train() with the full hyperparameter set.
-9. Upload best.pt and last.pt to the S3 checkpoint path.
-10. Evaluate best.pt and last.pt on the test split (reporting only) and
-    log metrics + plots to the current MLflow run.  Skipped with a warning
-    when the test split is not available.
-11. Clean up temp dirs.
+1. Validate that dataset_dir is a YOLO dataset: data.yaml, images/train, images/val.
+2. Resolve the starting weights: a custom .pt (a local file or an s3:// path in lakeFS) or the
+   variant's COCO weights.
+3. Write data.yaml to a temp dir (always deleted).
+4. Set MLFLOW_EXPERIMENT_NAME and MLFLOW_RUN so that the yolo built-in MLflow callback handles
+   all logging.
+5. Register yolo callbacks for per-epoch metric logging, console output and periodic MLflow
+   checkpoint artifacts.
+6. Call model.train() with the full hyperparameter set. A step run again after a lost machine or
+   an HPC time limit continues from the checkpoint folder: kaos-lib hooks Ultralytics, nothing here.
+7. Copy best.pt and last.pt (and the exports) into the step's output folder; the step API saves it
+   under ``checkpoints/<experiment>/<run>/`` of the app's outputs repository.
+8. Evaluate best.pt and last.pt on the test split (reporting only) and log metrics + plots to the
+   current MLflow run. Skipped with a warning when the test split is not available.
+9. Clean up temp dirs.
 """
 
-import json
 import logging
 import os
 import re
 import shutil
 import tempfile
-from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -34,38 +32,15 @@ import yaml
 
 from app.models.training import TrainingParams, TrainingResult
 
-from app.services import lakefs_io
-from app.services.resource_monitor import ResourceMonitor
-
 
 def kaos_lib_version() -> str:
-    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
-    for dist in ("kaos-lib", "kubecore"):
-        try:
-            return package_version(dist)
-        except PackageNotFoundError:
-            pass
-    return "unknown"
-
-
-def checkpoint_base(params: "TrainingParams") -> str:
-    """``{checkpoint_prefix}/{experiment}/{run}``: one run's checkpoints and
-    exports never overwrite another run's of the same experiment. The run is
-    the Argo workflow name the platform injects as KUBECORE_RUN_ID; without it
-    (local runs) the key is ``{checkpoint_prefix}/{experiment}``."""
-    base = f"{params.checkpoint_prefix.rstrip('/')}/{params.experiment_name}"
-    run = os.environ.get("KUBECORE_RUN_ID", "").strip()
-    return f"{base}/{run}" if run else base
+    """The installed kaos-lib version."""
+    return package_version("kaos-lib")
 
 
 def logged_model_name(experiment: str) -> str:
     """``<experiment>-best``: the name of a run's best.pt in the experiment's Models tab."""
     return f"{experiment}-best"
-
-
-def _dataset_ref(params: "TrainingParams") -> str:
-    """``<dataset repo>@<version>`` the run trained on ("" when it names no dataset repo)."""
-    return f"{params.dataset_repo}@{params.dataset_version}" if params.dataset_repo else ""
 
 
 _logger = logging.getLogger(__name__)
@@ -83,9 +58,6 @@ _METRIC_PRECISION = "metrics/precision(B)"
 _METRIC_RECALL = "metrics/recall(B)"
 _METRIC_MAP50 = "metrics/mAP50(B)"
 _METRIC_MAP50_95 = "metrics/mAP50-95(B)"
-
-# File name of the manifest the training entry writes into dataset_dir
-_MANIFEST_FILENAME = "dataset_manifest.json"
 
 
 # ---------------------------------------------------------------------------
@@ -105,28 +77,12 @@ class TrainingError(Exception):
 class TrainingService:
     """Orchestrates a YOLO training run with yolo built-in MLflow tracking.
 
-    MLflow logging (params, metrics, artifacts) is handled entirely by the
-    yolo MLflow callback.  This service sets the required environment
-    variables and focuses on S3 I/O and console output.
-
-    Parameters
-    ----------
-    s3_client:
-        A pre-constructed boto3 S3 client used for checkpoint download/upload
-        and (when source='s3') image streaming.
-    mlflow_tracking_uri:
-        URI of the remote MLflow tracking server.
+    MLflow logging (params, metrics, artifacts) is handled by the yolo MLflow callback; this
+    service sets the environment variables that callback reads, copies the weights into the step's
+    output folder and does the console output.
     """
 
-    def __init__(
-        self,
-        s3_client: Any,
-        mlflow_tracking_uri: str,
-    ) -> None:
-        self._s3 = s3_client
-        self._outputs_stage: Optional[Path] = None  # scratch copies for the run writer (set in _run_training)
-        self._run_writer = None  # the open kaos-lib run writer (set in _run_training)
-        self._mlflow_tracking_uri = mlflow_tracking_uri
+    def __init__(self) -> None:
         self._logger = logging.getLogger(__name__)
 
     # ------------------------------------------------------------------
@@ -136,24 +92,11 @@ class TrainingService:
     def run(self, params: TrainingParams) -> TrainingResult:
         """Execute the full training pipeline end-to-end.
 
-        Parameters
-        ----------
-        params:
-            Validated training parameters from the CLI.
-
-        Returns
-        -------
-        TrainingResult
-            Summary of the completed run.
-
         Raises
         ------
         TrainingError
             On any unrecoverable failure.
         """
-        # Auto-detect S3 streaming mode from manifest before validation
-        params = self._apply_manifest_if_present(params)
-
         self._validate_params(params)
 
         # Defer heavy imports so that unit tests can mock them easily
@@ -161,15 +104,10 @@ class TrainingService:
 
         Path(params.output_dir).mkdir(parents=True, exist_ok=True)
 
-        # Configure yolo's built-in MLflow callback via env vars
-        os.environ["MLFLOW_TRACKING_URI"] = self._mlflow_tracking_uri
+        # Configure yolo's built-in MLflow callback via env vars. It reads MLFLOW_RUN (not
+        # MLFLOW_RUN_NAME) for the run name: the run's name makes each run's MLflow run unique.
         os.environ["MLFLOW_EXPERIMENT_NAME"] = params.experiment_name
-
-        # yolo reads MLFLOW_RUN (not MLFLOW_RUN_NAME) for the run name.
-        # Bridge the Kubeline workflow name so each run gets a unique name.
-        workflow_name = os.environ.get("KUBECORE_WORKFLOW_NAME", "")
-        if workflow_name:
-            os.environ["MLFLOW_RUN"] = workflow_name
+        os.environ["MLFLOW_RUN"] = params.run_name
 
         try:
             result = self._run_training(params, YOLO)
@@ -177,77 +115,6 @@ class TrainingService:
             raise TrainingError(f"Training failed: {exc}") from exc
 
         return result
-
-    # ------------------------------------------------------------------
-    # Manifest auto-detection
-    # ------------------------------------------------------------------
-
-    def _apply_manifest_if_present(self, params: TrainingParams) -> TrainingParams:
-        """Read dataset_manifest.json from dataset_dir if it exists.
-
-        When present the manifest overrides the source, s3_bucket, and
-        s3_prefix fields on the params object so that the caller-supplied
-        --source / --s3-bucket / --s3-prefix flags are not required.
-
-        Returns a new (or the same) TrainingParams instance.
-        """
-        manifest_path = Path(params.dataset_dir) / _MANIFEST_FILENAME
-        if not manifest_path.exists():
-            self._logger.info(
-                "No %s found in dataset_dir=%s — using source=%s (local mode)",
-                _MANIFEST_FILENAME,
-                params.dataset_dir,
-                params.source,
-            )
-            return params
-
-        try:
-            with manifest_path.open() as fh:
-                raw = json.load(fh)
-        except Exception as exc:  # noqa: BLE001
-            self._logger.warning(
-                "Failed to parse %s: %s — falling back to source=%s",
-                manifest_path,
-                exc,
-                params.source,
-            )
-            return params
-
-        bucket = raw.get("bucket")
-        prefix = raw.get("prefix")
-
-        if not bucket or not prefix:
-            self._logger.warning(
-                "%s is missing 'bucket' or 'prefix' fields — ignoring manifest",
-                manifest_path,
-            )
-            return params
-
-        total = raw.get("total_images", "?")
-        label_keys = raw.get("label_keys")
-
-        mode_label = "manifest-only" if label_keys else "labels-only"
-        self._logger.info(
-            "Detected %s (bucket=%s prefix=%s total_images=%s mode=%s) — "
-            "switching to S3 streaming mode",
-            _MANIFEST_FILENAME,
-            bucket,
-            prefix,
-            total,
-            mode_label,
-        )
-
-        # Build a new params instance with overridden S3 fields
-        update: dict[str, Any] = {
-            "source": "s3",
-            "s3_bucket": bucket,
-            "s3_prefix": prefix,
-        }
-        # Signal manifest-only mode: labels must also be streamed from S3
-        if label_keys:
-            update["s3_stream_labels"] = True
-        updated = params.model_copy(update=update)
-        return updated
 
     # ------------------------------------------------------------------
     # Core training pipeline
@@ -258,23 +125,15 @@ class TrainingService:
         params: TrainingParams,
         yolo_cls: Any,
     ) -> TrainingResult:
-        """Inner pipeline: weights, data.yaml, callbacks, train(), S3 upload."""
+        """Inner pipeline: weights, data.yaml, callbacks, train(), weights into the output folder."""
 
-        monitor = ResourceMonitor(gpu_index=self._parse_gpu_index(params.device))
-
-        # Validate local dataset structure before starting the run
-        if params.source == "local":
-            self._validate_local_dataset(params)
+        # Validate the dataset structure before starting the run
+        self._validate_local_dataset(params)
 
         with tempfile.TemporaryDirectory(prefix="io-model-training-") as tmp_dir:
             tmp_path = Path(tmp_dir)
-            # Results are copied here, saved on the run branch as they appear and merged to
-            # main once at the end (see _upload_to_s3 / _commit_outputs).
-            self._outputs_stage = tmp_path / "outputs"
-            self._outputs_stage.mkdir()
-            self._open_run_writer(params)
 
-            # 1. Resolve model path (download from S3 if needed)
+            # 1. Resolve model path (download from lakeFS if needed)
             model_path = self._resolve_model_path(params, tmp_path)
 
             # 2. Write data.yaml into the temp dir
@@ -287,16 +146,12 @@ class TrainingService:
             epoch_metrics: dict[str, float] = {}
 
             model.add_callback(
-                "on_train_start",
-                self._make_provenance_callback(params),
-            )
-            model.add_callback(
                 "on_train_batch_end",
                 self._make_batch_end_callback(epoch_metrics),
             )
             model.add_callback(
                 "on_fit_epoch_end",
-                self._make_epoch_end_callback(epoch_metrics, monitor),
+                self._make_epoch_end_callback(epoch_metrics),
             )
             model.add_callback(
                 "on_train_epoch_end",
@@ -307,65 +162,30 @@ class TrainingService:
                 self._make_train_end_callback(epoch_metrics),
             )
 
-            # 5. Build train() kwargs — resume mode sets resume=True
+            # 5. Build train() kwargs
             train_kwargs = self._build_train_kwargs(
                 params=params,
                 data_yaml_path=str(data_yaml_path),
             )
 
-            # 5b. S3 streaming mode — inject S3PoseTrainer
-            if params.source == "s3":
-                from app.services.s3_pose_trainer import make_s3_pose_trainer
-
-                cache_dir = str(tmp_path / "s3_cache")
-                labels_root = str(Path(params.dataset_dir).resolve() / "labels")
-
-                # In manifest-only mode, labels are also streamed from S3
-                s3_labels_prefix: str | None = None
-                if params.s3_stream_labels:
-                    s3_labels_prefix = params.s3_prefix  # type: ignore[assignment]
-                    self._logger.info(
-                        "Manifest-only mode: labels will be streamed from S3"
-                    )
-
-                s3_trainer_cls = make_s3_pose_trainer(
-                    s3_client=self._s3,
-                    s3_bucket=params.s3_bucket,  # type: ignore[arg-type]
-                    s3_prefix=params.s3_prefix,  # type: ignore[arg-type]
-                    local_labels_root=labels_root,
-                    s3_labels_prefix=s3_labels_prefix,
-                    cache_dir=cache_dir,
-                    cache_max_bytes=params.disk_cache_bytes,
-                )
-                train_kwargs["trainer"] = s3_trainer_cls
-                self._logger.info(
-                    "S3 streaming enabled | bucket=%s prefix=%s cache=%s (%d MB)",
-                    params.s3_bucket,
-                    params.s3_prefix,
-                    cache_dir,
-                    params.disk_cache_bytes // (1024 * 1024),
-                )
-
             # A step lost here is run again by the platform; the checkpoint folder it keeps
-            # (KAOS_CHECKPOINT_DIR) is what training resumes from, via kaos_lib's Ultralytics hook.
+            # (kaos_lib.checkpoint) is what training resumes from, via kaos_lib's Ultralytics hook.
             trainer = model.train(**train_kwargs)
 
             # 6. Determine save directory
             save_dir = Path(model.trainer.save_dir)  # type: ignore[union-attr]
 
-            # 7. Upload final weights to S3
-            best_s3_uri = self._upload_final_weights(params, save_dir)
+            # 7. Weights (and exports) into the step's output folder
+            best_checkpoint = self._collect_weights(params, save_dir)
 
             # 8. Export quantized / optimized models
-            exported_s3_uris: dict[str, str] = {}
+            exported: dict[str, str] = {}
             if params.export.enabled:
-                exported_s3_uris = self._export_models(
+                exported = self._export_models(
                     model=model,
                     params=params,
-                    save_dir=save_dir,
                     data_yaml_path=str(data_yaml_path),
                 )
-            outputs_commit = self._commit_outputs(params)
 
             # 9. Post-training evaluation on the test split (reporting only)
             self._evaluate_on_test_set(
@@ -379,9 +199,7 @@ class TrainingService:
         # Build result — get MLflow run_id from yolo's run
         mlflow_run_id = self._get_mlflow_run_id()
 
-        # Tag the completed MLflow run with Kubeline platform metadata
-        self._tag_kubecore_metadata(mlflow_run_id)
-        self._tag_outputs(mlflow_run_id, outputs_commit)
+        self._tag_run(mlflow_run_id)
 
         final_map50 = float(epoch_metrics.get("val/mAP50", 0.0))
         final_map50_95 = float(epoch_metrics.get("val/mAP50_95", 0.0))
@@ -389,72 +207,22 @@ class TrainingService:
         raw_epoch = getattr(trainer, "epoch", None)
         epochs_completed: int = raw_epoch + 1 if raw_epoch is not None else params.epochs
 
-        self._log_model(mlflow_run_id, outputs_commit, params, epoch_metrics, epochs_completed)
-
         return TrainingResult(
             experiment_name=params.experiment_name,
             model_variant=params.model_variant,
             mlflow_run_id=mlflow_run_id,
-            best_checkpoint_local=str(save_dir / "weights" / "best.pt"),
-            best_checkpoint_s3=best_s3_uri,
+            best_checkpoint=best_checkpoint,
             epochs_completed=epochs_completed,
+            image_size=params.image_size,
             final_map50=final_map50,
             final_map50_95=final_map50_95,
-            exported_models=exported_s3_uris,
+            val_metrics={k: v for k, v in epoch_metrics.items() if k.startswith("val/")},
+            exported_models=exported,
         )
 
     # ------------------------------------------------------------------
     # Callback factories
     # ------------------------------------------------------------------
-
-    def _make_provenance_callback(
-        self,
-        params: TrainingParams,
-    ) -> Callable[[Any], None]:
-        """Return an on_train_start callback that logs dataset provenance to MLflow.
-
-        Fires after the yolo MLflow callback opens the run
-        (on_pretrain_routine_end), so mlflow.active_run() is non-None.
-        Implements FR-04 and CON-02: only non-None fields are logged.
-        Q3 resolution: pipeline.config_hash is logged as both param and tag.
-        T-05 mitigation: guarded by mlflow.active_run() check.
-        """
-
-        def on_train_start(trainer: Any) -> None:  # noqa: ARG001
-            try:
-                import mlflow  # noqa: PLC0415
-
-                if mlflow.active_run() is None:
-                    _logger.warning(
-                        "No active MLflow run at on_train_start; "
-                        "skipping provenance param logging"
-                    )
-                    return
-
-                param_map = {
-                    "dataset.repo": params.dataset_repo,
-                    "dataset.version": params.dataset_version,
-                    "dataset.lakefs_commit": params.lakefs_commit,
-                    "pipeline.config_hash": params.config_hash,
-                }
-                for key, value in param_map.items():
-                    if value is not None:
-                        mlflow.log_param(key, value)
-
-                # Q3: config_hash also logged as tag for experiment list filtering
-                if params.config_hash is not None:
-                    mlflow.set_tag("pipeline.config_hash", params.config_hash)
-
-                _logger.info(
-                    "Logged dataset provenance to MLflow | "
-                    "lakefs_commit=%s config_hash=%s",
-                    params.lakefs_commit or "null",
-                    params.config_hash or "null",
-                )
-            except Exception as exc:  # noqa: BLE001
-                _logger.warning("Failed to log provenance params to MLflow: %s", exc)
-
-        return on_train_start
 
     @staticmethod
     def _make_batch_end_callback(
@@ -488,9 +256,8 @@ class TrainingService:
     @staticmethod
     def _make_epoch_end_callback(
         epoch_metrics: dict[str, float],
-        monitor: ResourceMonitor,
     ) -> Callable[[Any], None]:
-        """Return a callback that logs per-epoch validation metrics and system resources."""
+        """Return a callback that logs per-epoch validation metrics."""
 
         def on_fit_epoch_end(trainer: Any) -> None:
             try:
@@ -505,15 +272,11 @@ class TrainingService:
 
                 current_epoch: int = getattr(trainer, "epoch", 0) + 1
 
-                # Collect system resource snapshot and log it together with the
-                # model metrics so every metric shares the same epoch step.
-                system_metrics = monitor.collect()
-                all_metrics = {**val_metrics, **system_metrics}
                 try:
                     import mlflow  # noqa: PLC0415
 
                     if mlflow.active_run() is not None:
-                        mlflow.log_metrics(all_metrics, step=current_epoch)
+                        mlflow.log_metrics(val_metrics, step=current_epoch)
                     else:
                         _logger.debug(
                             "No active MLflow run — skipping epoch %d metric logging",
@@ -612,116 +375,21 @@ class TrainingService:
         return ""
 
     @staticmethod
-    def _tag_kubecore_metadata(run_id: str) -> None:
-        """Tag the MLflow run with KUBECORE_* environment variables and ``kaos_lib.version``
-        (the kaos-lib package this image runs; novelcore/kaos#1147).
+    def _tag_run(run_id: str) -> None:
+        """Tag the finished MLflow run with ``kaos_lib.version`` (the kaos-lib package this image runs).
 
-        Uses MlflowClient (not the fluent API) so it works on an already-ended
-        run without triggering a new ghost run via mlflow.autolog().
+        Uses MlflowClient (not the fluent API) so it works on an already-ended run without
+        triggering a new ghost run via mlflow.autolog(). Where the results are in lakeFS is tagged
+        by model-registration: the commit exists only once this step has ended.
         """
         if not run_id:
             return
         try:
             from mlflow.tracking import MlflowClient  # noqa: PLC0415
 
-            kubecore_tags = {
-                k.lower().replace("kubecore_", "kubecore."): v
-                for k, v in os.environ.items()
-                if k.startswith("KUBECORE_") and v
-            }
-            kubecore_tags["kaos_lib.version"] = kaos_lib_version()
-            if kubecore_tags:
-                client = MlflowClient()
-                for key, value in kubecore_tags.items():
-                    client.set_tag(run_id, key, value)
-                _logger.info("Tagged MLflow run with %d kubecore tags", len(kubecore_tags))
+            MlflowClient().set_tag(run_id, "kaos_lib.version", kaos_lib_version())
         except Exception:  # noqa: BLE001
-            _logger.warning("Failed to tag MLflow run with kubecore metadata")
-
-    def _tag_outputs(self, run_id: str, commit: str) -> None:
-        """Link the MLflow run to its results in lakeFS (kaos#1283): the ``outputs-<app>``
-        repository, the merge commit on main, the run's path and the workflow.
-
-        model-registration reads ``kaos.outputs_commit`` back to tag that commit in lakeFS.
-        """
-        if not run_id:
-            return
-        w = self._run_writer
-        tags = self._outputs_tags(commit)
-        try:
-            from mlflow.tracking import MlflowClient  # noqa: PLC0415
-
-            client = MlflowClient()
-            for key, value in tags.items():
-                client.set_tag(run_id, key, value)
-            _logger.info("Tagged MLflow run %s with its outputs: %s@%s", run_id, w.repo, commit)
-        except Exception:  # noqa: BLE001
-            _logger.warning("Failed to tag MLflow run %s with its outputs; model-registration "
-                            "will register without a lakeFS tag", run_id)
-
-    def _outputs_tags(self, commit: str) -> dict[str, str]:
-        """``kaos.*`` tags naming where a run's results are in lakeFS."""
-        w = self._run_writer
-        return {
-            "kaos.outputs_repo": w.repo,
-            "kaos.outputs_commit": commit,
-            "kaos.outputs_path": w.prefix,
-            "kaos.workflow": os.environ.get("KUBECORE_WORKFLOW_NAME") or w.run,
-        }
-
-    def _log_model(self, run_id: str, commit: str, params: TrainingParams,
-                   epoch_metrics: dict[str, float], last_epoch: int) -> None:
-        """Show best.pt in the experiment's Models tab: an MLflow 3 logged model
-        ``<experiment>-best`` whose weights stay in lakeFS (``mlflow.create_external_model``),
-        with the training run as its source, the training settings as params, the ``kaos.*``
-        lakeFS tags and the final val metrics (yolo validates best.pt last). The run gets
-        ``kaos.logged_model_id`` so model-registration registers the version from this model.
-
-        A retried step reuses the model this run already has instead of creating a second one.
-        A failure only warns: the results are already in lakeFS and on the run, and
-        model-registration then registers best.pt from its lakeFS path as before.
-        """
-        if not run_id:
-            return
-        name = logged_model_name(params.experiment_name)
-        tags = self._outputs_tags(commit)
-        dataset_ref = _dataset_ref(params)
-        if dataset_ref:
-            tags["kaos.dataset_ref"] = dataset_ref
-        try:
-            import mlflow  # noqa: PLC0415
-            from mlflow.tracking import MlflowClient  # noqa: PLC0415
-
-            client = MlflowClient()
-            experiment_id = client.get_run(run_id).info.experiment_id
-            existing = client.search_logged_models(
-                experiment_ids=[experiment_id],
-                filter_string=f"source_run_id = '{run_id}' AND name = '{name}'",
-                max_results=1,
-            )
-            if existing:
-                model_id = existing[0].model_id
-                client.set_logged_model_tags(model_id, tags)
-                _logger.info("Run %s already has logged model %s (%s)", run_id, name, model_id)
-            else:
-                model_id = mlflow.create_external_model(
-                    name=name,
-                    source_run_id=run_id,
-                    experiment_id=experiment_id,
-                    params={"epochs": str(params.epochs), "imgsz": str(params.image_size),
-                            "model_variant": params.model_variant},
-                    tags=tags,
-                ).model_id
-                _logger.info("Logged model %s (%s) for run %s", name, model_id, run_id)
-            # step = the last epoch, where the run already has these values: the run's charts
-            # get no stray point.
-            for key, value in epoch_metrics.items():
-                if key.startswith("val/"):
-                    client.log_metric(run_id, key, value, step=last_epoch, model_id=model_id)
-            client.set_tag(run_id, "kaos.logged_model_id", model_id)
-        except Exception as exc:  # noqa: BLE001
-            _logger.warning("Failed to log model %s for run %s (%s); model-registration will "
-                            "register best.pt from its lakeFS path", name, run_id, exc)
+            _logger.warning("Failed to tag MLflow run %s with kaos_lib.version", run_id)
 
     # ------------------------------------------------------------------
     # Post-training export / quantization
@@ -731,21 +399,19 @@ class TrainingService:
         self,
         model: Any,
         params: "TrainingParams",
-        save_dir: Path,
         data_yaml_path: str,
     ) -> dict[str, str]:
         """Export trained model to requested formats/precisions.
 
-        Uploads each exported file to S3 and logs it as an MLflow artifact.
-        Errors are non-fatal — training has already succeeded.
+        Copies each exported file into the step's output folder and logs it as an MLflow
+        artifact. Errors are non-fatal — training has already succeeded.
 
         Returns
         -------
         dict[str, str]
-            Map of ``{format}_{precision}`` labels to S3 URIs.
+            Map of ``{format}_{precision}`` labels to file names in the output folder.
         """
         exported: dict[str, str] = {}
-        base_key = checkpoint_base(params)
         mlflow_run_id = self._get_mlflow_run_id()
 
         for fmt in params.export.formats:
@@ -785,14 +451,9 @@ class TrainingService:
                         )
                         continue
 
-                    # Upload to S3
-                    s3_key = f"{base_key}/{exported_path.name}"
-                    self._upload_to_s3(
-                        exported_path, params.checkpoint_bucket, s3_key
-                    )
-                    s3_uri = f"s3://{params.checkpoint_bucket}/{s3_key}"
-                    exported[label] = s3_uri
-                    self._logger.info("Uploaded %s to %s", label, s3_uri)
+                    shutil.copy(exported_path, Path(params.checkpoints_dir) / exported_path.name)
+                    exported[label] = exported_path.name
+                    self._logger.info("Exported %s as %s", label, exported_path.name)
 
                     # Log as MLflow artifact (run is closed, use MlflowClient)
                     self._log_mlflow_artifact(
@@ -839,47 +500,16 @@ class TrainingService:
         """Evaluate best.pt and last.pt on the test split and log to MLflow.
 
         Reporting only — never fails the run.  Skipped with a warning if
-        the test split is not available for the current dataset source
-        mode (local: ``images/test/`` absent or empty; S3 streaming: no
-        ``test`` key in ``dataset_manifest.json``).
-
-        In S3 streaming modes the evaluation uses a configured
-        :class:`S3PoseValidator` so images (and optionally labels) are
-        streamed from S3 exactly as they are during training.
+        ``images/test/`` is absent or empty.
         """
         if not self._is_test_split_available(params):
             self._logger.warning(
-                "Test split not available in source=%s mode; "
-                "skipping post-training evaluation.",
-                params.source,
+                "Test split not available (images/test/ absent or empty); "
+                "skipping post-training evaluation."
             )
             return
 
         mlflow_run_id = self._get_mlflow_run_id()
-
-        s3_validator_cls: Any = None
-        if params.source == "s3":
-            from app.services.s3_pose_validator import (  # noqa: PLC0415
-                make_s3_pose_validator,
-            )
-
-            cache_dir = str(tmp_path / "s3_val_cache")
-            labels_root = str(Path(params.dataset_dir).resolve() / "labels")
-            s3_labels_prefix = params.s3_prefix if params.s3_stream_labels else None
-            s3_validator_cls = make_s3_pose_validator(
-                s3_client=self._s3,
-                s3_bucket=params.s3_bucket,  # type: ignore[arg-type]
-                s3_prefix=params.s3_prefix,  # type: ignore[arg-type]
-                local_labels_root=labels_root,
-                s3_labels_prefix=s3_labels_prefix,
-                cache_dir=cache_dir,
-                cache_max_bytes=params.disk_cache_bytes,
-            )
-            self._logger.info(
-                "Test evaluation will stream from s3://%s/%s",
-                params.s3_bucket,
-                params.s3_prefix,
-            )
 
         weights_dir = save_dir / "weights"
         checkpoints: list[tuple[str, Path]] = [
@@ -912,8 +542,6 @@ class TrainingService:
                     "plots": True,
                     "save_json": False,
                 }
-                if s3_validator_cls is not None:
-                    val_kwargs["validator"] = s3_validator_cls
                 results = eval_model.val(**val_kwargs)
 
                 self._log_test_eval_results(
@@ -929,25 +557,11 @@ class TrainingService:
                 )
 
     def _is_test_split_available(self, params: TrainingParams) -> bool:
-        """Return True iff a test split is reachable under the current mode."""
-        if params.source == "local":
-            test_dir = Path(params.dataset_dir) / "images" / "test"
-            if not test_dir.is_dir():
-                return False
-            return any(
-                f.suffix.lower() in _IMAGE_EXTENSIONS for f in test_dir.iterdir()
-            )
-
-        # S3 streaming — consult dataset_manifest.json
-        manifest_path = Path(params.dataset_dir) / _MANIFEST_FILENAME
-        if not manifest_path.exists():
+        """Return True iff ``images/test/`` holds at least one image."""
+        test_dir = Path(params.dataset_dir) / "images" / "test"
+        if not test_dir.is_dir():
             return False
-        try:
-            with manifest_path.open() as fh:
-                raw = json.load(fh)
-        except Exception:  # noqa: BLE001
-            return False
-        return bool(raw.get("splits", {}).get("test"))
+        return any(f.suffix.lower() in _IMAGE_EXTENSIONS for f in test_dir.iterdir())
 
     def _log_test_eval_results(
         self,
@@ -1012,59 +626,11 @@ class TrainingService:
             )
 
     # ------------------------------------------------------------------
-    # GPU index parsing
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _parse_gpu_index(device: Any) -> "int | None":
-        """Extract a single integer GPU index from a device string.
-
-        Returns the integer index when ``device`` is a single GPU (e.g. ``"0"``
-        or ``0``).  Returns ``None`` for CPU or multi-GPU strings (``"0,1"``).
-        When ``device`` is ``None`` (yolo auto-select), defaults to GPU 0
-        if a GPU is available so that the ResourceMonitor still tracks GPU metrics
-        on single-GPU machines.
-
-        Examples
-        --------
-        >>> _parse_gpu_index("0")   # -> 0
-        >>> _parse_gpu_index(0)     # -> 0
-        >>> _parse_gpu_index("0,1") # -> None  (multi-GPU — monitor skipped)
-        >>> _parse_gpu_index("cpu") # -> None
-        >>> _parse_gpu_index(None)  # -> 0 if GPU available, else None
-        """
-        if device is None:
-            from app.services.resource_monitor import gpu_available  # noqa: PLC0415
-
-            return 0 if gpu_available() else None
-        s = str(device).strip()
-        if s.isdigit():
-            return int(s)
-        return None
-
-    # ------------------------------------------------------------------
     # Parameter validation
     # ------------------------------------------------------------------
 
     def _validate_params(self, params: TrainingParams) -> None:
-        """Raise TrainingError for mutually exclusive or missing parameters."""
-        if params.pretrained_weights and params.resume_from:
-            raise TrainingError(
-                "--pretrained-weights and --resume-from are mutually exclusive. "
-                "Use --pretrained-weights to initialise weights only (epoch 0), "
-                "or --resume-from to restore the full training state."
-            )
-
-        if params.source == "s3":
-            if not params.s3_bucket:
-                raise TrainingError(
-                    "--s3-bucket is required when --source=s3"
-                )
-            if not params.s3_prefix:
-                raise TrainingError(
-                    "--s3-prefix is required when --source=s3"
-                )
-
+        """Raise TrainingError when the dataset folder is missing."""
         dataset_path = Path(params.dataset_dir)
         if not dataset_path.exists():
             raise TrainingError(
@@ -1141,21 +707,13 @@ class TrainingService:
         """Determine the path passed to YOLO().
 
         Priority (highest first):
-        1. resume_from — download from S3 if needed; return the .pt path so
-           that YOLO() loads the full trainer state (resume=True handled in
-           train_kwargs).
-        2. pretrained_weights — download from S3 if needed; return the .pt path
-           for weight-only initialisation.
-        3. model_variant — return the bare variant name so that yolo
+        1. pretrained_weights — a local .pt, or ``s3://<repository>/<ref>/<path>`` in lakeFS,
+           downloaded to tmp_path; weight-only initialisation.
+        2. model_variant — return the bare variant name so that yolo
            downloads COCO pretrained weights from its CDN on first use.
         """
-        if params.resume_from and params.resume_from != "auto":
-            return self._maybe_download_pt(params.resume_from, tmp_path, "resume")
-
         if params.pretrained_weights:
-            return self._maybe_download_pt(
-                params.pretrained_weights, tmp_path, "pretrained"
-            )
+            return self._fetch_weights(params.pretrained_weights, tmp_path)
 
         # Bare variant name: yolo downloads the COCO-pretrained asset on
         # first use — INTO THE PATH WE HAND IT. A bare name means the current
@@ -1167,37 +725,21 @@ class TrainingService:
         weights_dir.mkdir(parents=True, exist_ok=True)
         return weights_dir / params.model_variant
 
-    def _maybe_download_pt(
-        self, uri_or_path: str, tmp_path: Path, label: str
-    ) -> Path:
-        """Download a .pt file from S3 to tmp_path if uri starts with s3://,
-        otherwise treat it as an already-local path and return it directly.
-        """
+    def _fetch_weights(self, uri_or_path: str, tmp_path: Path) -> Path:
+        """A local .pt as it is; ``s3://<repository>/<ref>/<path>`` downloaded from lakeFS."""
         match = _S3_URI_RE.match(uri_or_path)
-        if match:
-            bucket = match.group(1)
-            key = match.group(2)
-            local_pt = tmp_path / f"{label}_weights.pt"
-            self._logger.info(
-                "Downloading %s weights from s3://%s/%s -> %s",
-                label,
-                bucket,
-                key,
-                local_pt,
-            )
-            if bucket.startswith(("outputs-", "dataset-")):
-                # a lakeFS repository (our naming rule): read with the kubecore client,
-                # which works with the app's keys in-cluster and the bearer on HPC
-                return Path(lakefs_io.download_object(uri_or_path, str(tmp_path)))
-            self._s3.download_file(bucket, key, str(local_pt))
+        if not match:
+            local_pt = Path(uri_or_path)
+            if not local_pt.exists():
+                raise TrainingError(f"pretrained weights path does not exist: {uri_or_path}")
             return local_pt
+        from kaos_lib.lakefs import LakeFS  # noqa: PLC0415
 
-        # Local path
-        local_pt = Path(uri_or_path)
-        if not local_pt.exists():
-            raise TrainingError(
-                f"{label} weights path does not exist: {uri_or_path}"
-            )
+        repo, key = match.group(1), match.group(2)
+        ref, _, path = key.partition("/")
+        local_pt = tmp_path / Path(path).name
+        self._logger.info("Downloading pretrained weights from %s -> %s", uri_or_path, local_pt)
+        LakeFS.connect().download_object(repo, ref, path, local_pt)
         return local_pt
 
     # ------------------------------------------------------------------
@@ -1207,7 +749,7 @@ class TrainingService:
     def _write_data_yaml(self, params: TrainingParams, tmp_path: Path) -> Path:
         """Write a data.yaml to the temp directory.
 
-        If dataset_dir already contains a data.yaml (written by the training entry),
+        If dataset_dir already contains a data.yaml (every YOLO dataset has one),
         we copy it into the temp dir and update the ``path`` field to the
         absolute dataset_dir. Otherwise we generate a minimal pose-estimation
         template.
@@ -1239,15 +781,6 @@ class TrainingService:
         # Always set path to the resolved absolute dataset directory
         content["path"] = str(dataset_path)
 
-        # In S3 streaming mode only data.yaml is local.
-        # yolo validates that image directories exist at init time
-        # (before S3PoseTrainer takes over), so we create empty stubs.
-        if params.source == "s3":
-            for split_key in ("train", "val", "test"):
-                rel = content.get(split_key)
-                if rel:
-                    (dataset_path / rel).mkdir(parents=True, exist_ok=True)
-
         with dest_yaml.open("w") as fh:
             yaml.dump(content, fh, default_flow_style=False, sort_keys=False)
 
@@ -1264,20 +797,14 @@ class TrainingService:
 
         On a shared Slurm node (kubecore-operator PRD-HPC-1609) the step owns one slot's cores,
         but ``os.cpu_count()``, which yolo sizes by, still counts every core of the node.
-        kaos-lib's ``runtime.usable_cpus()`` is the slot's cores, else the CPU binding; an older
-        kaos-lib without it falls back to the CPU binding here. 0 (single-process loading) stays 0.
+        kaos-lib's ``runtime.usable_cpus()`` is the slot's cores, else the CPU binding. 0 (single-process
+        loading) stays 0.
         """
         if workers <= 0:
             return workers
-        try:
-            from kaos_lib import runtime
+        from kaos_lib import runtime
 
-            usable = runtime.usable_cpus()
-        except (ImportError, AttributeError):
-            try:
-                usable = len(os.sched_getaffinity(0))
-            except (AttributeError, OSError):
-                usable = os.cpu_count() or 1
+        usable = runtime.usable_cpus()
         capped = max(1, min(workers, usable - 1))
         if capped != workers:
             _logger.info("DataLoader workers %d -> %d: this step may use %d cores", workers, capped, usable)
@@ -1317,9 +844,7 @@ class TrainingService:
     ) -> dict[str, Any]:
         """Build the keyword arguments dict for model.train().
 
-        When resume_from is 'auto' or a .pt path, yolo restores full
-        training state via resume=True. The data and project/name are still
-        passed for path resolution.
+        A continued step resumes from the checkpoint folder: kaos-lib sets resume itself.
         """
         aug = params.augmentation
 
@@ -1379,103 +904,36 @@ class TrainingService:
         if params.freeze is not None:
             kwargs["freeze"] = params.freeze
 
-        # Full yolo resume
-        if params.resume_from:
-            kwargs["resume"] = True
-
         return kwargs
 
     # ------------------------------------------------------------------
-    # S3 checkpoint upload
+    # Weights into the step's output folder
     # ------------------------------------------------------------------
 
-    def _upload_final_weights(
-        self, params: TrainingParams, save_dir: Path
-    ) -> str:
-        """Upload best.pt and last.pt to S3 after training completes.
+    def _collect_weights(self, params: TrainingParams, save_dir: Path) -> str:
+        """Copy best.pt and last.pt into the step's output folder (``checkpoints_dir``).
 
         Returns
         -------
         str
-            The s3:// URI of the checkpoint later steps load: best.pt, or last.pt when this run
+            The file name of the checkpoint later steps load: best.pt, or last.pt when this run
             produced no best.pt (Ultralytics writes best.pt only when an epoch beats the best
             fitness, so a continued run that peaked before its interruption has none unless
             kaos-lib restored it). Never empty: a run with no weights at all raises.
         """
-        base_key = checkpoint_base(params)
-        best_key = f"{base_key}/best.pt"
-        last_key = f"{base_key}/last.pt"
-
         best_pt = save_dir / "weights" / "best.pt"
         last_pt = save_dir / "weights" / "last.pt"
-
-        best_uri = f"s3://{params.checkpoint_bucket}/{best_key}"
-        last_uri = f"s3://{params.checkpoint_bucket}/{last_key}"
-
         if not best_pt.exists() and not last_pt.exists():
             raise TrainingError(
                 f"training finished but left no weights: neither {best_pt} nor {last_pt} exists"
             )
-
+        for weights in (best_pt, last_pt):
+            if weights.exists():
+                shutil.copy(weights, Path(params.checkpoints_dir) / weights.name)
+                self._logger.info("Saved %s in the output folder", weights.name)
         if best_pt.exists():
-            self._upload_to_s3(best_pt, params.checkpoint_bucket, best_key)
-            self._logger.info("Uploaded best.pt to %s", best_uri)
-
-        if last_pt.exists():
-            self._upload_to_s3(last_pt, params.checkpoint_bucket, last_key)
-            self._logger.info(
-                "Uploaded last.pt to s3://%s/%s",
-                params.checkpoint_bucket,
-                last_key,
-            )
-
-        if best_pt.exists():
-            return best_uri
+            return best_pt.name
         self._logger.warning(
-            "best.pt not found at %s; downstream steps get last.pt (%s) as the checkpoint.",
-            best_pt,
-            last_uri,
+            "best.pt not found at %s; later steps get last.pt as the checkpoint.", best_pt
         )
-        return last_uri
-
-    def _commit_outputs(self, params: TrainingParams) -> str:
-        """Merge the run branch into ``main`` of ``outputs-<app>``: ONE commit per step per run,
-        carrying the dataset ref/commit and the MLflow run id; the branch is deleted.
-        Returns the merge commit on main.
-
-        A failure is fatal: results that never reached main must not look like success.
-        """
-        try:
-            commit = self._run_writer.finish({
-                "dataset_ref": _dataset_ref(params),
-                "dataset_commit": params.lakefs_commit or "",
-                "mlflow_run_id": self._get_mlflow_run_id() or "",
-            })
-        except Exception as exc:  # noqa: BLE001 - re-raised with the repository named
-            raise TrainingError(
-                f"merging results into {params.checkpoint_bucket} failed: {exc}") from exc
-        self._logger.info("Results merged into %s main: %s", params.checkpoint_bucket, commit)
-        return commit
-
-    def _open_run_writer(self, params: TrainingParams) -> None:
-        """Open the run's writer on ``outputs-<app>``: results are saved on the branch
-        ``run-<run>-checkpoints`` and merged to ``main`` once, at the end. Training never resumes from
-        it; resuming is the platform checkpoint folder's job (``KAOS_CHECKPOINT_DIR``)."""
-        self._run_writer = lakefs_io.run_writer(params.checkpoint_bucket, params.experiment_name)
-
-    def _upload_to_s3(self, local_path: Path, bucket: str, key: str) -> None:
-        """Save one result file on the run branch (a durable commit on ``run-<run>-checkpoints``).
-
-        ``bucket``/``key`` keep the ``{branch}/{path}`` vocabulary of the URIs we hand to later
-        steps; only the file name is used, the location comes from the run writer
-        (``checkpoints/<experiment>/<run>/<name>``).
-        """
-        if self._outputs_stage is None or self._run_writer is None:
-            raise TrainingError("no run writer: _upload_to_s3 outside a training run")
-        name = Path(key).name
-        try:
-            staged = self._outputs_stage / name
-            shutil.copy(local_path, staged)
-            self._run_writer.save([staged], f"checkpoints: {name}")
-        except Exception as exc:  # noqa: BLE001
-            raise TrainingError(f"saving {key} for {bucket} failed: {exc}") from exc
+        return last_pt.name

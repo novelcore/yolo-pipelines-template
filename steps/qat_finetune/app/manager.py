@@ -1,15 +1,9 @@
-"""Manager for the QAT fine-tune pipeline step.
-
-Wires together Config and QATService.
-"""
+"""Manager for the QAT fine-tune pipeline step."""
 
 import logging
-import os
 from typing import Optional
 
-
 from app.logger import setup_logging
-from app.models.config import Config
 from app.models.quantization import QATParams, QATResult
 from app.services.qat_service import QATService
 
@@ -17,20 +11,10 @@ from app.services.qat_service import QATService
 class Manager:
     """Orchestrates the QAT fine-tune step."""
 
-    def __init__(self, config: Optional[Config] = None) -> None:
-        self._config = config or Config()
-
-        setup_logging(level=self._config.log_level)
+    def __init__(self) -> None:
+        setup_logging()
         self._logger = logging.getLogger(__name__)
-
-        if self._config.mlflow_tracking_username:
-            os.environ["MLFLOW_TRACKING_USERNAME"] = self._config.mlflow_tracking_username
-        if self._config.mlflow_tracking_password:
-            os.environ["MLFLOW_TRACKING_PASSWORD"] = self._config.mlflow_tracking_password
-
-        self._service = QATService(
-            mlflow_tracking_uri=self._config.mlflow_tracking_uri,
-        )
+        self._service = QATService()
 
     def run(
         self,
@@ -38,7 +22,7 @@ class Manager:
         source_mlflow_run_id: str,
         dataset_dir: str,
         output_dir: str,
-        output_bucket: str,
+        export_dir: str,
         experiment_name: str,
         image_size: int = 640,
         device: Optional[str] = None,
@@ -51,8 +35,7 @@ class Manager:
     ) -> QATResult:
         """Execute the QAT fine-tune step."""
         self._logger.info(
-            "Starting %s | source_run=%s checkpoint=%s",
-            self._config.app_name,
+            "Starting qat-finetune | source_run=%s checkpoint=%s",
             source_mlflow_run_id,
             fp32_checkpoint_path,
         )
@@ -62,7 +45,7 @@ class Manager:
             source_mlflow_run_id=source_mlflow_run_id,
             dataset_dir=dataset_dir,
             output_dir=output_dir,
-            output_bucket=output_bucket,
+            export_dir=export_dir,
             experiment_name=experiment_name,
             image_size=image_size,
             device=device,

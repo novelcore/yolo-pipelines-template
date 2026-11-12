@@ -28,11 +28,3 @@ def test_without_a_slot_the_cpu_binding_counts(monkeypatch):
     monkeypatch.delenv("KUBECORE_SLOT_CPUS", raising=False)
     bound = len(os.sched_getaffinity(0))
     assert _cap()(10_000) == max(1, bound - 1)
-
-
-def test_an_older_kaos_lib_without_usable_cpus_falls_back_to_the_binding(monkeypatch):
-    import os
-    from kaos_lib import runtime
-    monkeypatch.delattr(runtime, "usable_cpus")
-    monkeypatch.setenv("KUBECORE_SLOT_CPUS", "2")   # an old kaos-lib cannot read it; the binding still counts
-    assert _cap()(10_000) == max(1, len(os.sched_getaffinity(0)) - 1)

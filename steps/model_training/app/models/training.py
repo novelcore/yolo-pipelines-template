@@ -70,7 +70,7 @@ class TrainingParams(BaseModel):
         description="YOLO model variant file, e.g. 'yolov8n-pose.pt'."
     )
     experiment_name: str = Field(
-        description="MLflow experiment name and S3 checkpoint prefix."
+        description="MLflow experiment name."
     )
     dataset_dir: str = Field(
         description="Local directory containing the downloaded YOLO dataset."
@@ -78,45 +78,19 @@ class TrainingParams(BaseModel):
     output_dir: str = Field(
         description="Local directory for yolo runs/ output."
     )
-
-    # ---- Dataset source ----
-    source: str = Field(
-        pattern=r"^(local|s3)$",
-        description=(
-            "Dataset read mode: 'local' reads from dataset_dir, "
-            "'s3' streams images directly from S3."
-        ),
+    run_name: str = Field(
+        description="The run's name: the MLflow run's name and the folder of its results."
     )
-    s3_bucket: Optional[str] = Field(
-        default=None,
-        description="S3 bucket containing images (required when source='s3').",
-    )
-    s3_prefix: Optional[str] = Field(
-        default=None,
-        description="S3 key prefix for images (required when source='s3').",
-    )
-    s3_stream_labels: bool = Field(
-        default=False,
-        description=(
-            "When True, labels are streamed from S3 during training instead "
-            "of read from local disk. Set automatically when the dataset "
-            "manifest contains label_keys (manifest-only mode)."
-        ),
+    checkpoints_dir: str = Field(
+        description="The step's output folder: best.pt, last.pt and the exports are copied here."
     )
 
-    # ---- Weight initialisation / resume ----
+    # ---- Weight initialisation ----
     pretrained_weights: Optional[str] = Field(
         default=None,
         description=(
-            "Local path or s3:// URI to a custom .pt file. "
+            "Local path or s3://<repository>/<ref>/<path> in lakeFS of a custom .pt file. "
             "Loads weights only; training starts from epoch 0."
-        ),
-    )
-    resume_from: Optional[str] = Field(
-        default=None,
-        description=(
-            "'auto', local path, or s3:// URI for full yolo resume "
-            "(restores epoch counter, optimizer, and scheduler state)."
         ),
     )
 
@@ -186,21 +160,12 @@ class TrainingParams(BaseModel):
         description=(
             "Device to train on: '0', '0,1', 'cpu', or None for yolo "
             "auto-select. When a single integer GPU index is given (e.g. '0') "
-            "the ResourceMonitor will track only that GPU."
+            "that GPU is used."
         ),
-    )
-
-    # ---- S3 streaming cache ----
-    disk_cache_bytes: int = Field(
-        default=2 * 1024**3,
-        gt=0,
-        description="Maximum disk budget (bytes) for the S3 image streaming cache.",
     )
 
     # ---- Checkpointing ----
     checkpoint_interval: int = Field(default=10, gt=0)
-    checkpoint_bucket: str = Field(default="temp-mlops")
-    checkpoint_prefix: str = Field(default="checkpoints")
 
     # ---- Augmentation ----
     augmentation: AugmentationParams = Field(default_factory=AugmentationParams)
@@ -208,40 +173,28 @@ class TrainingParams(BaseModel):
     # ---- Export / Quantization ----
     export: ExportConfig = Field(default_factory=ExportConfig)
 
-    # ---- Dataset provenance (FR-03) ----
-    dataset_repo: Optional[str] = Field(
-        default=None,
-        description="The dataset's lakeFS repository (dataset-<name>).",
-    )
-    dataset_version: Optional[str] = Field(
-        default=None,
-        description="Dataset version the run picked: a vN tag or 'latest'.",
-    )
-    lakefs_commit: Optional[str] = Field(
-        default=None,
-        description="LakeFS commit the dataset version resolved to (pinned for the run).",
-    )
-    config_hash: Optional[str] = Field(
-        default=None,
-        description="SHA-256 of the canonical pipeline config JSON (from config_validation).",
-    )
-
 
 class TrainingResult(BaseModel):
-    """Outcome of a completed training run."""
+    """Outcome of a completed training run: the values the step hands on."""
 
     experiment_name: str
     model_variant: str
     mlflow_run_id: str
-    best_checkpoint_local: str = Field(description="Local path to best.pt.")
-    best_checkpoint_s3: str = Field(description="S3 URI where best.pt was uploaded.")
+    best_checkpoint: str = Field(
+        description="File name, in the step's output folder, of the checkpoint later steps load: best.pt, or last.pt."
+    )
     epochs_completed: int
+    image_size: int
     final_map50: float
     final_map50_95: float
+    val_metrics: dict[str, float] = Field(
+        default_factory=dict,
+        description="The last epoch's validation metrics (val/precision, val/recall, val/mAP50, val/mAP50_95).",
+    )
     exported_models: dict[str, str] = Field(
         default_factory=dict,
         description=(
-            "Map of export label to S3 URI, e.g. {'engine_fp16': 's3://...'}. "
+            "Map of export label to file name in the output folder, e.g. {'engine_fp16': 'best.engine'}. "
             "Empty when export is disabled."
         ),
     )

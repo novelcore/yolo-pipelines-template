@@ -1,67 +1,70 @@
 # Datasets
 
-A dataset is a **lakeFS repository** named `dataset-<name>`. Your project starts with one,
-`dataset-default`.
+The pipeline reads one dataset and writes one. Datasets, versions and the form field that picks one are explained in the
+guide: [Read data](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/read-data.html) and [Produce a dataset](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/produce-a-dataset.html). The commands are in its
+[Reference](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/reference.html#commands).
 
-| thing | what it is |
-|---|---|
-| version | a tag on `main`: `v1`, `v2`, … |
-| `latest` | the newest data on `main` |
-| change | a pull request into `main`, reviewed and merged by a person |
-| pick | `dataset = <repository>@<version>` in the run form |
-| results | never written to a dataset: they go to `outputs-<pipeline>` |
+## The folder shape the pipeline reads
 
-A run reads **one commit**: the one its pick resolves to. Merging new data during a run does not
-change what that run reads.
-
-## The layout this pipeline reads
+A yolo dataset has this shape at the root of the repository. The names matter. Anything else in the repository, such as a
+README, is ignored.
 
 ```
-data.yaml                 path, train, val, test, names, kpt_shape, flip_idx
-images/{train,val,test}/   the images
-labels/{train,val,test}/   one .txt per image: class x y w h, then the keypoints
+dataset-spacecraft/
+  data.yaml                 the classes, the keypoints and where the splits are
+  images/train/a.jpg ...    training images
+  images/val/a.jpg ...      validation images
+  images/test/ ...          optional
+  labels/train/a.txt ...    one text file per image, same name
+  labels/val/a.txt ...
 ```
 
-at the **root** of the repository. Anything else in the repository (a README, notes) is ignored.
+`data.yaml` for a pose dataset with one class and four keypoints:
 
-This pipeline trains **pose**, so `data.yaml` also needs `kpt_shape` and `flip_idx`
-([Upload images and labels](prepare-dataset.md)).
+```yaml
+path: .
+train: images/train
+val: images/val
+test: images/test
+nc: 1
+names:
+  0: spacecraft
+kpt_shape: [4, 3]          # 4 keypoints, each as x y visibility
+flip_idx: [0, 3, 2, 1]     # which keypoint each one becomes when the image is flipped left-right
+```
 
-## Layouts
+One line per object in every label file: the class id, the box (centre x, centre y, width, height), then `x y visibility`
+for each keypoint. All coordinates are between 0 and 1.
 
-A *layout* is a named folder shape plus the checks for it. A new dataset has **no layout** unless you name one: `kaosctl dataset create <name> --layout yolo --classes a,b` starts a repository with the `yolo`
-layout (the starter files above, plus the checks that `validate` and `push` run). `kaosctl layout list` shows the layouts you can use, `kaosctl layout show yolo` prints one, and `kaosctl layout validate <dir> --layout yolo` checks a folder. You can do without it:
+```
+0 0.481 0.512 0.230 0.310  0.40 0.42 2  0.55 0.41 2  0.56 0.60 2  0.41 0.61 1
+```
 
-- `kaosctl dataset create <name>` (or `--layout none`) makes an empty `dataset-<name>`.
-- A repository named `dataset-<something>` created by hand in lakeFS becomes a dataset after its
-  first commit.
-- A repository with **no layout validates nothing**; `push` takes the files as they are.
-  Pass `--layout yolo` to `push` or `validate` to get the YOLO checks anyway.
-- In Python, `kaos_lib.datasets.materialize(DatasetRef.parse("<repo>@<ref>"))` reads any dataset you may read, `<ref>` being `vN`,
-  `latest`, a branch, a tag or a commit id. The run form's dropdown lists the datasets and their versions, newest first, then `@latest`, and updates within about a minute of a release.
+This pipeline trains pose, so `kpt_shape` and `flip_idx` are required for it to work, even though the check below does not
+insist on them.
 
-## The commands
+## Create, check and push it
 
-`kaosctl` comes with kaos-lib (0.4.0rc23 at the time of writing; [install it](prepare-dataset.md#install-and-sign-in)).
+A new dataset has no layout unless you name one. The `yolo` layout starts the repository with the files above and checks
+every push:
 
 ```bash
-kaosctl login
-kaosctl dataset create <name> [--layout yolo|none] [--classes a,b] [--description "..."]   # --classes needs --layout yolo
-kaosctl dataset list [--shared]
-kaosctl dataset versions <repo>
-kaosctl dataset pull <repo>@<ref> [dir] [--prefix folder/]
-kaosctl dataset validate <dir> [--layout yolo]        # = kaosctl layout validate <dir> --layout yolo
-kaosctl dataset push <dir> <repo> -m "message" [--layout yolo] [--no-validate]
-kaosctl dataset release <repo>
+kaosctl dataset create spacecraft --layout yolo --classes spacecraft
+kaosctl dataset pull dataset-spacecraft@latest ./dataset-spacecraft
+kaosctl layout validate ./dataset-spacecraft --layout yolo
+kaosctl dataset push ./dataset-spacecraft dataset-spacecraft -m "first 200 labelled images"
 ```
 
-In the browser, lakeFS's **Datasets** page has **New dataset**, upload on a branch with a pull
-request, and **Release version**. Sharing a dataset with another project is done in the console
-(**Datasets** → the dataset → **Sharing**, by the owning project's admins); see [Use a dataset shared with you](shared-dataset.md). The kaos-lib guide explains each task once: [Datasets](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/datasets.html) (the commands, [in the browser](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/datasets.html#in-the-browser), [layouts](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/datasets.html#layouts)) and [sharing a dataset](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/shared-datasets.html#share-a-dataset-the-owning-project).
+`validate` lists every problem at once and exits with code 2, for example `images/val/a.jpg has no labels/val/a.txt`.
+`push` opens a pull request into the dataset; merge it, then release a version with
+`kaosctl dataset release dataset-spacecraft`. Several classes: `--classes a,b,c`, the first is id 0.
 
-Every command prints the next step and the link to what it made. Exit codes: 0 ok, 1 something for
-you to fix (one `ERROR:` line), 2 an invalid dataset.
+## The dataset the pipeline writes
 
-!!! note "Who may do what"
-    Reading a dataset needs read rights, which the pipeline has. Creating a dataset, pushing, and
-    releasing a version are for people: a step can never write to a dataset.
+The first step that touches your data, `prepare-data`, writes it again as the dataset `dataset-<your app>-prepared`
+(`<your app>` is the name of your app; the steps only ever use the short name `prepared`): all of it, or a reproducible subset
+when you set `data-sample_size` ([What the pipeline does](the-pipeline.md#prepare-data-the-first-step-writes-a-dataset)).
+It is a dataset like yours, with versions, but only the pipeline writes it: you can read it and pick a version, never push
+to it. Training reads exactly the version of the run that wrote it. Its `latest` moves only when you ask for it in the run's
+advanced config (`plan: {promote: {prepared: true}}`), so you can also train a later run on a prepared version by picking
+`dataset-<your app>-prepared@<version>` as the `dataset`.
