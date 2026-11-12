@@ -6,7 +6,7 @@ This page explains the six steps, so the run form makes sense. You submit the ru
 |---|---|---|---|
 | 1 | `config-validation` | always | checks your form values fit together (the INT8 settings, and that a pretrained-weights path exists). If something is off it stops here, in seconds, before any machine is paid for |
 | 2 | `prepare-data` | always | reads the one version of your `dataset` pick (for example `dataset-cats@v1`) that the platform pinned when the run started, and writes it as the dataset `prepared`: every image, or, with `data-sample_size`, that many images per split (with their labels), picked by `data-seed`. [Details](#prepare-data-the-first-step-writes-a-dataset) |
-| 3 | `model-training` | always | trains the YOLO pose model on a GPU for `train-epochs` epochs on exactly the version `prepare-data` wrote. It logs to MLflow (a checkpoint every `train-checkpointing-interval_epochs` epochs), and when run again (a retry, a lost machine, an HPC time limit) resumes from its last checkpoint |
+| 3 | `model-training` | always | trains the YOLO pose model on a GPU for `train-epochs` epochs on exactly the version `prepare-data` wrote. It logs to MLflow (a checkpoint every `train-checkpointing-interval_epochs` epochs), and when run again (a retry, a lost machine, the time limit) resumes from its last checkpoint |
 | 4 | `qat-finetune` | only when `quantization-mode` = `qat` | goes on training the model in a way that prepares it for INT8 |
 | 5 | `model-quantization` | when `quantization-mode` is `ptq` or `qat` | makes an INT8 `.tflite` model and compares it with the full model on `quantization-parity_frames` images. The result is logged to MLflow (`parity_passed`, `parity_max_abs_error`); it does not stop the run, so look at it before you use the INT8 file |
 | 6 | `model-registration` | always | registers the best checkpoint in MLflow, and optionally promotes it (`registration-promote_to`) |
@@ -30,7 +30,7 @@ prepares the data, trains a model and registers it. That is the simple path.
 
 ## When a step is run again
 
-A step whose machine is lost, or whose HPC (Slurm) time limit is reached, is run again and continues from its checkpoint
+A step whose machine is lost, or whose time limit is reached, is run again and continues from its checkpoint
 ([Long jobs](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/long-jobs.html)). What each step of this pipeline keeps:
 
 | step | kept | when it is run again |

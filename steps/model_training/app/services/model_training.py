@@ -11,7 +11,7 @@ Responsibilities
 5. Register yolo callbacks for per-epoch metric logging, console output and periodic MLflow
    checkpoint artifacts.
 6. Call model.train() with the full hyperparameter set. A step run again after a lost machine or
-   an HPC time limit continues from the checkpoint folder: kaos-lib hooks Ultralytics, nothing here.
+   the time limit continues from the checkpoint folder: kaos-lib hooks Ultralytics, nothing here.
 7. Copy best.pt and last.pt (and the exports) into the step's output folder; the step API saves it
    under ``checkpoints/<experiment>/<run>/`` of the app's outputs repository.
 8. Evaluate best.pt and last.pt on the test split (reporting only) and log metrics + plots to the
