@@ -3,7 +3,6 @@ import re
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
-from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from typing import Any, Optional
 
@@ -14,13 +13,8 @@ from app.models.registration import RegistrationParams, RegistrationResult
 
 
 def kaos_lib_version() -> str:
-    """The installed kaos-lib version (distribution `kaos-lib`, or `kubecore` before its first release)."""
-    for dist in ("kaos-lib", "kubecore"):
-        try:
-            return package_version(dist)
-        except PackageNotFoundError:
-            pass
-    return "unknown"
+    """The installed kaos-lib version."""
+    return package_version("kaos-lib")
 
 
 class ModelRegistrationError(Exception):
@@ -37,16 +31,13 @@ class ModelRegistrationService:
 
     Parameters
     ----------
-    mlflow_tracking_uri:
-        URI of the MLflow tracking server.
     max_retries:
         Number of attempts before giving up on an MLflow call.
     """
 
     _RETRY_DELAYS = (1, 2, 4)
 
-    def __init__(self, mlflow_tracking_uri: str, max_retries: int = 3) -> None:
-        self._mlflow_tracking_uri = mlflow_tracking_uri
+    def __init__(self, max_retries: int = 3) -> None:
         self._max_retries = max_retries
         self._logger = logging.getLogger(__name__)
 
@@ -54,28 +45,26 @@ class ModelRegistrationService:
         """Execute the full registration pipeline.
 
         1. Connect to MLflow.
-        2. Register best.pt under params.registered_model_name: from the training run's logged
-           model when it has one (the version links to the run and the logged model), else
-           from best.pt's lakeFS path.
+        2. Show best.pt in the experiment's Models tab: a logged model of the training run
+           whose weights stay in lakeFS, and register best.pt under params.registered_model_name
+           from it (the version links to the run and the logged model).
         3. Set lineage tags on the best.pt version.
         3b. Tag the training run's outputs commit in lakeFS and record the tag on the version.
         4. Optionally register last.pt and tag it.
         5. Optionally assign a registry alias (champion/challenger) to the best.pt version.
         6. Return a RegistrationResult.
         """
-        mlflow.set_tracking_uri(self._mlflow_tracking_uri)
         client = MlflowClient()
 
-        last_checkpoint_path = self._resolve_last_checkpoint(params)
-
         self._logger.info(
-            "Registering best.pt from %s under model '%s'",
-            params.best_checkpoint_path,
+            "Registering %s from %s under model '%s'",
+            params.checkpoint,
+            self._uri(params, params.checkpoint),
             params.registered_model_name,
         )
         best_version = self._register_checkpoint(
             client=client,
-            model_uri=self._best_model_uri(client, params),
+            model_uri=self._log_model(client, params),
             registered_model_name=params.registered_model_name,
         )
         self._logger.info("Registered best.pt as version %s", best_version)
@@ -91,15 +80,16 @@ class ModelRegistrationService:
             client=client,
             registered_model_name=params.registered_model_name,
             version=best_version,
-            mlflow_run_id=params.mlflow_run_id,
+            params=params,
         )
 
         last_version: Optional[int] = None
-        if last_checkpoint_path is not None:
-            self._logger.info("Registering last.pt from %s", last_checkpoint_path)
+        if params.checkpoint == "best.pt":  # no last.pt of its own when best.pt stands in for it
+            last_uri = self._uri(params, "last.pt")
+            self._logger.info("Registering last.pt from %s", last_uri)
             last_version = self._register_checkpoint(
                 client=client,
-                model_uri=last_checkpoint_path,
+                model_uri=last_uri,
                 registered_model_name=params.registered_model_name,
             )
             self._logger.info("Registered last.pt as version %s", last_version)
@@ -133,39 +123,56 @@ class ModelRegistrationService:
             promoted_to=promoted_to,
         )
 
-    def _resolve_last_checkpoint(self, params: RegistrationParams) -> Optional[str]:
-        """Return the last.pt S3 URI, deriving it from best.pt path if not given."""
-        if params.last_checkpoint_path is not None:
-            return params.last_checkpoint_path
+    @staticmethod
+    def _uri(params: RegistrationParams, name: str) -> str:
+        """``s3://<repository>/<commit>/<path><name>``: a file of the training results, pinned to its commit."""
+        return f"s3://{params.outputs_repo}/{params.outputs_commit}/{params.outputs_path}{name}"
 
-        if "best.pt" in params.best_checkpoint_path:
-            derived = params.best_checkpoint_path.replace("best.pt", "last.pt")
-            self._logger.debug("Derived last.pt path: %s", derived)
-            return derived
+    def _log_model(self, client: MlflowClient, params: RegistrationParams) -> str:
+        """Show best.pt in the experiment's Models tab and return ``models:/<id>`` to register from.
 
-        self._logger.warning(
-            "Cannot derive last.pt path from '%s' (no 'best.pt' substring); "
-            "skipping last.pt registration",
-            params.best_checkpoint_path,
-        )
-        return None
-
-    def _best_model_uri(self, client: MlflowClient, params: RegistrationParams) -> str:
-        """``models:/<id>`` of the logged model training made for best.pt (the run's
-        ``kaos.logged_model_id``); best.pt's lakeFS path for a run without one (older runs, or
-        training could not log it)."""
-        run = self._with_retry(lambda: client.get_run(params.mlflow_run_id))
-        model_id = run.data.tags.get("kaos.logged_model_id")
-        if model_id:
-            self._logger.info("Registering best.pt from logged model %s", model_id)
-            return f"models:/{model_id}"
-        self._logger.warning(
-            "Training run %s has no kaos.logged_model_id (a run from before logged models, or "
-            "training could not log it): registering best.pt from %s, not linked to the run",
-            params.mlflow_run_id,
-            params.best_checkpoint_path,
-        )
-        return params.best_checkpoint_path
+        An MLflow 3 logged model ``<experiment>-best`` whose weights stay in lakeFS
+        (``mlflow.create_external_model``), with the training run as its source, the training
+        settings as params, the ``kaos.*`` lakeFS tags and the final val metrics. The run gets
+        ``kaos.logged_model_id``. A retried step reuses the model this run already has.
+        """
+        name = f"{params.experiment_name}-best"
+        tags = {
+            "kaos.outputs_repo": params.outputs_repo,
+            "kaos.outputs_commit": params.outputs_commit,
+            "kaos.outputs_path": params.outputs_path,
+            "kaos.workflow": params.run_name,
+        }
+        if params.dataset_version:
+            tags["kaos.dataset_ref"] = params.dataset_version
+        run_id = params.mlflow_run_id
+        experiment_id = self._with_retry(lambda: client.get_run(run_id)).info.experiment_id
+        existing = self._with_retry(lambda: client.search_logged_models(
+            experiment_ids=[experiment_id],
+            filter_string=f"source_run_id = '{run_id}' AND name = '{name}'",
+            max_results=1,
+        ))
+        if existing:
+            model_id = existing[0].model_id
+            self._with_retry(lambda: client.set_logged_model_tags(model_id, tags))
+            self._logger.info("Run %s already has logged model %s (%s)", run_id, name, model_id)
+        else:
+            model_id = self._with_retry(lambda: mlflow.create_external_model(
+                name=name,
+                source_run_id=run_id,
+                experiment_id=experiment_id,
+                params={"epochs": str(params.epochs), "imgsz": str(params.image_size),
+                        "model_variant": str(params.model_variant)},
+                tags=tags,
+            )).model_id
+            self._logger.info("Logged model %s (%s) for run %s", name, model_id, run_id)
+        # step = the last epoch, where the run already has these values: the run's charts get no stray point.
+        for key, value in params.val_metrics.items():
+            self._with_retry(lambda k=key, v=value: client.log_metric(run_id, k, v, step=params.epochs,
+                                                                      model_id=model_id))
+        for key, value in {**tags, "kaos.logged_model_id": model_id}.items():
+            self._with_retry(lambda k=key, v=value: client.set_tag(run_id, k, v))
+        return f"models:/{model_id}"
 
     def _register_checkpoint(
         self,
@@ -202,10 +209,8 @@ class ModelRegistrationService:
             tags["dataset_commit"] = params.dataset_commit
         if params.dataset_sample_size is not None:
             tags["dataset_sample_size"] = str(params.dataset_sample_size)
-        if params.config_hash is not None:
-            tags["config_hash"] = params.config_hash
-        if params.git_commit is not None:
-            tags["git_commit"] = params.git_commit
+        if params.prepared_dataset is not None:
+            tags["prepared_dataset"] = params.prepared_dataset
         if params.model_variant is not None:
             tags["model_variant"] = params.model_variant
         if params.best_map50 is not None:
@@ -232,26 +237,14 @@ class ModelRegistrationService:
         client: MlflowClient,
         registered_model_name: str,
         version: int,
-        mlflow_run_id: str,
+        params: RegistrationParams,
     ) -> None:
-        """Tag the training run's merge commit in ``outputs-<app>`` as ``model-<slug>-v<N>``
+        """Tag the training results' commit in ``outputs-<app>`` as ``model-<slug>-v<N>``
         (kaos#1283) and set ``kaos.*`` tags on the model version.
 
-        The commit comes from the run's ``kaos.outputs_repo`` / ``kaos.outputs_commit`` tags
-        (written by model-training). A run without them is registered without a lakeFS tag.
         An existing tag on the same commit is a success; on another commit it is an error.
         """
-        run_tags = self._with_retry(lambda: client.get_run(mlflow_run_id)).data.tags
-        repo = run_tags.get("kaos.outputs_repo")
-        commit = run_tags.get("kaos.outputs_commit")
-        if not (repo and commit):
-            self._logger.warning(
-                "Training run %s has no kaos.outputs_commit (a run from before kaos#1283, "
-                "or training could not tag it): version %s gets no lakeFS tag",
-                mlflow_run_id,
-                version,
-            )
-            return
+        repo, commit = params.outputs_repo, params.outputs_commit
 
         from kaos_lib.errors import NotFoundError  # noqa: PLC0415
         from kaos_lib.lakefs import LakeFS  # noqa: PLC0415
@@ -275,9 +268,8 @@ class ModelRegistrationService:
             "kaos.outputs_repo": repo,
             "kaos.outputs_commit": commit,
             "kaos.lakefs_tag": tag,
+            "kaos.workflow": params.run_name,
         }
-        if run_tags.get("kaos.workflow"):
-            tags["kaos.workflow"] = run_tags["kaos.workflow"]
         for key, value in tags.items():
 
             def _set_tag(k: str = key, v: str = value) -> None:

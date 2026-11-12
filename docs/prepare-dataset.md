@@ -47,12 +47,12 @@ This pipeline trains **pose**, so `kpt_shape` and `flip_idx` are required for it
     ```bash
     python3 -m venv ~/.venvs/kaos && . ~/.venvs/kaos/bin/activate
     pip install --index-url https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib-rc/simple/ \
-        --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel,mlflow]==0.4.0rc23"
+        --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel,mlflow]>=0.5.0rc1"
     kaosctl --version
     kaosctl login
     ```
 
-    **You should see:** `kaosctl 0.4.0rc23`, then your browser opens to sign in. If it does not, copy the link `kaosctl` printed into the browser yourself.
+    **You should see:** `kaosctl 0.5.0` (or newer), then your browser opens to sign in. If it does not, copy the link `kaosctl` printed into the browser yourself.
 
 ## Create the dataset
 

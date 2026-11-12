@@ -179,19 +179,17 @@ def test_should_ignore_stop_until_an_epoch_is_saved(folder, resume, monkeypatch)
 
 @pytest.fixture
 def service(folder, monkeypatch):
-    """QATService with MLflow, ultralytics and lakeFS stubbed (only imported, never used by _finetune)."""
+    """QATService with MLflow and ultralytics stubbed (only imported, never used by _finetune)."""
     stub = types.ModuleType("mlflow")
     stub.log_metric = lambda *a, **k: None
     tracking = types.ModuleType("mlflow.tracking")
     tracking.MlflowClient = object
     ultra = types.ModuleType("ultralytics")
     ultra.YOLO = object
-    lakefs_io = types.ModuleType("app.services.lakefs_io")
     for name, mod in (("mlflow", stub), ("mlflow.tracking", tracking), ("ultralytics", ultra)):
         monkeypatch.setitem(sys.modules, name, mod)
-    mod = import_in("qat_finetune", "app.services.qat_service")  # lakefs_io imports kaos_lib only
-    del lakefs_io
-    return mod.QATService("http://mlflow")
+    mod = import_in("qat_finetune", "app.services.qat_service")
+    return mod.QATService()
 
 
 def fixed_loader():

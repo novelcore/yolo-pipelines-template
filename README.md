@@ -21,7 +21,7 @@ Something failed? [When something breaks](docs/troubleshooting.md). All the run-
 ```bash
 python3 -m venv ~/.venvs/kaos && . ~/.venvs/kaos/bin/activate
 pip install --index-url https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib-rc/simple/ \
-    --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel,mlflow]==0.4.0rc23"
+    --extra-index-url https://pypi.org/simple/ "kaos-lib[zitadel,mlflow]>=0.5.0rc1"
 kaosctl login                                    # inside your pipeline's folder
 kaosctl dataset create spacecraft --layout yolo --classes spacecraft   # a new dataset has no layout unless you ask
 # add images, labels and kpt_shape / flip_idx in data.yaml, then:
@@ -35,10 +35,10 @@ Then pick `dataset-spacecraft@v1` in the pipeline's **Run** form. `kaosctl` come
 ## The pipeline
 
 ```
-config-validation → model-training → qat-finetune → model-quantization → model-registration
+config-validation → prepare-data → model-training → qat-finetune → model-quantization → model-registration
 ```
 
-`qat-finetune` and `model-quantization` run only when `quantization-mode` is `qat` or `ptq` (`qat-finetune`: `qat` only). The whole pipeline is `pipeline.py`; **the `config/` tree is the run form**: each plain value is a field and each group folder (`config/model/`, `config/train/optimizer/`, ...) a dropdown.
+`prepare-data` writes the run's dataset again as the dataset `prepared`, all of it or a reproducible subset (`data-sample_size`, `data-seed`), and `model-training` trains on exactly that version. `qat-finetune` and `model-quantization` run only when `quantization-mode` is `qat` or `ptq` (`qat-finetune`: `qat` only). The whole pipeline is `pipeline.py`; **the `config/` tree is the run form**: each plain value is a field and each group folder (`config/model/`, `config/train/optimizer/`, ...) a dropdown.
 
 Long trainings are not lost: a step on a reclaimed machine, a failed node or an HPC (Slurm) time limit is run again
 by the platform and training continues from its last checkpoint, with nothing to call. A step that is longer than
@@ -51,14 +51,14 @@ the longest HPC run is continued in capped runs when it is resumable, and refuse
 pipeline.py            the steps
 config/                every setting: a field or a dropdown on the run form
 steps/<name>/          one folder per step (README.md in each)
-step_tests/            tests of the step code (DEVELOPER.md §15)
+step_tests/            tests of the step code (step_tests/README.md)
 scripts/               check-docs.sh, gen-parameters.py
 docs/                  the guide (mkdocs)
 ```
 
-Your pipeline is `pipeline.py`, `config/` and `steps/`; it holds no copy of the platform's pipeline engine. On your computer, `kaosctl render --context pipeline-context.yaml` renders the pipeline with the same engine the platform uses, `kaosctl dev` sets up each step's Python environment and `kaosctl step run <step>` runs one step ([Check and try a step](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/step-run.html)).
+Your pipeline is `pipeline.py`, `config/` and `steps/`; it holds no copy of the platform's pipeline engine. On your computer, `kaosctl render --context pipeline-context.yaml` renders the pipeline with the same engine the platform uses, `kaosctl dev` sets up each step's Python environment and `kaosctl step run <step>` runs one step, for example `kaosctl step run prepare-data --input dataset=./a-few-files` ([Check and try a step](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/step-run.html)).
 
-[ADD-A-STEP.md](ADD-A-STEP.md), [DEVELOPER.md](DEVELOPER.md). Check the guide before a pull request: `scripts/check-docs.sh`. `docs/parameters.md` is generated: `python scripts/gen-parameters.py`.
+Add a setting or a step: [Change the pipeline](docs/change-the-pipeline.md). Check the guide before a pull request: `scripts/check-docs.sh`. `docs/parameters.md` is generated: `python scripts/gen-parameters.py`.
 
 `scripts/check-docs.sh` is for the maintainers of the template. Before the strict build it runs three checks:
 
@@ -74,4 +74,4 @@ One topic has one page: what is true for every pipeline (datasets, checkpoints, 
 
 ## License
 
-**GNU Affero General Public License v3.0** (`AGPL-3.0-only`), see [LICENSE](LICENSE). It depends on a training library that is itself AGPL-3.0, and three files adapt that library's internals (`steps/model_training/app/services/s3_dataset.py`, `s3_pose_trainer.py` and `s3_pose_validator.py`), so the template as a whole carries that licence. Releases before this change were published under Apache-2.0, which may be redistributed under AGPL-3.0. A pipeline created from this template inherits these terms for the template's code.
+**GNU Affero General Public License v3.0** (`AGPL-3.0-only`), see [LICENSE](LICENSE). It depends on a training library (Ultralytics) that is itself AGPL-3.0, so the template as a whole carries that licence. Releases before this change were published under Apache-2.0, which may be redistributed under AGPL-3.0. A pipeline created from this template inherits these terms for the template's code.

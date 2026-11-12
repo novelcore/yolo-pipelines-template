@@ -11,7 +11,7 @@ class QATParams(BaseModel):
     # ── Source ────────────────────────────────────────────────────────────────
     fp32_checkpoint_path: str = Field(
         ...,
-        description="Local path or s3:// URI to the FP32 .pt checkpoint from model-training.",
+        description="Local path of the FP32 .pt checkpoint from model-training.",
     )
     source_mlflow_run_id: str = Field(
         ...,
@@ -27,11 +27,11 @@ class QATParams(BaseModel):
     # ── Output ────────────────────────────────────────────────────────────────
     output_dir: str = Field(
         ...,
-        description="Local directory for intermediate artifacts (downloaded checkpoint, TFLite).",
+        description="Local directory for intermediate artifacts (the TFLite before it is saved).",
     )
-    output_bucket: str = Field(
+    export_dir: str = Field(
         ...,
-        description="S3 bucket for TFLite artifact upload.",
+        description="The step's output folder: the INT8 TFLite is copied here.",
     )
 
     # ── MLflow ────────────────────────────────────────────────────────────────
@@ -95,9 +95,9 @@ class QATResult(BaseModel):
         ...,
         description="MLflow run ID of the model-training step (lineage).",
     )
-    tflite_s3_uri: str = Field(
+    tflite: str = Field(
         ...,
-        description="S3 URI of the produced INT8 TFLite artifact.",
+        description="File name, in the step's output folder, of the produced INT8 TFLite.",
     )
     parity_passed: bool = Field(
         ...,

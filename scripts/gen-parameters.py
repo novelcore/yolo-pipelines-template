@@ -58,15 +58,14 @@ for _f in AUG.model_fields:
     MODEL[f"image_processing-{_f}"] = (AUG, _f)
 
 D = {  # one line each; what the field does for you
-    "dataset": "The data to train on: `<dataset>@<version>` (`dataset-spacecraft@v1`, `@latest`), or `<owner>/<dataset>@<version>` for a dataset shared with you. You must set this: the default is an empty dataset in a new project.",
-    "experiment-name": "Names the MLflow experiment and the folder the weights go to. Reuse a name to compare runs.",
+    "dataset": "The data the run starts from: `<dataset>@<version>` (`dataset-spacecraft@v1`, `@latest`), or `<owner>/<dataset>@<version>` for a dataset shared with you. You must set this: the default is an empty dataset in a new project.",
+    "experiment-name": "Names the MLflow experiment and the folder the weights are saved in. Reuse a name to compare runs.",
     "experiment-description": "Free text stored on the MLflow run.",
     "model": "Dropdown: which model size to train.",
     "model-variant": "The model file behind the dropdown (set by `model`).",
-    "model-pretrained_weights": "An `s3://` path to your own weights to start from (weights only, training starts at epoch 0). Empty uses the bundled ones.",
-    "data-source": "Where the data comes from. Leave on `lakefs`.",
-    "data-sample_size": "Train on this many image and label pairs per split, to make a quick test. Empty uses all of it.",
-    "data-seed": "Random seed for the sampling above.",
+    "model-pretrained_weights": "An `s3://<repository>/<ref>/<path>` path to your own weights to start from (weights only, training starts at epoch 0). Empty uses the standard weights of the model.",
+    "data-sample_size": "Train on this many images, and their labels, per split (`train`, `val`, `test`), to make a quick test. `prepare-data` keeps them. Empty keeps every image.",
+    "data-seed": "Picks which images `data-sample_size` keeps: the same seed keeps the same images.",
     "train-epochs": "Training rounds.",
     "train-batch_size": "Images per step, a positive number.",
     "train-image_size": "Input size in pixels, a multiple of 32.",
@@ -86,8 +85,6 @@ D = {  # one line each; what the field does for you
     "train-loss-box": "Weight of the box loss.", "train-loss-cls": "Weight of the class loss.",
     "train-loss-dfl": "Weight of the distribution-focal loss.",
     "train-checkpointing-interval_epochs": "Log a checkpoint to MLflow every N epochs. Resuming after a lost machine is automatic and does not depend on it.",
-    "train-checkpointing-storage_path": "Where checkpoints go. Leave empty: your outputs repository is used.",
-    "train-checkpointing-resume_from": "Empty starts fresh; `auto` continues from the latest checkpoint; or a full `s3://` path.",
     "train-export-enabled": "Also export the trained model (TensorRT or ONNX) after training.",
     "train-export-formats": "Comma-separated: `engine`, `onnx`.", "train-export-precisions": "Comma-separated: `fp16`, `int8`.",
     "train-optimizer": "Dropdown: `sgd`, `adam`, `adamw`.",
@@ -186,8 +183,8 @@ def build():
          "Type, default and options come from the pipeline's `config/` folder; bounds come from the "
          "checks the steps run on the values. A field is a path with dashes: `train.batch_size` is `train-batch_size`. "
          "Fields set by a dropdown change when you pick another option, so their default is that of the option shown.", "",
-         "The form also has `<step>-class`, `<step>-cpu`, `<step>-mem` and `<step>-disk` for each step, "
-         "described in [Run on HPC (Slurm)](slurm.md).", "",
+         "The form also has a `<step>-class` field for each step: the machine it runs on, described in "
+         "[Run on HPC (Slurm)](slurm.md).", "",
          "!!! note \"Checked before training\"",
          "    With `quantization-mode` = `ptq` or `qat`, the first step (`config-validation`) checks that "
          "`quantization-calibration_frames` is from 100 to 10000, so a wrong value fails in seconds.", ""]

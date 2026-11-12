@@ -96,6 +96,7 @@ nav:
       - Promote a model: promote.md
       - Datasets: datasets.md
       - All the run-form fields: parameters.md
+      - Change the pipeline: change-the-pipeline.md
       - Under the hood (optional): datasets-in-the-steps.md
   - Help:
       - When something breaks: troubleshooting.md

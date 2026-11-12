@@ -3,7 +3,7 @@
 
 Every field of the **Run** form, with its type, default and allowed values. Type, default and options come from the pipeline's `config/` folder; bounds come from the checks the steps run on the values. A field is a path with dashes: `train.batch_size` is `train-batch_size`. Fields set by a dropdown change when you pick another option, so their default is that of the option shown.
 
-The form also has `<step>-class`, `<step>-cpu`, `<step>-mem` and `<step>-disk` for each step, described in [Run on HPC (Slurm)](slurm.md).
+The form also has a `<step>-class` field for each step: the machine it runs on, described in [Run on HPC (Slurm)](slurm.md).
 
 !!! note "Checked before training"
     With `quantization-mode` = `ptq` or `qat`, the first step (`config-validation`) checks that `quantization-calibration_frames` is from 100 to 10000, so a wrong value fails in seconds.
@@ -12,14 +12,14 @@ The form also has `<step>-class`, `<step>-cpu`, `<step>-mem` and `<step>-disk` f
 
 | field | type | default | allowed | what it does |
 |---|---|---|---|---|
-| `experiment-name` | text | `object-pose-v1-yolov8n` |  | Names the MLflow experiment and the folder the weights go to. Reuse a name to compare runs. |
+| `experiment-name` | text | `object-pose-v1-yolov8n` |  | Names the MLflow experiment and the folder the weights are saved in. Reuse a name to compare runs. |
 | `experiment-description` | text | empty |  | Free text stored on the MLflow run. |
 
 ## Dataset
 
 | field | type | default | allowed | what it does |
 |---|---|---|---|---|
-| `dataset` | text | `dataset-default@latest` |  | The data to train on: `<dataset>@<version>` (`dataset-spacecraft@v1`, `@latest`), or `<owner>/<dataset>@<version>` for a dataset shared with you. You must set this: the default is an empty dataset in a new project. |
+| `dataset` | text | `dataset-default@latest` |  | The data the run starts from: `<dataset>@<version>` (`dataset-spacecraft@v1`, `@latest`), or `<owner>/<dataset>@<version>` for a dataset shared with you. You must set this: the default is an empty dataset in a new project. |
 
 ## Model
 
@@ -27,15 +27,14 @@ The form also has `<step>-class`, `<step>-cpu`, `<step>-mem` and `<step>-disk` f
 |---|---|---|---|---|
 | `model` | dropdown | `yolov8n` | options: `yolov11x`, `yolov8n`, `yolov8s` | Dropdown: which model size to train. |
 | `model-variant` | text | `yolov8n-pose.pt` |  | The model file behind the dropdown (set by `model`). |
-| `model-pretrained_weights` | text | empty |  | An `s3://` path to your own weights to start from (weights only, training starts at epoch 0). Empty uses the bundled ones. |
+| `model-pretrained_weights` | text | empty |  | An `s3://<repository>/<ref>/<path>` path to your own weights to start from (weights only, training starts at epoch 0). Empty uses the standard weights of the model. |
 
 ## Data loading
 
 | field | type | default | allowed | what it does |
 |---|---|---|---|---|
-| `data-source` | text | `lakefs` |  | Where the data comes from. Leave on `lakefs`. |
-| `data-sample_size` | int or empty | empty |  | Train on this many image and label pairs per split, to make a quick test. Empty uses all of it. |
-| `data-seed` | int | `42` |  | Random seed for the sampling above. |
+| `data-sample_size` | int or empty | empty |  | Train on this many images, and their labels, per split (`train`, `val`, `test`), to make a quick test. `prepare-data` keeps them. Empty keeps every image. |
+| `data-seed` | int | `42` |  | Picks which images `data-sample_size` keeps: the same seed keeps the same images. |
 
 ## Training
 
@@ -62,8 +61,6 @@ The form also has `<step>-class`, `<step>-cpu`, `<step>-mem` and `<step>-disk` f
 | `train-loss-cls` | float | `0.5` | > 0.0 | Weight of the class loss. |
 | `train-loss-dfl` | float | `1.5` | > 0.0 | Weight of the distribution-focal loss. |
 | `train-checkpointing-interval_epochs` | int | `10` | > 0 | Log a checkpoint to MLflow every N epochs. Resuming after a lost machine is automatic and does not depend on it. |
-| `train-checkpointing-storage_path` | text | empty |  | Where checkpoints go. Leave empty: your outputs repository is used. |
-| `train-checkpointing-resume_from` | text | empty |  | Empty starts fresh; `auto` continues from the latest checkpoint; or a full `s3://` path. |
 | `train-export-enabled` | bool | `false` |  | Also export the trained model (TensorRT or ONNX) after training. |
 | `train-export-formats` | text | `engine` |  | Comma-separated: `engine`, `onnx`. |
 | `train-export-precisions` | text | `fp16` |  | Comma-separated: `fp16`, `int8`. |

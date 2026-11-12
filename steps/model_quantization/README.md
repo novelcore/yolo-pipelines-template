@@ -1,14 +1,8 @@
 # model-quantization
 
-Makes the INT8 TFLite model.
+Makes the INT8 `.tflite` of the trained model and checks it against the full model.
 
-- **Runs on:** CPU, only when `quantization-mode` is `ptq` or `qat`.
-- **Input check:** an empty or unloadable checkpoint is refused with a message that says so.
-- **`ptq`:** exports the trained FP32 `best.pt` to INT8 TFLite after calibrating on `quantization-calibration_frames` training images (at least 100, at most 10000).
-- **`qat`:** packages the INT8 TFLite that `qat-finetune` made.
-- **Parity:** compares INT8 and FP32 on `quantization-parity_frames` images and logs `parity_max_abs_error` and `parity_passed` to MLflow. This is diagnostic: it does not fail the step.
-- **Writes:** the `.tflite` to `outputs-<pipeline>` under `quantization/<experiment>/<run>/`.
-- **Output:** `quantization-result`.
-- **Settings:** [docs/parameters.md](../../docs/parameters.md) (model: `app/models/quantization.py`).
-
-The step is started by the pipeline with the composed params and the training result; there is no separate command line to run it by hand.
+- **Runs on:** CPU, when `quantization-mode` is `ptq` or `qat`.
+- **Reads:** the setting `quantization`; the model `checkpoints` and the dataset `prepared` with `step.input(...)`; in `qat` mode also the model `qat` that `qat-finetune` made.
+- **Writes:** the model `quantization`: the INT8 `.tflite` (exported here for `ptq`, the one of `qat-finetune` checked and saved for `qat`), under `quantization/<experiment>/<run>/`.
+- **Hands on:** the MLflow run, the file name, the parity result (`parity_passed`, `parity_max_abs_error`).

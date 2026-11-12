@@ -29,8 +29,6 @@ train:
   # ── checkpointing ──
   checkpointing:
     interval_epochs: 10 # log an intermediate checkpoint to MLflow every N epochs
-    storage_path: "" # override location; empty = platform-derived
-    resume_from: "" # empty = fresh, 'auto' = latest, or a full S3 path
   # ── post-training export ──
   export:
     enabled: false # boolean

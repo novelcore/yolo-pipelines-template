@@ -66,7 +66,8 @@ def test_the_default_form_values_pass():
 
 def test_training_rejects_auto_batch_and_the_form_does_not_promise_it():
     training = _model("steps/model_training/app/models/training.py", "m_train").TrainingParams
-    base = dict(model_variant="yolov8n-pose.pt", experiment_name="e", dataset_dir="d", output_dir="o", source="local")
+    base = dict(model_variant="yolov8n-pose.pt", experiment_name="e", run_name="r", dataset_dir="d", output_dir="o",
+                checkpoints_dir="c")
     with pytest.raises(Exception, match="batch_size"):
         training(batch_size=-1, **base)
     text = (ROOT / "config" / "train.yaml").read_text()

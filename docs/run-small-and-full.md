@@ -24,12 +24,12 @@
     | `dataset` | `dataset-spacecraft@v1` |
     | `model` | `yolov8n` (the smallest) |
     | `train-epochs` | `10` |
-    | `data-sample_size` | `50` (optional: train on 50 image pairs per split) |
+    | `data-sample_size` | `50` (optional: train on 50 images and their labels per split; `data-seed` picks which) |
     | `quantization-mode` | `none` |
 
     Then **Submit**.
 
-    **You should see:** a live view of your run as boxes: `config-validation` finishes in seconds, `model-training` is the long one, `model-registration` ends it. `qat-finetune` and `model-quantization` show as *skipped*, which is normal ([Watch it train](watch-it.md)).
+    **You should see:** a live view of your run as boxes: `config-validation` and `prepare-data` finish quickly, `model-training` is the long one, `model-registration` ends it. `qat-finetune` and `model-quantization` show as *skipped*, which is normal ([Watch it train](watch-it.md)).
 
     ![The key fields set](img/form-fields.png)
 
@@ -37,7 +37,7 @@ If `config-validation` turns red, its log names the field to fix ([Troubleshooti
 
 ## A full run
 
-3. **Do:** submit again with the real settings: `experiment-name` = `spacecraft-pose`, the same `dataset`, `model` = `yolov8s` or `yolov11x` for more accuracy, `train-epochs` = `100`, and no `data-sample_size`. Several runs can go at once.
+3. **Do:** submit again with the real settings: `experiment-name` = `spacecraft-pose`, the same `dataset`, `model` = `yolov8s` or `yolov11x` for more accuracy, `train-epochs` = `100`, and no `data-sample_size` (so `prepare-data` keeps every image). Several runs can go at once.
 
     **You should see:** the same boxes, training for hours rather than minutes. The run keeps going if you close the tab. If a training machine is reclaimed, the platform runs the step again and training continues from its last checkpoint instead of starting over ([details](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/checkpoint.html)).
 
@@ -62,6 +62,6 @@ If `config-validation` turns red, its log names the field to fix ([Troubleshooti
 
 ## Where it trains
 
-By default training runs on a cluster GPU. To use a Slurm supercomputer, see [Run on HPC (Slurm)](slurm.md).
+`prepare-data` runs on the platform's own machines. By default training runs on a cluster GPU. To use a Slurm supercomputer, see [Run on HPC (Slurm)](slurm.md).
 
 **Next:** [read the results](results.md).

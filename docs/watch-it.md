@@ -15,7 +15,7 @@ Each step shows its state with a color.
 
 ## How long it takes
 
-- The first two steps, checking settings and loading the dataset, are quick. Seconds to a few minutes.
+- The first two steps, checking settings and preparing the dataset (`prepare-data`), are quick for a small dataset: seconds to a few minutes.
 - Training is the long one. It depends on your model, your epochs, and your dataset. For a first test with a small model and a few epochs, it can be minutes. A full run can take hours.
 - The saving step at the end is quick again.
 

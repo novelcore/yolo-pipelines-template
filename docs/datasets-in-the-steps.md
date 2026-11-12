@@ -1,72 +1,67 @@
 # Under the hood: how the steps use datasets and write results
 
 *Optional.* You do not need this page to train. It is for someone reading or changing the steps. Each step is a folder under `steps/`
-that installs kaos-lib (`kaos_lib`, at the pin in `KAOS_LIB_PACKAGE` in its Dockerfile) and copies
-only its own `app/`.
+that installs kaos-lib (`kaos_lib`, at the pin in `KAOS_LIB_PACKAGE` in its Dockerfile) and copies only its own `app/`. A step
+gets everything it reads and hands on everything it writes through [the step API](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/step.html):
+no step reads a platform variable, parses a dataset reference or relays a path.
+
+## What each step reads and writes
+
+| step | reads | writes | hands on |
+|---|---|---|---|
+| `config-validation` | the settings `model` and `quantization` | nothing | that it checked |
+| `prepare-data` | `step.input("dataset")`: the version of your `dataset` pick that the platform pinned for the run | the dataset `prepared` (`step.output("prepared")`) | the images kept per split |
+| `model-training` | `step.input("prepared")`: exactly the version `prepare-data` wrote | the model `checkpoints`: `best.pt`, `last.pt`, exports | the MLflow run, the checkpoint's file name, the validation metrics |
+| `qat-finetune` | the model `checkpoints` and the dataset `prepared` | the model `qat`: the INT8 `.tflite` | the MLflow run, the file name |
+| `model-quantization` | the model `checkpoints` (and `qat`) and the dataset `prepared` | the model `quantization`: the INT8 `.tflite` | the MLflow run, the file name |
+| `model-registration` | the results of the steps before it, and where they were saved | nothing: it registers in MLflow | the registered versions |
+
+`pipeline.py` declares each line of this table (`inputs=`, `needs=`, `produces=`); `kaosctl lint` checks the declarations
+against the code.
 
 ## Reading the dataset
 
-| step | what it does with the dataset |
-|---|---|
-| `config-validation` | does not read the dataset |
-| `model-training` | at its start resolves the pick with `datasets.resolve`, which returns the one commit the platform pinned for the run (the run's data lock, `KAOS_LIB_LOCK`), and reads the dataset's `data.yaml` at that commit. For your own dataset in the cluster, streams images and labels from the project's lakeFS S3 gateway at that commit (no full copy); for a **shared** dataset (`<owner>/dataset-x@v1`, which lives in the owner's lakeFS) and on Slurm, materializes the data locally first through the package (`lakefs_io.materialize`) |
-| `qat-finetune`, `model-quantization` | read the dataset as local files for calibration and parity, with `lakefs_io.materialize(dataset_ref, dataset_commit, dest)`, using the `dataset_ref` and `dataset_commit` that training recorded in `training-result` |
+`step.input("dataset")` is a folder with the pinned version of the dataset: downloaded once and kept, or, on HPC (Slurm),
+the copy the platform staged next to the job. The folder holds only the dataset's own files and is never written to. It is
+the same for your own datasets and for a dataset shared with you.
 
-`lakefs_io.materialize` is `datasets.materialize` with the ref pinned to the commit
-(`DatasetRef.parse(ref).with_commit(commit)`). It downloads `data.yaml`, `images/` and `labels/`
-once, or uses the copy staged on the Slurm machine, and returns a
-`data.yaml` whose `path:` points at it.
+`prepare-data` reads it. `model-training`, `qat-finetune` and `model-quantization` read the dataset `prepared` that
+`prepare-data` wrote in the same run, so all of them see the same files. Training copies the folder's `data.yaml` into a
+temporary file with its `path:` set to the folder, and Ultralytics reads the images and labels from the files. There is no
+streaming of images from the store while it trains: the files are on the machine first.
 
 ## Writing results
 
-Training, QAT and quantization write through the package's run writer (`lakefs_io.run_writer`,
-`outputs.run`):
+A step writes into the folder `step.output("<name>")` and the step API saves it when the step ends (`step.result(...)`):
 
-1. `model-training` opens the writer for `outputs-<pipeline>`, experiment, and run
-   (the run's id). Training never resumes from this branch: resuming is the platform's checkpoint
-   folder (`KAOS_CHECKPOINT_DIR`), see [Long runs: checkpoints](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/checkpoint.html).
-2. `best.pt`, `last.pt` and exports are saved at the end. Each save is a commit on the run branch only.
-3. `finish` merges the branch into `main`: **one commit**, `checkpoints: <experiment>/<run>`, with
-   `dataset_ref`, `dataset_commit` and `mlflow_run_id` in its details, and deletes the branch.
-4. QAT and quantization do the same with `kind="quantization"` for the INT8 `.tflite`.
-5. Training then tags its MLflow run with `kaos.outputs_repo`, `kaos.outputs_commit` (the merge
-   commit), `kaos.outputs_path` and `kaos.workflow`. `model-registration` reads them back, creates
-   the lakeFS tag `model-<slug(name)>-v<N>` on that commit for the `best.pt` version it registers
-   (an existing tag on the same commit is fine; on another commit the step fails), and sets
-   `kaos.outputs_repo`, `kaos.outputs_commit`, `kaos.lakefs_tag` and `kaos.workflow` on the
-   model version.
+| declared in `pipeline.py` | saved as |
+|---|---|
+| `model("checkpoints")`, `model("qat")`, `model("quantization")` | the files of this run, in `outputs-<pipeline>` under `<name>/<experiment>/<run>/`, one commit per output and run |
+| `dataset("prepared")` | a new version of the dataset `dataset-<pipeline>-prepared` |
 
-If a step raises, the branch stays, nothing reaches `main`, and the retry continues from the branch.
-`training-result` carries `best_checkpoint_s3` (`s3://outputs-<pipeline>/main/checkpoints/<experiment>/<run>/best.pt`),
-which the next steps read back with `lakefs_io.download_object`. It is never empty: when a run has no `best.pt`
-(a continued run restores it through kaos-lib; without it Ultralytics writes none if no epoch after the restart beat the
-earlier best), `best_checkpoint_s3` is the `last.pt` location, and a run with no weights at all fails. `qat-finetune` and
-`model-quantization` refuse an empty checkpoint with a message that says so.
+Nothing reaches `outputs-<pipeline>` until the step has ended well, and a step that is run again writes exactly what the new
+attempt wrote. What the step hands on in `step.result(...)` is small (at most 8 KiB): the MLflow run, file names and metrics.
+The step API adds what it read and what it wrote, each with its exact commit, to the result of the step, so the next step
+knows where to read.
 
 ## Models in MLflow
 
-Training also logs `best.pt` as an MLflow 3 **logged model** `<experiment>-best` (the
-experiment's **Models** tab) with `mlflow.create_external_model`: the weights stay in lakeFS,
-MLflow holds only a metadata `MLmodel`. Its source run is the training run; its params are
-`epochs`, `imgsz` and `model_variant`; its tags are the four `kaos.*` above plus
-`kaos.dataset_ref`; the final val metrics (`val/*`, from the trainer's last validation of
-`best.pt`) are logged against it. The run gets `kaos.logged_model_id`. A retried step reuses the
-run's logged model instead of making a second one, and a failure only warns: the results are
-already in lakeFS and registration falls back to the lakeFS path.
+`model-registration` shows `best.pt` in the experiment's **Models** tab as an MLflow 3 **logged model** `<experiment>-best`
+(`mlflow.create_external_model`): the weights stay in lakeFS, MLflow holds only metadata. Its source run is the training run; its
+params are `epochs`, `imgsz` and `model_variant`; its tags are `kaos.outputs_repo`, `kaos.outputs_commit` (the commit that holds the
+weights), `kaos.outputs_path`, `kaos.workflow` and `kaos.dataset_ref`; the final validation metrics of the training run are logged
+against it. The training run gets the same tags and `kaos.logged_model_id`. A step that is run again reuses the run's logged model.
 
-When `model-registration` registers version N of `best.pt` as `<name>`, it registers it **from
-the logged model** (`models:/<model_id>`), so the version links to the training run and to the
-logged model; it tags the commit in lakeFS as **`model-<name>-v<N>`** (characters other than
-`A-Za-z0-9_-` become `-`) and sets `kaos.outputs_repo`, `kaos.outputs_commit`, `kaos.lakefs_tag`
-and `kaos.workflow` on the model version. A run with no `kaos.logged_model_id` (older runs, or
-training could not log it) is registered from the `s3://` lakeFS path of `best.pt`, with a
-warning. `last.pt` is registered from its lakeFS path, without a tag. A run with no
-`kaos.outputs_commit` (older runs) is registered without a lakeFS tag. The INT8 models of
-`model-quantization` and `qat-finetune` are not logged models.
+It then registers version N of `best.pt` as `<name>` **from the logged model** (`models:/<model_id>`), tags the commit in lakeFS as
+**`model-<name>-v<N>`** (characters other than `A-Za-z0-9_-` become `-`; an existing tag on the same commit is fine, on another commit
+the step fails), and sets `kaos.outputs_repo`, `kaos.outputs_commit`, `kaos.lakefs_tag` and `kaos.workflow` on the model version.
+`last.pt` is registered from its path in lakeFS, pinned to the commit, without a lakeFS tag. The INT8 models are not logged models;
+their location is a tag of the version, `export_int8_tflite`. The version also says where the data came from: `dataset_version`
+and `dataset_commit` (the dataset you picked), `prepared_dataset` (the version training read) and `dataset_sample_size`.
+
+If MLflow cannot log the model, the step fails and says so: a model that cannot be linked to its run is not registered.
 
 ## Changing a step
 
-- Keep `lakefs_io.py` identical in the three steps that have it (a test checks it): each image
-  carries only its own `app/`.
-- Step tests live in `step_tests/` and run with `python -m pytest` with the package installed
-  (DEVELOPER.md §15).
+- Step tests live in `step_tests/` and run with `python -m pytest` with kaos-lib installed (`step_tests/README.md`).
+- Add a step or a setting: [Change the pipeline](change-the-pipeline.md).

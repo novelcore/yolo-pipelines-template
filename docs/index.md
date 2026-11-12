@@ -25,7 +25,8 @@ Short on time? [A day with yolo](worked-day.md) does all of it in one page.
 
 ```mermaid
 graph LR
-    A["config-validation"] --> C["model-training"]
+    A["config-validation"] --> P["prepare-data"]
+    P --> C["model-training"]
     C --> D["qat-finetune (qat only)"]
     C --> E["model-quantization (ptq or qat)"]
     D --> E
@@ -37,4 +38,4 @@ graph LR
 
 ## Reference
 
-[Datasets](datasets.md), [kaos-lib versions](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/support-window.html), [Word list](glossary.md), and, optional, [how the steps read data and write results](datasets-in-the-steps.md). To change the steps themselves, follow the [hera cookbook](https://novelcore.github.io/hera-pipeline-template/).
+[Datasets](datasets.md), [change the pipeline](change-the-pipeline.md), [kaos-lib versions](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/support-window.html), [Word list](glossary.md), and, optional, [how the steps read data and write results](datasets-in-the-steps.md).

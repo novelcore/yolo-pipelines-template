@@ -4,20 +4,20 @@ PTQ path:
     FP32 .pt checkpoint
         → YOLO.export(format='tflite', int8=True, data=<calibration yaml>)
         → INT8 TFLite
-        → S3 upload + MLflow logging
+        → the step's output folder + MLflow logging
 
 QAT passthrough:
-    INT8 TFLite s3:// URI (from qat-finetune)
+    INT8 TFLite (from qat-finetune)
+        → copied into the step's output folder
         → parity test stub (FR-M-03)
         → MLflow logging
 """
 
 import logging
 import os
-import threading
-from contextlib import contextmanager
+import shutil
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Optional
 
 import mlflow
 import torch
@@ -26,11 +26,6 @@ from ultralytics import YOLO
 
 from app.models.quantization import ParityReport, QuantizationParams, QuantizationResult
 from app.services.parity_test import ParityTestService
-from app.services import lakefs_io
-from app.services.resource_monitor import ResourceMonitor
-
-# Interval (seconds) between system-metric samples during the export.
-_SYSTEM_METRICS_INTERVAL_S = 15.0
 
 # yolo results_dict keys → sanitized MLflow metric suffixes. Covers the
 # box (B) detection metrics and, for pose models, the keypoint (P) metrics.
@@ -49,8 +44,7 @@ class QuantizationError(Exception):
 class QuantizationService:
     """Runs PTQ (yolo) or QAT passthrough and logs to MLflow."""
 
-    def __init__(self, mlflow_tracking_uri: str) -> None:
-        self._mlflow_uri = mlflow_tracking_uri
+    def __init__(self) -> None:
         self._logger = logging.getLogger(__name__)
         self._parity = ParityTestService()
 
@@ -60,7 +54,6 @@ class QuantizationService:
 
     def run(self, params: QuantizationParams) -> QuantizationResult:
         """Dispatch to PTQ or QAT passthrough based on params.mode."""
-        mlflow.set_tracking_uri(self._mlflow_uri)
         mlflow.set_experiment(params.experiment_name)
 
         if params.mode == "ptq":
@@ -72,12 +65,10 @@ class QuantizationService:
     # ------------------------------------------------------------------
 
     def _run_ptq(self, params: QuantizationParams) -> QuantizationResult:
-        """PTQ: yolo export(int8=True) → TFLite → S3 → MLflow."""
+        """PTQ: yolo export(int8=True) → TFLite → output folder → MLflow."""
         assert params.fp32_checkpoint_path is not None
 
-        local_ckpt = self._resolve_checkpoint(
-            params.fp32_checkpoint_path, params.output_dir
-        )
+        local_ckpt = self._check_checkpoint(params.fp32_checkpoint_path)
         data_yaml = self._find_data_yaml(params.dataset_dir)
 
         with mlflow.start_run(
@@ -90,36 +81,35 @@ class QuantizationService:
                 local_ckpt,
             )
 
-            with self._sample_system_metrics(run_id):
-                self._seed_torch(params.calibration_seed)  # FR-M-04
-                tflite_path = self._export_ptq(local_ckpt, data_yaml, params)
-                s3_uri = self._upload_tflite(tflite_path, params)
-                self._log_tflite_artifact(run_id, tflite_path)
-                # PTQ exports the FULL model → compare against full-model FP32.
-                parity = self._run_parity_and_log(
-                    run_id=run_id,
-                    tflite_path=tflite_path,
-                    fp32_checkpoint_path=local_ckpt,
-                    params=params,
-                    headless=False,
-                )
-                # Task-metric quality signal: INT8 vs FP32 mAP on the val set.
-                self._run_map_delta_and_log(
-                    run_id=run_id,
-                    fp32_checkpoint_path=local_ckpt,
-                    tflite_path=tflite_path,
-                    data_yaml=data_yaml,
-                    params=params,
-                )
-                self._log_ptq_run(run_id, params, s3_uri)
+            self._seed_torch(params.calibration_seed)  # FR-M-04
+            tflite_path = self._export_ptq(local_ckpt, data_yaml, params)
+            tflite = self._save_tflite(tflite_path, params)
+            self._log_tflite_artifact(run_id, tflite_path)
+            # PTQ exports the FULL model → compare against full-model FP32.
+            parity = self._run_parity_and_log(
+                run_id=run_id,
+                tflite_path=tflite_path,
+                fp32_checkpoint_path=local_ckpt,
+                params=params,
+                headless=False,
+            )
+            # Task-metric quality signal: INT8 vs FP32 mAP on the val set.
+            self._run_map_delta_and_log(
+                run_id=run_id,
+                fp32_checkpoint_path=local_ckpt,
+                tflite_path=tflite_path,
+                data_yaml=data_yaml,
+                params=params,
+            )
+            self._log_ptq_run(run_id, params, tflite)
 
-        self._logger.info("PTQ complete | run_id=%s tflite=%s", run_id, s3_uri)
+        self._logger.info("PTQ complete | run_id=%s tflite=%s", run_id, tflite)
 
         return QuantizationResult(
             mlflow_run_id=run_id,
             source_run_id=params.source_mlflow_run_id,
             mode="ptq",
-            tflite_s3_uri=s3_uri,
+            tflite=tflite,
             parity_passed=parity.parity_passed,
             parity_max_abs_error=parity.max_abs_error,
         )
@@ -146,9 +136,9 @@ class QuantizationService:
         return tflite_path
 
     def _log_ptq_run(
-        self, run_id: str, params: QuantizationParams, s3_uri: str
+        self, run_id: str, params: QuantizationParams, tflite: str
     ) -> None:
-        """Log PTQ parameters and artifact URI to MLflow."""
+        """Log PTQ parameters and the TFLite file name to MLflow."""
         client = MlflowClient()
         items: list[tuple[str, str]] = [
             ("quantization_mode", "ptq"),
@@ -159,7 +149,7 @@ class QuantizationService:
             ("parity_frames", str(params.parity_frames)),
             ("parity_max_abs_error_threshold", str(params.parity_max_abs_error)),
             ("source_run_id", params.source_mlflow_run_id),
-            ("tflite_s3_uri", s3_uri),
+            ("tflite", tflite),
         ]
         for key, value in items:
             try:
@@ -172,8 +162,8 @@ class QuantizationService:
     # ------------------------------------------------------------------
 
     def _run_qat_passthrough(self, params: QuantizationParams) -> QuantizationResult:
-        """QAT passthrough: receive TFLite URI, run parity stub, log to MLflow."""
-        assert params.tflite_s3_uri is not None
+        """QAT passthrough: save qat-finetune's TFLite as this step's output, run parity, log to MLflow."""
+        assert params.tflite_path is not None
 
         tags: dict[str, str] = {"source_run_id": params.source_mlflow_run_id}
         if params.qat_run_id:
@@ -184,34 +174,28 @@ class QuantizationService:
             self._logger.info(
                 "QAT passthrough run started | run_id=%s tflite=%s",
                 run_id,
-                params.tflite_s3_uri,
+                params.tflite_path,
             )
 
-            with self._sample_system_metrics(run_id):
-                local_tflite = self._download_tflite(
-                    params.tflite_s3_uri, params.output_dir
-                )
-                self._log_tflite_artifact(run_id, local_tflite)
-                # Download the FP32 checkpoint locally for the headless parity
-                # reference — otherwise the raw s3:// URI is treated as a local
-                # path ("No such file s3:/…") and parity errors. Mirrors PTQ,
-                # which resolves the checkpoint before parity.
-                local_ckpt = (
-                    self._resolve_checkpoint(
-                        params.fp32_checkpoint_path, params.output_dir
-                    )
-                    if params.fp32_checkpoint_path
-                    else None
-                )
-                # QAT exports the backbone+neck only (CON-03) → headless FP32.
-                parity = self._run_parity_and_log(
-                    run_id=run_id,
-                    tflite_path=local_tflite,
-                    fp32_checkpoint_path=local_ckpt,
-                    params=params,
-                    headless=True,
-                )
-            self._log_qat_passthrough_run(run_id, params)
+            local_tflite = params.tflite_path
+            tflite = self._save_tflite(local_tflite, params)
+            self._log_tflite_artifact(run_id, local_tflite)
+            # The FP32 checkpoint is the headless parity reference. Mirrors PTQ,
+            # which checks the checkpoint before parity.
+            local_ckpt = (
+                self._check_checkpoint(params.fp32_checkpoint_path)
+                if params.fp32_checkpoint_path
+                else None
+            )
+            # QAT exports the backbone+neck only (CON-03) → headless FP32.
+            parity = self._run_parity_and_log(
+                run_id=run_id,
+                tflite_path=local_tflite,
+                fp32_checkpoint_path=local_ckpt,
+                params=params,
+                headless=True,
+            )
+            self._log_qat_passthrough_run(run_id, params, tflite)
 
         self._logger.info("QAT passthrough complete | run_id=%s", run_id)
 
@@ -219,12 +203,12 @@ class QuantizationService:
             mlflow_run_id=run_id,
             source_run_id=params.source_mlflow_run_id,
             mode="qat",
-            tflite_s3_uri=params.tflite_s3_uri,
+            tflite=tflite,
             parity_passed=parity.parity_passed,
             parity_max_abs_error=parity.max_abs_error,
         )
 
-    def _log_qat_passthrough_run(self, run_id: str, params: QuantizationParams) -> None:
+    def _log_qat_passthrough_run(self, run_id: str, params: QuantizationParams, tflite: str) -> None:
         """Log QAT passthrough parameters to MLflow."""
         client = MlflowClient()
         items: list[tuple[str, str]] = [
@@ -236,7 +220,7 @@ class QuantizationService:
             ("parity_frames", str(params.parity_frames)),
             ("parity_max_abs_error_threshold", str(params.parity_max_abs_error)),
             ("source_run_id", params.source_mlflow_run_id),
-            ("tflite_s3_uri", params.tflite_s3_uri or ""),
+            ("tflite", tflite),
         ]
         if params.qat_run_id:
             items.append(("qat_run_id", params.qat_run_id))
@@ -250,17 +234,13 @@ class QuantizationService:
     # Shared helpers
     # ------------------------------------------------------------------
 
-    def _resolve_checkpoint(self, path: str, output_dir: str) -> str:
-        """Return a local path to the checkpoint, downloading from S3 if needed."""
+    def _check_checkpoint(self, path: str) -> str:
+        """Return the local path of the checkpoint; an empty path is an error."""
         if not path:
             raise QuantizationError(
-                "no FP32 checkpoint to quantize: the training result's best_checkpoint_s3 is empty"
+                "no FP32 checkpoint to quantize: the training result names no checkpoint"
             )
-        if not path.startswith("s3://"):
-            return path
-        self._logger.info("Downloading checkpoint: %s -> %s", path, output_dir)
-        local_path = lakefs_io.download_object(path, output_dir)
-        return local_path
+        return path
 
     def _find_data_yaml(self, dataset_dir: str) -> str:
         """Locate the YOLO data YAML in the dataset directory.
@@ -278,25 +258,15 @@ class QuantizationService:
             f"No YOLO data YAML found in {dataset_dir!r}. " f"Searched: {candidates}"
         )
 
-    def _upload_tflite(self, local_path: str, params) -> str:
-        """Write the INT8 TFLite to ``outputs-<app>`` (one commit on main) and return its s3:// URI.
+    def _save_tflite(self, local_path: str, params) -> str:
+        """Copy the INT8 TFLite into the step's output folder; returns its file name.
 
-        The commit is kaos-lib's ``write_run``: ``quantization/<experiment>/<run>/``
-        saved on the run branch ``run-<run>-quantization`` and merged into main; the merge commit
-        records the dataset ref and commit.
+        The step API saves the folder as ``quantization/<experiment>/<run>/`` of the app's
+        outputs repository, for PTQ and for QAT alike.
         """
-        prefix = lakefs_io.write_outputs(params.output_bucket, params.experiment_name,
-                                         [local_path], kind="quantization",
-                                         metadata={"dataset_ref": os.environ.get("KUBECORE_DATASET_REF", ""),
-                                                   "dataset_commit": os.environ.get("KUBECORE_DATASET_COMMIT", "")})
-        self._logger.info("model-quantization: INT8 tflite written to %s", prefix)
-        return prefix + Path(local_path).name
-
-    def _download_tflite(self, s3_uri: str, output_dir: str) -> str:
-        """Download TFLite from an s3:// URI. Returns local path."""
-        self._logger.info("Downloading TFLite: %s -> %s", s3_uri, output_dir)
-        local_path = lakefs_io.download_object(s3_uri, output_dir)
-        return local_path
+        shutil.copy(local_path, Path(params.export_dir) / Path(local_path).name)
+        self._logger.info("model-quantization: INT8 tflite saved as %s", Path(local_path).name)
+        return Path(local_path).name
 
     def _seed_torch(self, seed: int) -> None:
         """Seed PyTorch RNG before PTQ calibration export (FR-M-04).
@@ -310,7 +280,7 @@ class QuantizationService:
     def _log_tflite_artifact(self, run_id: str, tflite_path: str) -> None:
         """Log the quantized .tflite to MLflow as a run artifact.
 
-        Non-fatal: the lakeFS/S3 upload is the authoritative artifact store,
+        Non-fatal: the step's output folder is the authoritative artifact store,
         so an MLflow logging failure only warns (consistent with the other
         MLflow logging in this service).
         """
@@ -368,11 +338,11 @@ class QuantizationService:
             )
         except Exception as exc:
             # Parity is DIAGNOSTIC, not a gate. By this point the INT8 model is
-            # already exported, uploaded to S3 and logged to MLflow, so a parity
-            # computation error must not fail the step (which would also drop the
-            # quantization_result.json output). Record a sentinel and continue.
+            # already exported, copied into the output folder and logged to MLflow, so a
+            # parity computation error must not fail the step (which would also lose the
+            # saved model). Record a sentinel and continue.
             self._logger.error(
-                "Parity test errored (non-fatal; INT8 artifact already published): %s",
+                "Parity test errored (non-fatal; INT8 model already saved): %s",
                 exc,
                 exc_info=True,
             )
@@ -403,58 +373,6 @@ class QuantizationService:
             self._logger.warning("Failed to log parity metrics to MLflow: %s", exc)
 
         return parity
-
-    # ------------------------------------------------------------------
-    # System-resource sampling
-    # ------------------------------------------------------------------
-
-    @contextmanager
-    def _sample_system_metrics(self, run_id: str) -> Iterator[None]:
-        """Sample CPU/RAM (and GPU when present) into MLflow while the body runs.
-
-        Runs a daemon thread that logs a snapshot from :class:`ResourceMonitor`
-        every ``_SYSTEM_METRICS_INTERVAL_S`` seconds under a monotonically
-        increasing step. This gives the quantization run a system-metrics time
-        series (parity with the training run, whose ``resource_monitor`` logs the
-        same ``system/*`` keys). Entirely best-effort: any failure to start or
-        sample is swallowed so it never affects the export.
-        """
-        monitor: Optional[ResourceMonitor]
-        try:
-            # gpu_index=0 is inert on CPU nodes (ResourceMonitor skips GPU unless
-            # pynvml detected a device); relevant only for QAT-on-GPU passthrough.
-            monitor = ResourceMonitor(gpu_index=0)
-        except Exception as exc:  # noqa: BLE001
-            self._logger.warning("System-metrics sampler disabled: %s", exc)
-            monitor = None
-
-        if monitor is None:
-            yield
-            return
-
-        client = MlflowClient()
-        stop = threading.Event()
-        state = {"step": 0}
-
-        def _loop() -> None:
-            while not stop.is_set():
-                for key, value in monitor.collect().items():
-                    try:
-                        client.log_metric(run_id, key, value, step=state["step"])
-                    except Exception:  # noqa: BLE001
-                        pass
-                state["step"] += 1
-                stop.wait(_SYSTEM_METRICS_INTERVAL_S)
-
-        thread = threading.Thread(
-            target=_loop, name="quant-system-metrics", daemon=True
-        )
-        thread.start()
-        try:
-            yield
-        finally:
-            stop.set()
-            thread.join(timeout=5.0)
 
     # ------------------------------------------------------------------
     # mAP-delta (FP32 vs INT8 task-metric quality)

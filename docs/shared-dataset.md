@@ -14,7 +14,7 @@ A project can *share* a dataset with other projects: read-only, so you can train
 
 2. **Do:** pick it in the run form's `dataset` field, as `<owner>/dataset-<name>@<version>`, for example `team-a/dataset-spacecraft@v1`. The dropdown also lists shared datasets.
 
-    **You should see:** the run trains on the owner's version. Because the data is in the owner's store, the pipeline first copies it to the training machine (your own datasets are streamed instead), so loading takes longer.
+    **You should see:** the run trains on the owner's version. `prepare-data` reads the owner's version like one of your own and writes it as your project's dataset `prepared`, so the other steps read your project's copy.
 
 3. **Do (optional):** look at the data on your computer.
 

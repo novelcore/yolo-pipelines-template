@@ -3,7 +3,7 @@
 # the yolo TFLite INT8 export toolchain (tensorflow/onnx2tf/...) baked in
 # from PyPI (yolo would otherwise pip-install these at RUNTIME,
 # which fails in an offline pod), + a build-time import check.
-# In-image command: python -m app.entry --params <params> ...
+# In-image command: python -m app.entry (no arguments).
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -61,12 +61,11 @@ print('tensorflow', tensorflow.__version__, '| export toolchain import OK')"
 
 # kaos-lib, the platform library (datasets, run outputs; formerly the kubecore package), from
 # github.com/kaos-io/kaos-lib. The PLATFORM picks it: the CI passes --build-arg
-# KAOS_LIB_PACKAGE=<requirement> on every build, inside the range in .kaos/compat.yaml
-# (docs/kaos-lib-versions.md). The value is the whole pip requirement (name, extras, version or
+# KAOS_LIB_PACKAGE=<requirement> on every build, inside the range in .kaos/compat.yaml. The value is the whole pip requirement (name, extras, version or
 # URL); this default is only for a build on your computer. Installed last, so a new version
 # reuses the cached TensorFlow layers above.
-# Default for a local build: kaos-lib 0.4.0rc17. The platform's CI overrides it with --build-arg KAOS_LIB_PACKAGE.
-ARG KAOS_LIB_PACKAGE="kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/50aee081e1bb031ef199eefe68e62ee35e6281d7.zip"
+# Default for a local build: kaos-lib 0.5.0. The platform's CI overrides it with --build-arg KAOS_LIB_PACKAGE.
+ARG KAOS_LIB_PACKAGE="kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/19a7151fb3589fdff31ba549226100c30a7497dc.zip"
 RUN pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"
 
 ENTRYPOINT ["python", "-m", "app.entry"]

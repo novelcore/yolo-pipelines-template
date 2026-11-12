@@ -9,16 +9,15 @@ Pipeline:
         → fine-tune loop (distillation loss vs FP32 teacher)
         → convert_pt2e(fold_quantize=False)   [torchao; CON-01]
         → litert_torch.convert() → edge_model.export()
-        → INT8 TFLite → S3 + MLflow
+        → INT8 TFLite → the step's output folder + MLflow
 """
 
 import logging
 import os
 import random
-import threading
-from contextlib import contextmanager
+import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import mlflow
 import torch
@@ -31,10 +30,7 @@ from torchao.quantization.pt2e.quantize_pt2e import convert_pt2e, prepare_qat_pt
 from ultralytics import YOLO
 
 from app.models.quantization import QATParams, QATResult
-from app.services import lakefs_io, qat_resume
-
-# Interval (seconds) between system-metric samples during the QAT run.
-_SYSTEM_METRICS_INTERVAL_S = 15.0
+from app.services import qat_resume
 
 if TYPE_CHECKING:
     from torch.utils.data import DataLoader
@@ -47,8 +43,7 @@ class QATError(Exception):
 class QATService:
     """Runs PT2E QAT fine-tuning and exports an INT8 TFLite artifact."""
 
-    def __init__(self, mlflow_tracking_uri: str) -> None:
-        self._mlflow_uri = mlflow_tracking_uri
+    def __init__(self) -> None:
         self._logger = logging.getLogger(__name__)
 
     # ------------------------------------------------------------------
@@ -60,7 +55,7 @@ class QATService:
 
         Steps
         -----
-        1.  Resolve / download the FP32 checkpoint.
+        1.  Check the FP32 checkpoint.
         2.  Load YOLO model, apply head exclusion (CON-03).
         3.  Capture computation graph via torch.export (strict=False).
         4.  Insert fake-quantize nodes with litert_torch PT2EQuantizer
@@ -68,14 +63,13 @@ class QATService:
         5.  Fine-tune the prepared model with a distillation loss.
         6.  Convert to real INT8 ops (fold_quantize=False, CON-01).
         7.  Export INT8 TFLite via litert_torch.
-        8.  Upload TFLite to S3.
-        9.  Log all parameters and artifact URI to MLflow,
+        8.  Copy the TFLite into the step's output folder.
+        9.  Log all parameters and the file name to MLflow,
             linked to the source model-training run.
         """
-        mlflow.set_tracking_uri(self._mlflow_uri)
         mlflow.set_experiment(params.experiment_name)
 
-        local_ckpt = self._resolve_checkpoint(params.fp32_checkpoint_path, params.output_dir)
+        local_ckpt = self._check_checkpoint(params.fp32_checkpoint_path)
         device = self._resolve_device(params.device)
 
         # A continued job (platform checkpoint folder restored) logs into the first job's MLflow run:
@@ -93,33 +87,32 @@ class QATService:
                 device,
             )
 
-            with self._sample_system_metrics(run_id):
-                fp32_module = self._load_headless_module(local_ckpt, device)
-                sample = (
-                    torch.zeros(
-                        1, 3, params.image_size, params.image_size, device=device
-                    ),
-                )
+            fp32_module = self._load_headless_module(local_ckpt, device)
+            sample = (
+                torch.zeros(
+                    1, 3, params.image_size, params.image_size, device=device
+                ),
+            )
 
-                exported = self._capture_graph(fp32_module, sample)
-                prepared = self._prepare_qat(exported)
-                self._seed_rng(params.calibration_seed, device)  # FR-M-04
-                self._finetune(prepared, fp32_module, params, device)
-                quantized = self._convert(prepared)
-                tflite_path = self._export_tflite(
-                    quantized, sample, params.output_dir
-                )
-                s3_uri = self._upload_tflite(tflite_path, params)
-            self._log_run(run_id, params, s3_uri)
+            exported = self._capture_graph(fp32_module, sample)
+            prepared = self._prepare_qat(exported)
+            self._seed_rng(params.calibration_seed, device)  # FR-M-04
+            self._finetune(prepared, fp32_module, params, device)
+            quantized = self._convert(prepared)
+            tflite_path = self._export_tflite(
+                quantized, sample, params.output_dir
+            )
+            tflite = self._save_tflite(tflite_path, params)
+            self._log_run(run_id, params, tflite)
 
         self._logger.info(
-            "QAT complete | run_id=%s tflite=%s", run_id, s3_uri
+            "QAT complete | run_id=%s tflite=%s", run_id, tflite
         )
 
         return QATResult(
             mlflow_run_id=run_id,
             source_run_id=params.source_mlflow_run_id,
-            tflite_s3_uri=s3_uri,
+            tflite=tflite,
             # Parity values are populated by FR-M-03 (parity_test.py).
             # Placeholder until that feature is implemented.
             parity_passed=True,
@@ -127,82 +120,19 @@ class QATService:
         )
 
     # ------------------------------------------------------------------
-    # System-resource sampling
+    # Step 1 — Checkpoint check
     # ------------------------------------------------------------------
 
-    @contextmanager
-    def _sample_system_metrics(self, run_id: str) -> Iterator[None]:
-        """Sample CPU/RAM (and GPU when present) into MLflow while the body runs.
+    def _check_checkpoint(self, path: str) -> str:
+        """Return the local path of the FP32 checkpoint.
 
-        A daemon thread logs a ResourceMonitor snapshot every
-        ``_SYSTEM_METRICS_INTERVAL_S`` seconds under an increasing step, giving
-        the qat-finetune run a system-metrics time series (parity with the
-        training and model-quantization runs). QAT usually runs on GPU, so this
-        captures GPU utilization/VRAM during the fine-tune. Best-effort: any
-        failure is swallowed so it never affects the QAT run.
-        """
-        monitor: Any
-        try:
-            # Imported lazily + defensively: system metrics are best-effort and
-            # must NEVER crash the QAT run. A missing psutil/pynvml or any import
-            # error just disables the sampler (import at module load previously
-            # took the whole step down with it on exit 1).
-            from app.services.resource_monitor import ResourceMonitor
-
-            monitor = ResourceMonitor(gpu_index=0)  # inert on CPU nodes
-        except Exception as exc:  # noqa: BLE001
-            self._logger.warning("System-metrics sampler disabled: %s", exc)
-            monitor = None
-
-        if monitor is None:
-            yield
-            return
-
-        client = MlflowClient()
-        stop = threading.Event()
-        state = {"step": 0}
-
-        def _loop() -> None:
-            while not stop.is_set():
-                for key, value in monitor.collect().items():
-                    try:
-                        client.log_metric(run_id, key, value, step=state["step"])
-                    except Exception:  # noqa: BLE001
-                        pass
-                state["step"] += 1
-                stop.wait(_SYSTEM_METRICS_INTERVAL_S)
-
-        thread = threading.Thread(
-            target=_loop, name="qat-system-metrics", daemon=True
-        )
-        thread.start()
-        try:
-            yield
-        finally:
-            stop.set()
-            thread.join(timeout=5.0)
-
-    # ------------------------------------------------------------------
-    # Step 1 — Checkpoint resolution
-    # ------------------------------------------------------------------
-
-    def _resolve_checkpoint(self, path: str, output_dir: str) -> str:
-        """Return a local path to the FP32 checkpoint.
-
-        Downloads from S3 if ``path`` starts with ``s3://``. An empty path is an error: the
-        training step found no weights to hand over. (``YOLO("")`` does not fail, it yields a
-        model that is the empty string, which crashed later with "'str' object has no attribute 'to'".)
+        An empty path is an error: the training step found no weights to hand over. (``YOLO("")`` does
+        not fail, it yields a model that is the empty string, which crashed later with
+        "'str' object has no attribute 'to'".)
         """
         if not path:
-            raise ValueError(
-                "no FP32 checkpoint to fine-tune: the training result's best_checkpoint_s3 is empty"
-            )
-        if not path.startswith("s3://"):
-            return path
-
-        self._logger.info("Downloading checkpoint: %s -> %s", path, output_dir)
-        local_path = lakefs_io.download_object(path, output_dir)
-        return local_path
+            raise ValueError("no FP32 checkpoint to fine-tune: the training result names no checkpoint")
+        return path
 
     # ------------------------------------------------------------------
     # Step 2 — Load model + head exclusion (CON-03)
@@ -504,29 +434,24 @@ class QATService:
         return output_path
 
     # ------------------------------------------------------------------
-    # Step 8 — Upload TFLite to S3
+    # Step 8 — Copy TFLite into the step's output folder
     # ------------------------------------------------------------------
 
-    def _upload_tflite(self, local_path: str, params) -> str:
-        """Write the INT8 TFLite to ``outputs-<app>`` (one commit on main) and return its s3:// URI.
+    def _save_tflite(self, local_path: str, params) -> str:
+        """Copy the INT8 TFLite into the step's output folder; returns its file name.
 
-        The commit is kaos-lib's ``write_run``: ``quantization/<experiment>/<run>/``
-        saved on the run branch ``run-<run>-quantization`` and merged into main; the merge commit
-        records the dataset ref and commit.
+        The step API saves the folder as ``qat/<experiment>/<run>/`` of the app's outputs repository.
         """
-        prefix = lakefs_io.write_outputs(params.output_bucket, params.experiment_name,
-                                         [local_path], kind="quantization",
-                                         metadata={"dataset_ref": os.environ.get("KUBECORE_DATASET_REF", ""),
-                                                   "dataset_commit": os.environ.get("KUBECORE_DATASET_COMMIT", "")})
-        self._logger.info("qat-finetune: INT8 tflite written to %s", prefix)
-        return prefix + Path(local_path).name
+        shutil.copy(local_path, Path(params.export_dir) / Path(local_path).name)
+        self._logger.info("qat-finetune: INT8 tflite saved as %s", Path(local_path).name)
+        return Path(local_path).name
 
     # ------------------------------------------------------------------
     # Step 9 — MLflow logging (FR-M-05)
     # ------------------------------------------------------------------
 
-    def _log_run(self, run_id: str, params: QATParams, s3_uri: str) -> None:
-        """Log QAT parameters and artifact URI to MLflow (FR-M-05).
+    def _log_run(self, run_id: str, params: QATParams, tflite: str) -> None:
+        """Log QAT parameters and the TFLite file name to MLflow (FR-M-05).
 
         Errors are swallowed with a warning — MLflow unavailability must
         not block the artifact upload.
@@ -541,7 +466,7 @@ class QATService:
             ("calibration_seed", str(params.calibration_seed)),
             ("image_size", str(params.image_size)),
             ("source_run_id", params.source_mlflow_run_id),
-            ("tflite_s3_uri", s3_uri),
+            ("tflite", tflite),
             ("fold_quantize", "False"),
         ]
         for key, value in log_items:

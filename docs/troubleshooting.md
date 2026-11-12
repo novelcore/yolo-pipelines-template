@@ -58,11 +58,11 @@ That version does not exist. Pick one it lists, or release a new one. A version 
 
 ## Stops at the first step (`config-validation`)
 
-This step checks your form before any training time is spent; its message names what to fix.
+This step checks your form before any machine is paid for; its message names what to fix.
 
-### `pretrained weights not found: s3://...` or `model.pretrained_weights must be null or an s3:// path`
+### `pretrained weights not found: s3://...` or `model.pretrained_weights must be empty or an s3://...`
 
-`model-pretrained_weights` must be empty or the full `s3://` path of a `.pt` file that exists.
+`model-pretrained_weights` must be empty or the full `s3://<repository>/<ref>/<path>` of a `.pt` file that exists.
 
 ### `quantization.calibration_frames must be between 100 and 10000, got 50`
 
@@ -73,6 +73,15 @@ With `quantization-mode` = `ptq` or `qat`, `quantization-calibration_frames` (th
 Some fields only accept certain choices (the message lists them) and some pairs of fields must agree (the message names both). Change the field and submit again. [All the fields](parameters.md) list the allowed values.
 
 ## During the run
+
+### `prepare-data` stops with `the dataset has no data.yaml at its root` or `data.sample_size must be a positive number or empty`
+
+The version you picked is not a yolo dataset (it needs `data.yaml`, `images/` and `labels/` at its root), or `data-sample_size` is `0` or negative: set a whole number of images per split, or leave it empty to keep every image.
+
+### A step ends with `ended without step.result()` or a step after it never starts
+
+A step that does not hand on its result fails, and the steps after it are not started. Read the log of the red step: the message above this line says what went wrong.
+
 
 ### Training ends with `No valid labels found`
 
@@ -92,7 +101,7 @@ By design: the step is run again by the platform, at most twice, and training co
 
 ### Training is taking forever
 
-Make a test run quick: `model` = `yolov8n`, `train-epochs` = `10`, and `data-sample_size` = `50`. Prove the whole thing works, then scale up.
+Make a test run quick: `model` = `yolov8n`, `train-epochs` = `10`, and `data-sample_size` = `50` (50 images per split; `data-seed` picks which, and the same seed keeps the same ones). Prove the whole thing works, then scale up.
 
 ### Registration fails with `lakeFS tag model-... already points at ...`
 
@@ -110,7 +119,7 @@ Open the quantization run in MLflow and read `parity_passed` and `parity_max_abs
 
 ## If `pipeline.py` is refused
 
-If you changed `pipeline.py` and the build fails with `sets a service account (serviceAccountName)`, `sets podSpecPatch` or `uses a name the platform reserves for its HPC follower`, remove it. The platform alone chooses which account every step runs as, sizes and places the pods, and owns the template names `hpc-follower`. The pipeline is not released until you do: the pull request check goes red, naming the step. To change a step's machine or size, use `step(...)` options and the `<step>-class`, `-cpu` and `-mem` fields of the run form.
+If you changed `pipeline.py` and the build fails with `sets a service account (serviceAccountName)`, `sets podSpecPatch` or `uses a name the platform reserves for its HPC follower`, remove it. The platform alone chooses which account every step runs as, sizes and places the pods, and owns the template names `hpc-follower`. The pipeline is not released until you do: the pull request check goes red, naming the step. To change a step's machine, use `step(...)` options and the `<step>-class` field of the run form: a step gets the CPU, memory and disk of the machine its class names.
 
 ## Everything else
 

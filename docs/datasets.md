@@ -9,7 +9,7 @@ A dataset is a **lakeFS repository** named `dataset-<name>`. Your project starts
 | `latest` | the newest data on `main` |
 | change | a pull request into `main`, reviewed and merged by a person |
 | pick | `dataset = <repository>@<version>` in the run form |
-| results | never written to a dataset: they go to `outputs-<pipeline>` |
+| results | weights and exports go to `outputs-<pipeline>`; the pipeline's own `prepare-data` step writes a dataset of its own ([below](#the-dataset-the-pipeline-writes)) |
 
 A run reads **one commit**: the one its pick resolves to. Merging new data during a run does not
 change what that run reads.
@@ -27,6 +27,15 @@ at the **root** of the repository. Anything else in the repository (a README, no
 This pipeline trains **pose**, so `data.yaml` also needs `kpt_shape` and `flip_idx`
 ([Upload images and labels](prepare-dataset.md)).
 
+## The dataset the pipeline writes
+
+The first step that touches your data, `prepare-data`, writes it again as the dataset `dataset-<pipeline>-prepared`: all of it,
+or a reproducible subset when you set `data-sample_size` ([What the pipeline does](the-pipeline.md#prepare-data-the-first-step-writes-a-dataset)).
+It is a dataset like yours, with versions, but only the pipeline writes it: you can read it and pick a version, never push to it.
+Training reads exactly the version of the run that wrote it. Its `latest` moves only when you ask for it in the run's advanced
+settings (`plan: {promote: {prepared: true}}`), so you can also train a later run on a prepared version by picking
+`dataset-<pipeline>-prepared@<version>` as the `dataset`.
+
 ## Layouts
 
 A *layout* is a named folder shape plus the checks for it. A new dataset has **no layout** unless you name one: `kaosctl dataset create <name> --layout yolo --classes a,b` starts a repository with the `yolo`
@@ -42,7 +51,7 @@ layout (the starter files above, plus the checks that `validate` and `push` run)
 
 ## The commands
 
-`kaosctl` comes with kaos-lib (0.4.0rc23 at the time of writing; [install it](prepare-dataset.md#install-and-sign-in)).
+`kaosctl` comes with kaos-lib (0.5 or newer; [install it](prepare-dataset.md#install-and-sign-in)).
 
 ```bash
 kaosctl login
@@ -64,4 +73,5 @@ you to fix (one `ERROR:` line), 2 an invalid dataset.
 
 !!! note "Who may do what"
     Reading a dataset needs read rights, which the pipeline has. Creating a dataset, pushing, and
-    releasing a version are for people: a step can never write to a dataset.
+    releasing a version are for people. A step can write only the datasets its `pipeline.py` declares in `produces=`
+    (here `prepared`); it can never write yours.

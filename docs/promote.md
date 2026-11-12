@@ -1,6 +1,6 @@
 # Promote a model
 
-When a run finishes, the last step saves the model and gives it a name and a version. That is called registering. The version is made from the model the run shows in the experiment's **Models** tab ([Read your results](results.md#your-trained-model-in-the-models-tab)), so the two are linked: the version names its source run and that model, and the model lists the versions made from it. Promoting is the next move. It gives a version a label, `champion` or `challenger`, so everyone knows which one to use.
+When a run finishes, the last step saves the model and gives it a name and a version. That is called registering. The version is made from the model that the last step also shows in the experiment's **Models** tab ([Read your results](results.md#your-trained-model-in-the-models-tab)), so the two are linked: the version names its source run and that model, and the model lists the versions made from it. Promoting is the next move. It gives a version a label, `champion` or `challenger`, so everyone knows which one to use.
 
 ## Two ways to promote
 
@@ -29,8 +29,6 @@ So from any of the three you reach the other two:
 | the registry version | its source run and its model are linked on the version page; its tags name the lakeFS tag |
 | the model in the Models tab | its source run is linked; its registered versions are listed; its tags name the lakeFS commit and folder |
 | the lakeFS tag `model-<name>-v<version>` | the commit's details name the MLflow run |
-
-Runs trained before the Models tab was used are registered straight from the `best.pt` file in lakeFS. Those versions have no model in the Models tab and no source run link; their lakeFS tag and `kaos.*` tags work the same way.
 
 ## What promotion means
 

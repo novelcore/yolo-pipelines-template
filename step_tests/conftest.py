@@ -1,33 +1,24 @@
-"""Fixtures: an in-memory lakeFS with a dataset and an outputs repository, and per-step imports.
+"""Fixtures for the step tests: a YOLO dataset in a folder, and the steps imported one at a time.
 
 Every step names its package `app`, so a step is imported with `step_app(<dir>)` which swaps
-`sys.modules["app"]` for the duration of the `with`.
+`sys.modules["app"]` for the duration of the `with`. A step is run the way the platform runs it:
+`kaos_lib.testing.running` prepares its context, `kaosctl step run` runs it on this machine.
 """
 import contextlib
 import importlib
-import importlib.util
 import sys
 from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # fake_lakefs.py
-
 try:
-    import kaos_lib  # noqa: E402,F401
-    import kaos_lib.lock  # noqa: E402,F401
+    import kaos_lib  # noqa: F401
 except ImportError:
     raise pytest.UsageError("step tests need kaos-lib: see step_tests/README.md for the pip install line") from None
 
-from fake_lakefs import FakeLakeFS  # noqa: E402
+ROOT = Path(__file__).resolve().parents[1]
 
-ENV_VARS = ("LAKEFS_ENDPOINT", "LAKEFS_URL", "LAKEFS_ACCESS_KEY", "LAKEFS_SECRET_KEY", "LAKEFS_BEARER_TOKEN",
-            "KUBECORE_STAGED_DIR", "KUBECORE_CACHE_DIR", "KUBECORE_DATASET_CONFIG", "CHECKPOINT_BUCKET",
-            "CHECKPOINT_PREFIX", "KUBECORE_RUN_ID", "KUBECORE_WORKFLOW_NAME", "KUBECORE_DATASET_DIR", "KAOS_LIB_LOCK", "AWS_ACCESS_KEY_ID",
-            "AWS_SECRET_ACCESS_KEY", "S3_ENDPOINT_URL")
-
-DATA_YAML = b"path: .\ntrain: images/train\nval: images/val\nnc: 1\nnames:\n  0: ship\n"
+DATA_YAML = "path: .\ntrain: images/train\nval: images/val\ntest: images/test\nnc: 1\nnames:\n  0: ship\n"
 
 
 @contextlib.contextmanager
@@ -51,34 +42,42 @@ def import_in(step, module):
         return importlib.import_module(module)
 
 
-@pytest.fixture(autouse=True)
-def clean_env(tmp_path, monkeypatch):
-    kaos_lib.lock.reset()  # the data lock is process-wide: no test sees another's reads
-    for var in ENV_VARS:
-        monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv("KUBECORE_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.chdir(tmp_path)
+def make_dataset(folder: Path, train=6, val=3, test=2, size=32) -> Path:
+    """A small YOLO dataset: data.yaml, `train`/`val`/`test` images with one label line each, and a README."""
+    from PIL import Image
+
+    for split, count in (("train", train), ("val", val), ("test", test)):
+        (folder / "images" / split).mkdir(parents=True)
+        (folder / "labels" / split).mkdir(parents=True)
+        for i in range(count):
+            Image.new("RGB", (size, size), (i * 20 % 255, 40, 90)).save(folder / "images" / split / f"{split}{i:02d}.jpg")
+            (folder / "labels" / split / f"{split}{i:02d}.txt").write_text("0 0.5 0.5 0.4 0.4\n")
+    (folder / "data.yaml").write_text(DATA_YAML)
+    (folder / "README.md").write_text("notes\n")
+    return folder
 
 
 @pytest.fixture
-def fake():
-    f = FakeLakeFS()
-    files = {"data.yaml": DATA_YAML, "images/train/a.jpg": b"img", "labels/train/a.txt": b"0 0.5 0.5 0.1 0.1\n",
-             "README.md": b"notes"}
-    f.add_repo("dataset-cats", metadata={"kaos.kind": "dataset", "kaos.template": "ultralytics"}, files=files)
-    f.tag("dataset-cats", "v1")
-    f.add_repo("outputs-yolo", metadata={"kaos.kind": "outputs"})
-    return f
+def dataset(tmp_path):
+    return make_dataset(tmp_path / "raw")
 
 
-@pytest.fixture
-def client(fake):
-    return fake.client()
+def composed_settings(**overrides) -> dict:
+    """The run's settings with every default of config/ (the platform composes them with Hydra; this merges the same
+    files). ``overrides`` replace whole sections."""
+    import yaml
 
+    def load(rel):
+        return yaml.safe_load((ROOT / "config" / rel).read_text())
 
-@pytest.fixture
-def connected(fake, monkeypatch):
-    """LakeFS.connect() returns the fake: for code that connects on its own."""
-    from kaos_lib.lakefs import LakeFS
-    monkeypatch.setattr(LakeFS, "connect", classmethod(lambda cls, *a, **k: fake.client()))
-    return fake
+    train = load("train.yaml")["train"]
+    train["optimizer"] = load("train/optimizer/sgd.yaml")
+    train["callbacks"] = load("train/callbacks/early_stopping.yaml")
+    train["qat"] = load("train/qat/default_qat.yaml")
+    settings = {"experiment": load("experiment.yaml")["experiment"], "dataset": load("dataset.yaml")["dataset"],
+                "data": load("data.yaml")["data"], "model": load("model/yolov8n.yaml"), "train": train,
+                "image_processing": load("image_processing/mosaic_default.yaml"),
+                "quantization": load("quantization.yaml")["quantization"],
+                "registration": load("registration.yaml")["registration"], "logging": load("logging.yaml")["logging"]}
+    settings.update(overrides)
+    return settings
