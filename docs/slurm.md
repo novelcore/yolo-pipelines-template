@@ -5,7 +5,7 @@ the reasons a job waits are explained in the guide: [HPC (Slurm)](https://storag
 
 - **Pick the class for training only.** On the run form, set `model-training-class` to one of the Slurm classes and submit.
   The other steps stay where they are.
-- **The time limit is 12 hours.** `walltime="12h"` on `model-training` in `pipeline.py`. Raise it there for a longer training.
+- **The time limit is 12 hours.** `walltime="12h"` on `model-training` in `pipeline.py` is the default of the run-form field `model-training-walltime`. Write another value there (for example `24h`) for one run, or raise it in `pipeline.py` for every run.
 - **Training continues by itself.** It writes `last.pt` and `best.pt` into the checkpoint folder, so a job that reaches its
   limit, or loses its node, is continued from the last epoch with the same total number of epochs and in the same MLflow
   run ([Long jobs](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/long-jobs.html)).
