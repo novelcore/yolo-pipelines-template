@@ -63,7 +63,7 @@ D = {  # one line each; what the field does for you
     "experiment-description": "Free text stored on the MLflow run.",
     "model": "Dropdown: which model size to train.",
     "model-variant": "The model file behind the dropdown (set by `model`).",
-    "model-pretrained_weights": "An `s3://<repository>/<ref>/<path>` path to your own weights to start from (weights only, training starts at epoch 0). Empty uses the standard weights of the model.",
+    "model-pretrained_weights": "A `<repository>@<version>/<path>` reference to your own weights, for example `outputs-myapp@main/checkpoints/exp1/run1/best.pt` to start from (weights only, training starts at epoch 0). Empty uses the standard weights of the model.",
     "data-sample_size": "Train on this many images, and their labels, per split (`train`, `val`, `test`), to make a quick test. `prepare-data` keeps them. Empty keeps every image.",
     "data-seed": "Picks which images `data-sample_size` keeps: the same seed keeps the same images.",
     "train-epochs": "Training rounds.",

@@ -27,7 +27,7 @@ The form also has a `<step>-class` field for each step: the machine it runs on, 
 |---|---|---|---|---|
 | `model` | dropdown | `yolov8n` | options: `yolov11x`, `yolov8n`, `yolov8s` | Dropdown: which model size to train. |
 | `model-variant` | text | `yolov8n-pose.pt` |  | The model file behind the dropdown (set by `model`). |
-| `model-pretrained_weights` | text | empty |  | An `s3://<repository>/<ref>/<path>` path to your own weights to start from (weights only, training starts at epoch 0). Empty uses the standard weights of the model. |
+| `model-pretrained_weights` | text | empty |  | A `<repository>@<version>/<path>` reference to your own weights, for example `outputs-myapp@main/checkpoints/exp1/run1/best.pt` to start from (weights only, training starts at epoch 0). Empty uses the standard weights of the model. |
 
 ## Data loading
 

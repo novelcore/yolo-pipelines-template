@@ -89,7 +89,7 @@ class TrainingParams(BaseModel):
     pretrained_weights: Optional[str] = Field(
         default=None,
         description=(
-            "Local path or s3://<repository>/<ref>/<path> in lakeFS of a custom .pt file. "
+            "Local path or <repository>@<version>/<path> in lakeFS of a custom .pt file. "
             "Loads weights only; training starts from epoch 0."
         ),
     )
