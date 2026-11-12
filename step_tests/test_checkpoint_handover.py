@@ -1,5 +1,6 @@
 """The checkpoint the training step hands to qat-finetune and model-quantization is never empty, and they read it
 from the model `checkpoints` that model-training saved (PRD-HPC-1461 AC-13)."""
+import os
 import types
 from pathlib import Path
 
@@ -68,7 +69,8 @@ def test_ptq_works_on_a_copy_of_the_checkpoint_because_the_export_writes_beside_
                          produces=[("model", "quantization")]):
         entry.main()
     checkpoint = Path(seen["fp32_checkpoint_path"])
-    assert checkpoint.read_bytes() == b"weights" and checkpoint.parent == Path(seen["output_dir"])
+    assert checkpoint.read_bytes() == b"weights" and checkpoint.parent != folders["checkpoints"]
+    assert os.access(checkpoint.parent, os.W_OK), "the export writes beside the checkpoint it is given"
     assert seen["mode"] == "ptq" and seen["tflite_path"] is None
 
 

@@ -1,6 +1,4 @@
 """model-quantization: make the INT8 TFLite of the trained model (PTQ), or check and save the one qat-finetune made."""
-import shutil
-
 from kaos_lib import mlflow as tracking
 from kaos_lib import step
 
@@ -12,10 +10,9 @@ def main() -> None:
     q = ctx.params["quantization"]
     mode = q.get("mode", "ptq")
     train = step.upstream("model-training").values
-    runs = step.output("quantization").parents[2] / "runs"
-    runs.mkdir(parents=True, exist_ok=True)
-    # The input folder is read-only and the export writes beside its checkpoint: work on a copy.
-    checkpoint = shutil.copy(step.input("checkpoints") / train["best_checkpoint"], runs)
+    runs = step.workdir()
+    # The export writes beside its checkpoint, so the step works on a writable copy of the input.
+    checkpoint = step.input("checkpoints", writable=True) / train["best_checkpoint"]
     tflite, qat_run_id = None, None
     if mode == "qat":  # the qat-finetune result is the INT8 model; this step checks and saves it
         qat = step.upstream("qat-finetune")

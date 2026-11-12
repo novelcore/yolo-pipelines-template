@@ -28,7 +28,7 @@ RUN /opt/poetry/bin/poetry export --only=main -f requirements.txt --output /tmp/
 # github.com/kaos-io/kaos-lib. The platform's CI passes KAOS_LIB_PACKAGE, the WHOLE pip requirement (the
 # platform registry's wheel); the default is this template's pin. Only app/ is copied into the image.
 # Default for a local build: kaos-lib 0.5.0. The platform's CI overrides it with --build-arg KAOS_LIB_PACKAGE.
-ARG KAOS_LIB_PACKAGE="kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/19a7151fb3589fdff31ba549226100c30a7497dc.zip"
+ARG KAOS_LIB_PACKAGE="kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/f422375c291f99bce326de3c606b957ec6cb228d.zip"
 RUN pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"
 
 COPY app/ ./app/

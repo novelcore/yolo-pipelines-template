@@ -10,8 +10,7 @@ def main() -> None:
     train = step.upstream("model-training").values
     q = ctx.params["quantization"]
     qat = ctx.params["train"].get("qat", {})
-    runs = step.output("qat").parents[2] / "runs"
-    runs.mkdir(parents=True, exist_ok=True)
+    runs = step.workdir()
     tracking.mlflow()  # fails here, before any GPU time, when MLflow cannot be reached
 
     result = Manager().run(

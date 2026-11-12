@@ -74,4 +74,4 @@ One topic has one page: what is true for every pipeline (datasets, checkpoints, 
 
 ## License
 
-**GNU Affero General Public License v3.0** (`AGPL-3.0-only`), see [LICENSE](LICENSE). It depends on a training library (Ultralytics) that is itself AGPL-3.0, so the template as a whole carries that licence. Releases before this change were published under Apache-2.0, which may be redistributed under AGPL-3.0. A pipeline created from this template inherits these terms for the template's code.
+**GNU Affero General Public License v3.0** (`AGPL-3.0-only`), see [LICENSE](LICENSE). The template depends on Ultralytics, which is licensed under AGPL-3.0; see its licence.

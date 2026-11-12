@@ -37,7 +37,7 @@ A step writes into the folder `step.output("<name>")` and the step API saves it 
 | declared in `pipeline.py` | saved as |
 |---|---|
 | `model("checkpoints")`, `model("qat")`, `model("quantization")` | the files of this run, in `outputs-<pipeline>` under `<name>/<experiment>/<run>/`, one commit per output and run |
-| `dataset("prepared")` | a new version of the dataset `dataset-<pipeline>-prepared` |
+| `dataset("prepared")` | a new version of the dataset `dataset-<your app>-prepared` |
 
 Nothing reaches `outputs-<pipeline>` until the step has ended well, and a step that is run again writes exactly what the new
 attempt wrote. What the step hands on in `step.result(...)` is small (at most 8 KiB): the MLflow run, file names and metrics.

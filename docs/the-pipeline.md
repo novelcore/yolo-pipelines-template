@@ -24,7 +24,7 @@ A step can write a dataset, and the steps after it read exactly that version. `p
 - **With `data-sample_size` = `50`** it keeps 50 images of each split (`train`, `val`, `test`) and their labels, to try a run
   quickly. `data-seed` picks which: the same seed keeps the same images, another seed other ones. A split with fewer images keeps
   them all. `data.yaml` and every file outside `images/` and `labels/` are kept as they are.
-- **Where it goes:** the dataset `dataset-<pipeline>-prepared`, a repository of its own in your project. A run that writes new
+- **Where it goes:** the dataset `dataset-<your app>-prepared`, a repository of its own in your project. A run that writes new
   files seals a new version; one that writes files an existing version already has adds none. The dataset's `latest` moves to this run's version only when you ask: `plan: {promote: {prepared: true}}` in the run's
   advanced settings. The steps after `prepare-data` read this run's version either way, so a run is never changed by another
   run that finishes later.
@@ -57,7 +57,7 @@ from an earlier one.
 - **Weights and exports:** `outputs-<pipeline>` in lakeFS, under `checkpoints/<experiment>/<run>/`
   (`best.pt`, `last.pt`). The INT8 model goes under `quantization/<experiment>/<run>/`, and, for `qat`, the model
   `qat-finetune` made under `qat/<experiment>/<run>/`.
-- **The prepared data:** the dataset `dataset-<pipeline>-prepared` ([Datasets](datasets.md)).
+- **The prepared data:** the dataset `dataset-<your app>-prepared` ([Datasets](datasets.md)).
 - **Metrics, parameters, plots:** the project's MLflow, in the experiment named by
   `experiment-name`.
 - **The registered model:** MLflow's model registry; `object-pose-yolo` unless you set

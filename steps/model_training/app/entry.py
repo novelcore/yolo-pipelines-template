@@ -17,8 +17,7 @@ def main() -> None:
     freeze = train.get("freeze")
     freeze = int(freeze) if freeze not in (None, "", "None") else None
     checkpoints = step.output("checkpoints")
-    runs = checkpoints.parents[2] / "runs"  # Ultralytics' own output, on the step's working volume
-    runs.mkdir(parents=True, exist_ok=True)
+    runs = step.workdir()  # Ultralytics' own output
     tracking.mlflow()  # fails here, before any GPU time, when MLflow cannot be reached
 
     result = Manager(ctx.params["logging"]["level"]).run(

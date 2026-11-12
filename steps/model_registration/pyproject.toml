@@ -14,9 +14,7 @@ packages = [{include = "app"}]
 python = ">=3.12,<=3.14"
 pydantic = "^2.11.5"
 typer = "^0.16.0"
-pydantic-settings = "^2.10.1"
 mlflow = ">=3.0,<4"
-boto3 = ">=1.34"
 # MLflow auth: the `zitadel` request-auth provider ships with kaos-lib[mlflow], the package the Dockerfile installs.
 requests = "^2.31.0"
 
@@ -50,5 +48,5 @@ disallow_untyped_defs = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["boto3", "boto3.*", "botocore", "botocore.*", "mlflow", "mlflow.*", "torch", "torch.*"]
+module = ["mlflow", "mlflow.*", "torch", "torch.*"]
 ignore_missing_imports = true

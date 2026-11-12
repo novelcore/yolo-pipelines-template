@@ -29,12 +29,12 @@ This pipeline trains **pose**, so `data.yaml` also needs `kpt_shape` and `flip_i
 
 ## The dataset the pipeline writes
 
-The first step that touches your data, `prepare-data`, writes it again as the dataset `dataset-<pipeline>-prepared`: all of it,
+The first step that touches your data, `prepare-data`, writes it again as the dataset `dataset-<your app>-prepared` (`<your app>` is the name of your app; the steps only ever use the short name `prepared`): all of it,
 or a reproducible subset when you set `data-sample_size` ([What the pipeline does](the-pipeline.md#prepare-data-the-first-step-writes-a-dataset)).
 It is a dataset like yours, with versions, but only the pipeline writes it: you can read it and pick a version, never push to it.
 Training reads exactly the version of the run that wrote it. Its `latest` moves only when you ask for it in the run's advanced
 settings (`plan: {promote: {prepared: true}}`), so you can also train a later run on a prepared version by picking
-`dataset-<pipeline>-prepared@<version>` as the `dataset`.
+`dataset-<your app>-prepared@<version>` as the `dataset`.
 
 ## Layouts
 
