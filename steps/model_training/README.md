@@ -4,7 +4,7 @@ Trains the YOLO pose model (YOLOv8 / YOLOv11) on the dataset version `prepare-da
 
 - **Runs on:** a GPU (`gpu=True` in `pipeline.py`); on HPC (Slurm) when `model-training-class` is an HPC class.
 - **Reads:** the settings `experiment`, `model`, `train`, `image_processing`, `logging`, and `step.input("prepared")`: the dataset version `prepare-data` wrote, as files on the machine.
-- **Writes:** the model `checkpoints` (`best.pt`, `last.pt`, exports), saved in `outputs-<pipeline>` under `checkpoints/<experiment>/<run>/`; metrics to MLflow. A step run again after a lost machine or an HPC time limit continues from its last checkpoint (nothing to call; see docs/the-pipeline.md), and `best.pt` survives the continuation. The result always names a checkpoint: `best.pt`, or `last.pt` when a continued run wrote no `best.pt`; a run with no weights at all fails.
+- **Writes:** the model `checkpoints` (`best.pt`, `last.pt`, exports), saved in `outputs-<pipeline>` under `checkpoints/<experiment>/<run>/`; metrics to MLflow. A step run again after a lost machine or the time limit continues from its last checkpoint (nothing to call; see docs/the-pipeline.md), and `best.pt` survives the continuation. The result always names a checkpoint: `best.pt`, or `last.pt` when a continued run wrote no `best.pt`; a run with no weights at all fails.
 - **Hands on:** the MLflow run, the checkpoint's file name, the epochs completed, the final validation metrics and the exports.
 - **Settings:** [docs/parameters.md](../../docs/parameters.md) (bounds are the pydantic models in `app/models/training.py`).
 
