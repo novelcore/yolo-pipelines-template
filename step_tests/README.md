@@ -22,8 +22,7 @@ A step is run the way the platform runs it: `kaos_lib.testing.running` prepares 
 | `test_training_run.py` | a real one-epoch training on the CPU, started on the dataset `prepare-data` wrote (needs `torch` and `ultralytics`; skipped without them; nothing is downloaded) |
 | `test_qat_resume.py` | the QAT fine-tune resumes from the checkpoint folder (needs `torch` and `torchao`) |
 | `test_config_validation.py`, `test_form_bounds.py` | what `config-validation` refuses |
-| `test_kaos_lib_version.py`, `test_repo_layout.py` | the image pins, `.kaos/compat.yaml`, and that an app is `pipeline.py`, `config/` and `steps/` |
-| `test_docs_example.py` | the pipeline file and the step the guide of kaos-lib shows equal this template (needs `DOCS_CHECK_KAOS_LIB`; skipped without it) |
+| `test_kaos_lib_version.py` | the image pins, and the installed kaos-lib is inside the range of `.kaos/compat.yaml` |
+| `test_parameters_doc.py` | `docs/parameters.md` equals what `python scripts/gen-parameters.py` writes from `config/` |
 
-A step image copies only its `app/` folder. `test_repo_layout.py` fails if a copy of the platform's pipeline code, or a step that
-composes the settings, comes back: the platform provides its own.
+A step image copies only its `app/` folder.

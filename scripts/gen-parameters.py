@@ -185,8 +185,7 @@ def build():
          "Fields set by a dropdown change when you pick another option, so their default is that of the option shown.", "",
          "The form also has a `<step>-class` field for each step: the machine it runs on, described in "
          "[Run on HPC (Slurm)](slurm.md).", "",
-         "!!! note \"Checked before training\"",
-         "    With `quantization-mode` = `ptq` or `qat`, the first step (`config-validation`) checks that "
+         "> **Checked before training.** With `quantization-mode` = `ptq` or `qat`, the first step (`config-validation`) checks that "
          "`quantization-calibration_frames` is from 100 to 10000, so a wrong value fails in seconds.", ""]
     for sec in ORDER:
         if not rows[sec]:

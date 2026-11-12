@@ -5,8 +5,7 @@ Every field of the **Run** form, with its type, default and allowed values. Type
 
 The form also has a `<step>-class` field for each step: the machine it runs on, described in [Run on HPC (Slurm)](slurm.md).
 
-!!! note "Checked before training"
-    With `quantization-mode` = `ptq` or `qat`, the first step (`config-validation`) checks that `quantization-calibration_frames` is from 100 to 10000, so a wrong value fails in seconds.
+> **Checked before training.** With `quantization-mode` = `ptq` or `qat`, the first step (`config-validation`) checks that `quantization-calibration_frames` is from 100 to 10000, so a wrong value fails in seconds.
 
 ## Run
 

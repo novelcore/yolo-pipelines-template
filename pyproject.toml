@@ -1,7 +1,7 @@
 [project]
-name = "yolo-training-pipeline"
+name = "pipeline"
 version = "0.1.0"
-description = "KubeCore ML pipeline (Hera DAG + Hydra experiment config)"
+description = "An ML pipeline on the platform"
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]

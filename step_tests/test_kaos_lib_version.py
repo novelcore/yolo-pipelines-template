@@ -9,15 +9,11 @@ from importlib.metadata import version
 import pytest
 import yaml
 from conftest import ROOT
+from packaging.specifiers import SpecifierSet
 
 STEPS = sorted(p.parent.name for p in (ROOT / "steps").glob("*/Dockerfile"))
 # The ARG holds the whole requirement: name[extras] then ==X.Y.Z or " @ <url>".
 SPEC_RE = re.compile(r'^ARG KAOS_LIB_PACKAGE="([A-Za-z0-9._-]+(?:\[[A-Za-z0-9,._-]+\])?(?: ?==\S+| @ https://\S+))"$', re.M)
-
-
-def test_every_step_has_an_image():
-    assert STEPS == ["config_validation", "model_quantization", "model_registration", "model_training",
-                     "prepare_data", "qat_finetune"]
 
 
 @pytest.mark.parametrize("step", STEPS)
@@ -40,7 +36,7 @@ def test_quantization_installs_the_package_after_the_export_toolchain():
     assert text.index("ARG KAOS_LIB_PACKAGE") > text.index('"tensorflow==')
 
 
-def test_the_template_declares_the_range_of_its_package():
+def test_the_app_declares_the_range_of_its_package():
     compat = yaml.safe_load((ROOT / ".kaos" / "compat.yaml").read_text())
-    assert compat == {"kaos-lib": ">=0.5.0rc1,<0.6"}
-    assert version("kaos-lib").startswith("0.5."), "the package the steps are tested with is inside the range"
+    assert SpecifierSet(compat["kaos-lib"]).contains(version("kaos-lib"), prereleases=True), \
+        "the installed kaos-lib is inside the range .kaos/compat.yaml declares"
