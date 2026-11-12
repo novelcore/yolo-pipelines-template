@@ -56,15 +56,14 @@ kaosctl dataset push ./dataset-spacecraft dataset-spacecraft -m "first 200 label
 ```
 
 `validate` lists every problem at once and exits with code 2, for example `images/val/a.jpg has no labels/val/a.txt`.
-`push` opens a pull request into the dataset; merge it, then release a version with
-`kaosctl dataset release dataset-spacecraft`. Several classes: `--classes a,b,c`, the first is id 0.
+`push` opens a pull request into the dataset; merge it ([Run it](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/run-it.html#put-a-few-files-in-a-dataset)), then
+release a version with `kaosctl dataset release dataset-spacecraft`. Several classes: `--classes a,b,c`, the first is id 0.
 
 ## The dataset the pipeline writes
 
 The first step that touches your data, `prepare-data`, writes it again as the dataset `dataset-<your app>-prepared`
 (`<your app>` is the name of your app; the steps only ever use the short name `prepared`): all of it, or a reproducible subset
 when you set `data-sample_size` ([What the pipeline does](the-pipeline.md#prepare-data-the-first-step-writes-a-dataset)).
-It is a dataset like yours, with versions, but only the pipeline writes it: you can read it and pick a version, never push
-to it. Training reads exactly the version of the run that wrote it. Its `latest` moves only when you ask for it in the run's
-advanced config (`plan: {promote: {prepared: true}}`), so you can also train a later run on a prepared version by picking
-`dataset-<your app>-prepared@<version>` as the `dataset`.
+You can read it and pick a version, never push to it. Training reads exactly the version of the run that wrote it. To train a
+later run on a prepared version, pick `dataset-<your app>-prepared@<version>` as the `dataset`. Which version the name `latest`
+points to is explained in [Move `latest`](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/flow-datasets.html#move-latest).
