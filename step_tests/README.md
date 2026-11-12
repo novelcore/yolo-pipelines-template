@@ -23,6 +23,7 @@ A step is run the way the platform runs it: `kaos_lib.testing.running` prepares 
 | `test_qat_resume.py` | the QAT fine-tune resumes from the checkpoint folder (needs `torch` and `torchao`) |
 | `test_config_validation.py`, `test_form_bounds.py` | what `config-validation` refuses |
 | `test_kaos_lib_version.py`, `test_repo_layout.py` | the image pins, `.kaos/compat.yaml`, and that an app is `pipeline.py`, `config/` and `steps/` |
+| `test_docs_example.py` | the pipeline file and the step the guide of kaos-lib shows equal this template (needs `DOCS_CHECK_KAOS_LIB`; skipped without it) |
 
 A step image copies only its `app/` folder. `test_repo_layout.py` fails if a copy of the platform's pipeline engine, or a step that
 composes the settings, comes back: the platform runs its own.

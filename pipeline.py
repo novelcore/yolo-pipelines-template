@@ -11,7 +11,8 @@
 
 Every setting lives in config/ and reaches the run form by itself; the version of the dataset is chosen
 on the run form, never here. Conditions refer to form fields by name (config path, dots to hyphens):
-quantization.mode is quantization-mode. Add a step: docs/add-a-step.md.
+quantization.mode is quantization-mode. Add a step:
+https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/first-step.html
 """
 
 from pathlib import Path

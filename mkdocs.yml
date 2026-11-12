@@ -68,7 +68,6 @@ markdown_extensions:
 
 plugins:
   - search
-  - glightbox
 
 extra_css:
   - assets/extra.css
@@ -81,33 +80,11 @@ extra:
 
 nav:
   - Start here: index.md
-  - The journey:
-      - "1. Prepare and upload a dataset": prepare-dataset.md
-      - "2. Release a version and pick it": release-a-version.md
-      - "3. Create a yolo pipeline": create-pipeline.md
-      - "4. Run, small then full": run-small-and-full.md
-      - "5. Results, weights and models": results.md
-      - "6. Use a shared dataset": shared-dataset.md
-      - "7. Run on HPC (Slurm)": slurm.md
-      - A day with yolo: worked-day.md
-  - More on the pipeline:
-      - What the pipeline does: the-pipeline.md
-      - Watch it train: watch-it.md
-      - Promote a model: promote.md
-      - Datasets: datasets.md
-      - All the run-form fields: parameters.md
-      - Change the pipeline: change-the-pipeline.md
-      - Under the hood (optional): datasets-in-the-steps.md
-  - Help:
-      - When something breaks: troubleshooting.md
-      - Word list: glossary.md
-  - kaos-lib guide:   # what is true for every pipeline is explained once, there
-      - Datasets: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/datasets.html
-      - Check your pipeline: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/lint.html
-      - Run a step locally: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/step-run.html
-      - Long runs and checkpoints: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/checkpoint.html
-      - Versions and upgrades: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/support-window.html
-      - Everything else: https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/index.html
-  - Cookbook (hera): https://novelcore.github.io/hera-pipeline-template/
+  - What the pipeline does: the-pipeline.md
+  - All the run-form fields: parameters.md
+  - Datasets: datasets.md
+  - Run on HPC (Slurm): slurm.md
+  - "The guide, from Run it": https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/run-it.html
+  - "The guide: a real pipeline": https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/a-real-pipeline.html
 
 copyright: "Copyright &copy; 2026 Novelcore"

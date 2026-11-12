@@ -16,4 +16,4 @@ steps/model_registration/
   app/services/model_registration.py   MLflow and lakeFS calls
 ```
 
-Pick and promote models: [docs/promote.md](../../docs/promote.md).
+Promote a model with the run-form field `registration-promote_to`: [docs/parameters.md](../../docs/parameters.md).

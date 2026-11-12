@@ -17,4 +17,4 @@ steps/model_training/
   Dockerfile          the image (installs kaos-lib at KAOS_LIB_PACKAGE)
 ```
 
-Tests: `step_tests/` (`step_tests/README.md`), including a real one-epoch run on the CPU. How data and results move: [docs/datasets-in-the-steps.md](../../docs/datasets-in-the-steps.md).
+Tests: `step_tests/` (`step_tests/README.md`), including a real one-epoch run on the CPU. How data and results move: [the guide](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/produce-a-dataset.html).

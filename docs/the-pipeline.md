@@ -1,7 +1,6 @@
 # What the pipeline does
 
-This page has no tasks. It explains the six steps, so the run form makes sense. You press
-**Submit** once, and the steps run in this order:
+This page explains the six steps, so the run form makes sense. You submit the run once, and the steps run in this order:
 
 | # | step | runs | what it does |
 |---|---|---|---|
@@ -37,8 +36,7 @@ and the INT8 steps can still run on HPC.
 ## When a step is run again
 
 A step whose machine is lost, or whose HPC (Slurm) time limit is reached, is run again by the platform and continues
-from its checkpoint. How that works, the settings and the log messages are in the kaos-lib guide:
-[Long runs: checkpoints](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/checkpoint.html). What each step of this pipeline keeps:
+from its checkpoint. How that works is in the guide: [Long jobs](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/long-jobs.html). What each step of this pipeline keeps:
 
 | step | kept | when it is run again |
 |---|---|---|
@@ -61,6 +59,6 @@ from an earlier one.
 - **Metrics, parameters, plots:** the project's MLflow, in the experiment named by
   `experiment-name`.
 - **The registered model:** MLflow's model registry; `object-pose-yolo` unless you set
-  `registration-registered_model_name`.
+  `registration-registered_model_name`. Set `registration-promote_to` to `champion` or `challenger` on the run form to give the new version that label when the run ends; empty only saves it.
 
-Next: [Upload images and labels](prepare-dataset.md).
+Next: [Datasets](datasets.md).
