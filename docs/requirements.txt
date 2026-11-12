@@ -1,6 +1,0 @@
-# Dependencies to build the documentation site.
-# Used by .github/workflows/docs.yml. Pinned so the build stays stable.
-mkdocs-material>=9.5,<10
-# Only for scripts/gen-parameters.py (docs/parameters.md):
-pydantic>=2
-PyYAML>=6
