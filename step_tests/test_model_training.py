@@ -102,7 +102,7 @@ def test_pretrained_weights_in_lakefs_are_downloaded_from_the_ref_they_name(trai
             dest.write_bytes(b"w")
 
     monkeypatch.setattr(LakeFS, "connect", classmethod(lambda cls, *a, **k: Lake()))
-    got = make_service(training)._fetch_weights("s3://outputs-yolo/abc123/checkpoints/exp/run/best.pt", tmp_path)
+    got = make_service(training)._fetch_weights("outputs-yolo@abc123/checkpoints/exp/run/best.pt", tmp_path)
     assert asked == [("outputs-yolo", "abc123", "checkpoints/exp/run/best.pt")]
     assert got.name == "best.pt" and got.read_bytes() == b"w"
 

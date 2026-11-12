@@ -3,7 +3,7 @@
 Responsibilities
 ----------------
 1. Validate that dataset_dir is a YOLO dataset: data.yaml, images/train, images/val.
-2. Resolve the starting weights: a custom .pt (a local file or an s3:// path in lakeFS) or the
+2. Resolve the starting weights: a custom .pt (a local file or a <repository>@<version>/<path> reference in lakeFS) or the
    variant's COCO weights.
 3. Write data.yaml to a temp dir (always deleted).
 4. Set MLFLOW_EXPERIMENT_NAME and MLFLOW_RUN so that the yolo built-in MLflow callback handles
@@ -49,7 +49,7 @@ _logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_S3_URI_RE = re.compile(r"^s3://([^/]+)/(.+)$")
+_WEIGHTS_REF_RE = re.compile(r"^([^/@\s]+)@([^/\s]+)/(.+)$")  # <repository>@<version>/<path>
 
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
@@ -707,7 +707,7 @@ class TrainingService:
         """Determine the path passed to YOLO().
 
         Priority (highest first):
-        1. pretrained_weights — a local .pt, or ``s3://<repository>/<ref>/<path>`` in lakeFS,
+        1. pretrained_weights — a local .pt, or ``<repository>@<version>/<path>`` in lakeFS,
            downloaded to tmp_path; weight-only initialisation.
         2. model_variant — return the bare variant name so that yolo
            downloads COCO pretrained weights from its CDN on first use.
@@ -726,8 +726,8 @@ class TrainingService:
         return weights_dir / params.model_variant
 
     def _fetch_weights(self, uri_or_path: str, tmp_path: Path) -> Path:
-        """A local .pt as it is; ``s3://<repository>/<ref>/<path>`` downloaded from lakeFS."""
-        match = _S3_URI_RE.match(uri_or_path)
+        """A local .pt as it is; ``<repository>@<version>/<path>`` downloaded from lakeFS."""
+        match = _WEIGHTS_REF_RE.match(uri_or_path)
         if not match:
             local_pt = Path(uri_or_path)
             if not local_pt.exists():
@@ -735,8 +735,7 @@ class TrainingService:
             return local_pt
         from kaos_lib.lakefs import LakeFS  # noqa: PLC0415
 
-        repo, key = match.group(1), match.group(2)
-        ref, _, path = key.partition("/")
+        repo, ref, path = match.groups()
         local_pt = tmp_path / Path(path).name
         self._logger.info("Downloading pretrained weights from %s -> %s", uri_or_path, local_pt)
         LakeFS.connect().download_object(repo, ref, path, local_pt)

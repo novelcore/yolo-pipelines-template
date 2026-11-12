@@ -30,21 +30,28 @@ def _lake(monkeypatch, lake):
 def test_existing_pretrained_weights_pass(monkeypatch):
     _, svc = _service()
     lake = _lake(monkeypatch, _Lake(("outputs-yolo", "main", "checkpoints/exp/run/best.pt")))
-    svc.run({"model": {"pretrained_weights": "s3://outputs-yolo/main/checkpoints/exp/run/best.pt"}})
+    svc.run({"model": {"pretrained_weights": "outputs-yolo@main/checkpoints/exp/run/best.pt"}})
     assert lake.asked == [("outputs-yolo", "main", "checkpoints/exp/run/best.pt")]
 
 
 def test_missing_pretrained_weights_fail(monkeypatch):
     mod, svc = _service()
     _lake(monkeypatch, _Lake())
-    with pytest.raises(mod.ConfigValidationError, match="pretrained weights not found: s3://repo/main/w.pt"):
-        svc.run({"model": {"pretrained_weights": "s3://repo/main/w.pt"}})
+    with pytest.raises(mod.ConfigValidationError, match="pretrained weights not found: repo@main/w.pt"):
+        svc.run({"model": {"pretrained_weights": "repo@main/w.pt"}})
 
 
-def test_pretrained_weights_must_be_empty_or_a_lakefs_path():
+@pytest.mark.parametrize("value", [
+    "/somewhere/w.pt",                          # no repository
+    "outputs-yolo/main/w.pt",                   # missing @
+    "outputs-yolo@main",                        # missing path
+    "outputs-yolo@main/",                       # empty path
+    "s3://outputs-yolo/main/checkpoints/w.pt",  # the old form
+])
+def test_pretrained_weights_must_be_empty_or_a_reference(value):
     mod, svc = _service()
-    with pytest.raises(mod.ConfigValidationError, match="empty or an s3://"):
-        svc.run({"model": {"pretrained_weights": "/somewhere/w.pt"}})
+    with pytest.raises(mod.ConfigValidationError, match=r"<repository>@<version>/<path>, for example outputs-myapp@main/"):
+        svc.run({"model": {"pretrained_weights": value}})
 
 
 def test_nothing_to_look_up_needs_no_lake(monkeypatch):

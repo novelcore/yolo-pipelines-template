@@ -8,14 +8,17 @@ upstream by the platform. Re-implementing a parallel schema here would just be a
 to drift. It checks:
 
   - quantization: ``calibration_frames`` is inside the bounds the INT8 steps accept;
-  - pretrained weights: an ``s3://<repository>/<ref>/<path>`` weights override exists in lakeFS.
+  - pretrained weights: a ``<repository>@<version>/<path>`` weights override exists in lakeFS.
 
 The dataset is not checked here: the platform pins every dataset of the run to one commit before the
 first step starts, and ``prepare-data`` reads it.
 """
 
 import logging
-from urllib.parse import urlparse
+import re
+
+# <repository>@<version>/<path>: a file inside a repository at a version, like a dataset reference plus a path.
+_WEIGHTS_RE = re.compile(r"^([^/@\s]+)@([^/\s]+)/(.+)$")
 
 # Bounds of quantization.calibration_frames. They mirror QuantizationParams / QATParams
 # (steps/model_quantization, steps/qat_finetune: Field(ge=100, le=10000)); this image has no
@@ -62,17 +65,19 @@ class ConfigValidationService:
     def _check_pretrained_weights(self, weights) -> None:
         if not weights:
             return  # standard yolo names are fetched by the training step
-        if not str(weights).startswith("s3://"):
+        weights = str(weights)
+        match = _WEIGHTS_RE.match(weights)
+        if not match:
             raise ConfigValidationError(
-                f"model.pretrained_weights must be empty or an s3://<repository>/<ref>/<path> path, got: {weights!r}"
+                f"model.pretrained_weights must be empty or <repository>@<version>/<path>, "
+                f"for example outputs-myapp@main/checkpoints/exp1/run1/best.pt, got: {weights!r}"
             )
-        parsed = urlparse(weights)
-        ref, _, path = parsed.path.lstrip("/").partition("/")
+        repo, ref, path = match.groups()
         self._log.info("checking pretrained weights %s", weights)
         from kaos_lib.lakefs import LakeFS  # noqa: PLC0415
 
         try:
-            found = any(obj["path"] == path for obj in LakeFS.connect().list_objects(parsed.netloc, ref, path))
+            found = any(obj["path"] == path for obj in LakeFS.connect().list_objects(repo, ref, path))
         except Exception as exc:  # the repository or the ref does not exist, or lakeFS cannot be reached
             raise ConfigValidationError(f"pretrained weights not found: {weights} ({exc})") from exc
         if not found:
