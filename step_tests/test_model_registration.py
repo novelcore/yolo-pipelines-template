@@ -5,14 +5,12 @@ shows best.pt in the experiment's Models tab as a logged model, registers best.p
 commit in lakeFS (`model-<slug(name)>-v<N>`) and records the tag on the model version. MLflow is a recording fake.
 """
 import importlib
-import json
-import os
 import types
 from importlib.metadata import version
 
 import pytest
 from conftest import composed_settings, step_app
-from kaos_lib import lock, step, testing
+from kaos_lib import testing
 from kaos_lib.errors import NotFoundError
 from kaos_lib.lakefs import LakeFS
 
@@ -107,47 +105,32 @@ def entry(modules, monkeypatch):
     return modules[0]
 
 
-def result(values, reads=(), writes=()):
-    return {"version": 1, "status": "ok", "values": values, "reads": list(reads), "writes": list(writes)}
-
-
 TRAIN = {"best_checkpoint": "best.pt", "mlflow_run_id": "mlflow-1", "model_variant": "yolov8n-pose.pt",
          "epochs_completed": 3, "image_size": 640, "final_map50": 0.5, "final_map50_95": 0.3,
          "val_metrics": {"val/mAP50": 0.5, "val/precision": 0.9}, "exported_models": {}}
-WROTE = {"name": "checkpoints", "type": "model", "repo": "outputs-yolo", "commit": COMMIT}
-RAW = {"name": "dataset", "repo": "dataset-cats", "owner": None, "ref": "v2", "commit": "a" * 40}
-PREPARED = {"name": "prepared", "type": "dataset", "repo": "dataset-yolo-prepared", "commit": "b" * 40}
+RAW = {"repo": "dataset-cats", "ref": "v2", "commit": "a" * 40}   # what prepare-data read
+RUN = "test-run"                                                  # the run id kaos_lib.testing hands the step
 
 
 def run(entry, tmp_path, train=None, quant=None, settings=None, name="model-registration"):
-    upstream = {"prepare-data": result({}, [RAW], [PREPARED]),
-                "model-training": result({**TRAIN, **(train or {})}, writes=[WROTE]),
-                "model-quantization": (result(quant["values"], writes=[quant["write"]]) if quant else testing.ABSENT)}
-    context = testing.local_context(run="run-9", app="yolo", step_name=name, kind="publish", experiment="exp",
-                                    params=settings or composed_settings(), reads=[], produces=[], upstream=upstream)
-    work, staged = tmp_path / "work", tmp_path / "staged"
-    staged.mkdir(parents=True)
-    saved = {k: os.environ.get(k) for k in (step.ENV, step.LOCAL_WORK_ENV)}
-    os.environ.update({step.ENV: lock.wire(context), step.LOCAL_WORK_ENV: str(work),
-                       "KAOS_STAGED_ROOT": str(staged)})
-    step.stop()
-    lock.reset()
-    try:
+    upstream = {"prepare-data": {}, "model-training": {**TRAIN, **(train or {})},
+                "model-quantization": quant["values"] if quant else None}
+    writes = {"prepare-data": {"prepared": {"type": "dataset", "commit": "b" * 40}},
+              "model-training": {"checkpoints": {"type": "model", "commit": COMMIT}}}
+    if quant:
+        writes["model-quantization"] = {"quantization": {"type": "model", "commit": quant["commit"]}}
+    with testing.running(tmp_path, kind="publish", name=name, app="yolo", experiment="exp",
+                         params=settings or composed_settings(), upstream=upstream, upstream_writes=writes,
+                         upstream_reads={"prepare-data": {"dataset": RAW}}) as ran:
         entry.main()
-    finally:
-        step.stop()
-        lock.reset()
-        for k, v in saved.items():
-            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
-        os.environ.pop("KAOS_STAGED_ROOT", None)
-    return json.loads((work / "output" / "kaos-result.json").read_text())
+    return ran.result
 
 
 def test_registers_best_from_the_logged_model_and_last_from_its_pinned_path(entry, mlf, lake, tmp_path):
     out = run(entry, tmp_path)
     assert [(n, u) for n, u in mlf.registered] == [
         ("object-pose-yolo", "models:/m-1"),
-        ("object-pose-yolo", f"s3://outputs-yolo/{COMMIT}/checkpoints/exp/run-9/last.pt")]
+        ("object-pose-yolo", f"s3://outputs-yolo/{COMMIT}/checkpoints/exp/{RUN}/last.pt")]
     assert out["values"]["best_version"] == 1 and out["values"]["last_version"] == 2
 
 
@@ -156,7 +139,7 @@ def test_the_logged_model_names_where_the_results_are_and_carries_the_val_metric
     model = mlf.logged_models["m-1"]
     assert model["name"] == "exp-best" and model["run"] == "mlflow-1"
     assert model["tags"] == {"kaos.outputs_repo": "outputs-yolo", "kaos.outputs_commit": COMMIT,
-                             "kaos.outputs_path": "checkpoints/exp/run-9/", "kaos.workflow": "run-9",
+                             "kaos.outputs_path": f"checkpoints/exp/{RUN}/", "kaos.workflow": RUN,
                              "kaos.dataset_ref": "dataset-cats@v2"}
     assert model["params"] == {"epochs": "3", "imgsz": "640", "model_variant": "yolov8n-pose.pt"}
     assert sorted((k, s, m) for k, _, s, m in mlf.metrics) == [("val/mAP50", 3, "m-1"), ("val/precision", 3, "m-1")]
@@ -197,12 +180,11 @@ def test_a_model_trained_to_last_pt_registers_last_only_once(entry, mlf, lake, t
 
 
 def test_exports_and_the_int8_model_are_recorded_with_the_commit_that_holds_them(entry, mlf, lake, tmp_path):
-    quant = {"values": {"tflite": "model_int8.tflite", "mlflow_run_id": "mlflow-2"},
-             "write": {"name": "quantization", "type": "model", "repo": "outputs-yolo", "commit": QUANT_COMMIT}}
+    quant = {"values": {"tflite": "model_int8.tflite", "mlflow_run_id": "mlflow-2"}, "commit": QUANT_COMMIT}
     run(entry, tmp_path, train={"exported_models": {"onnx_fp16": "best.onnx"}}, quant=quant)
     tags = mlf.version_tags[("object-pose-yolo", 1)]
-    assert tags["export_onnx_fp16"] == f"s3://outputs-yolo/{COMMIT}/checkpoints/exp/run-9/best.onnx"
-    assert tags["export_int8_tflite"] == f"s3://outputs-yolo/{QUANT_COMMIT}/quantization/exp/run-9/model_int8.tflite"
+    assert tags["export_onnx_fp16"] == f"s3://outputs-yolo/{COMMIT}/checkpoints/exp/{RUN}/best.onnx"
+    assert tags["export_int8_tflite"] == f"s3://outputs-yolo/{QUANT_COMMIT}/quantization/exp/{RUN}/model_int8.tflite"
 
 
 def test_the_alias_asked_for_is_given_to_the_best_version(entry, mlf, lake, tmp_path):

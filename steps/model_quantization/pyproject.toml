@@ -13,11 +13,9 @@ packages = [{include = "app"}]
 [tool.poetry.dependencies]
 python = ">=3.12,<=3.14"
 pydantic = "^2.11.5"
-typer = "^0.16.0"
 ultralytics = ">=8.2"
 mlflow = ">=3.0,<4"
 # MLflow auth: the `zitadel` request-auth provider ships with kaos-lib[mlflow], the package the Dockerfile installs.
-pyyaml = ">=6.0"
 numpy = ">=1.24"
 pillow = ">=10.0"
 ai-edge-litert = ">=1.0"
@@ -28,7 +26,6 @@ isort = "^6.0.1"
 mypy = "^1.15.0"
 pytest = "^8.4.1"
 pytest-cov = "^6.2.1"
-types-pyyaml = ">=6.0"
 
 [tool.poetry.scripts]
 model-quantization = "app.cli:main"

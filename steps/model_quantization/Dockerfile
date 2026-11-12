@@ -65,7 +65,7 @@ print('tensorflow', tensorflow.__version__, '| export toolchain import OK')"
 # URL); this default is only for a build on your computer. Installed last, so a new version
 # reuses the cached TensorFlow layers above.
 # Default for a local build: kaos-lib 0.5.0. The platform's CI overrides it with --build-arg KAOS_LIB_PACKAGE.
-ARG KAOS_LIB_PACKAGE="kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/f422375c291f99bce326de3c606b957ec6cb228d.zip"
+ARG KAOS_LIB_PACKAGE="kaos-lib[zitadel] @ https://github.com/kaos-io/kaos-lib/archive/94115aed01aff9a7c702a7510ae6cbda804e875c.zip"
 RUN pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"
 
 ENTRYPOINT ["python", "-m", "app.entry"]

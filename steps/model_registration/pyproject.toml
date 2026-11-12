@@ -13,10 +13,8 @@ packages = [{include = "app"}]
 [tool.poetry.dependencies]
 python = ">=3.12,<=3.14"
 pydantic = "^2.11.5"
-typer = "^0.16.0"
 mlflow = ">=3.0,<4"
 # MLflow auth: the `zitadel` request-auth provider ships with kaos-lib[mlflow], the package the Dockerfile installs.
-requests = "^2.31.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.1.0"

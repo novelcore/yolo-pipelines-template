@@ -14,10 +14,8 @@ packages = [{include = "app"}]
 # Python 3.11 required — torch 2.11.0 + torchao 0.17.0 do not support 3.12 (CON-01)
 python = ">=3.11,<3.12"
 pydantic = "^2.11.5"
-typer = "^0.16.0"
 mlflow = ">=3.0,<4"
 # MLflow auth: the `zitadel` request-auth provider ships with kaos-lib[mlflow], the package the Dockerfile installs.
-pyyaml = ">=6.0"
 Pillow = ">=10.0"
 # ── Pinned version matrix ─────────────────────────────────────────────────────
 # DO NOT change these pins without re-running the full spike validation suite on
@@ -42,7 +40,6 @@ isort = "^6.0.1"
 mypy = "^1.15.0"
 pytest = "^8.4.1"
 pytest-cov = "^6.2.1"
-types-pyyaml = ">=6.0"
 
 [tool.poetry.scripts]
 qat-finetune = "app.cli:main"
