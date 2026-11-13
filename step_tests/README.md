@@ -18,6 +18,7 @@ A step is run the way the platform runs it: `kaos_lib.testing.running` prepares 
 | `test_step_contract.py` | every entry starts with `step.start()`, ends with `step.result(`, and has no `os.environ`, `getenv`, `argparse` or `sys.argv` |
 | `test_prepare_data.py` | `prepare-data` keeps every file or a reproducible subset: the same seed, the same files |
 | `test_model_training.py`, `test_checkpoint_handover.py` | the training and the INT8 steps read their inputs with `step.input(...)` and save with `step.output(...)` |
+| `test_model_quantization.py` | the INT8 calibration reads the images of the dataset `prepared`, wherever the `path` in its `data.yaml` points (needs `torch` and `ultralytics`) |
 | `test_model_registration.py` | registration reads where the results were saved from the result of `model-training`, names the model `<app>.<setting>`, and writes the `export_<label>` tags as `<repository>@<version>/<path>` |
 | `test_entries_build_real_params.py` | the training, qat-finetune and model-quantization entries build the real parameters of their managers (a `Path` where text is expected fails here) |
 | `test_names.py` | the experiment and the registered model are `<app>` or `<app>.<setting>`, a setting the rule refuses is refused in the first step, and the steps' copies of `names.py` are equal |
