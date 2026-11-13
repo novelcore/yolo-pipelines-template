@@ -12,7 +12,7 @@ class Manager:
         self._log = logging.getLogger(__name__)
         self._service = ConfigValidationService()
 
-    def run(self, resolved: dict) -> None:
+    def run(self, resolved: dict, app: str, experiment: str) -> None:
         self._log.info("Starting config-validation")
-        self._service.run(resolved)
+        self._service.run(resolved, app, experiment)
         self._log.info("Config validation completed successfully")

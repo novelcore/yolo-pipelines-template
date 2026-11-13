@@ -8,7 +8,9 @@ upstream by the platform. Re-implementing a parallel schema here would just be a
 to drift. It checks:
 
   - quantization: ``calibration_frames`` is inside the bounds the INT8 steps accept;
-  - pretrained weights: a ``<repository>@<version>/<path>`` weights override exists in lakeFS.
+  - pretrained weights: a ``<repository>@<version>/<path>`` weights override exists in lakeFS;
+  - names: the experiment and the registered model that the later steps create in the experiment tracking are `<app>` or
+    `<app>.<name>` with a name the project accepts (app/names.py).
 
 The dataset is not checked here: the platform pins every dataset of the run to one commit before the
 first step starts, and ``prepare-data`` reads it.
@@ -16,6 +18,8 @@ first step starts, and ``prepare-data`` reads it.
 
 import logging
 import re
+
+from app import names
 
 # <repository>@<version>/<path>: a file inside a repository at a version, like a dataset reference plus a path.
 _WEIGHTS_RE = re.compile(r"^([^/@\s]+)@([^/\s]+)/(.+)$")
@@ -35,11 +39,22 @@ class ConfigValidationService:
     def __init__(self) -> None:
         self._log = logging.getLogger(__name__)
 
-    def run(self, resolved: dict) -> None:
-        """Run all checks over the composed settings; raises ConfigValidationError on the first failure."""
+    def run(self, resolved: dict, app: str, experiment: str) -> None:
+        """Run all checks over the composed settings of the app `app` whose run is in the experiment `experiment`;
+        raises ConfigValidationError on the first failure."""
+        self._check_names(app, experiment, (resolved.get("registration") or {}).get("registered_model_name"))
         self._check_quantization(resolved.get("quantization") or {})
         self._check_pretrained_weights((resolved.get("model") or {}).get("pretrained_weights"))
         self._log.info("config-validation: all checks passed")
+
+    @staticmethod
+    def _check_names(app: str, experiment: str, model_name) -> None:
+        """Fail now, before any GPU time, on a name the tracking would refuse at the end of the run."""
+        try:
+            names.experiment(app, experiment)
+            names.registered_model(app, model_name)
+        except ValueError as exc:
+            raise ConfigValidationError(str(exc)) from None
 
     @staticmethod
     def _check_quantization(quant: dict) -> None:

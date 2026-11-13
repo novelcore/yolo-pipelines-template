@@ -58,17 +58,17 @@ for _f in AUG.model_fields:
     MODEL[f"image_processing-{_f}"] = (AUG, _f)
 
 D = {  # one line each; what the field does for you
-    "dataset": "The data the run starts from: `<dataset>@<version>` (`dataset-spacecraft@v1`, `@latest`), or `<owner>/<dataset>@<version>` for a dataset shared with you. You must set this: the default is an empty dataset in a new project.",
-    "experiment-name": "Names the MLflow experiment and the folder the weights are saved in. Reuse a name to compare runs.",
+    "dataset": "The data the run starts from: `<dataset>@<version>` (`dataset-spacecraft@v1`, `@latest`), or `<owner>/<dataset>@<version>` for a dataset shared with you. The default is your project's own default dataset, which holds no images at first: a run on it trains on a small sample that `prepare-data` makes (see `docs/datasets.md`). Choose a dataset of your own to train on your images.",
+    "experiment-name": "The end of the MLflow experiment's name and the name of the folder the weights are saved in. The experiment is `<your app>.<this>` (just `<your app>` when empty). Letters, digits, `-` and `_` only. Reuse a name to compare runs.",
     "experiment-description": "Free text stored on the MLflow run.",
     "model": "Dropdown: which model size to train.",
     "model-variant": "The model file behind the dropdown (set by `model`).",
     "model-pretrained_weights": "A `<repository>@<version>/<path>` reference to your own weights, for example `outputs-myapp@main/checkpoints/exp1/run1/best.pt` to start from (weights only, training starts at epoch 0). Empty uses the standard weights of the model.",
     "data-sample_size": "Train on this many images, and their labels, per split (`train`, `val`, `test`), to make a quick test. `prepare-data` keeps them. Empty keeps every image.",
     "data-seed": "Picks which images `data-sample_size` keeps: the same seed keeps the same images.",
-    "train-epochs": "Training rounds.",
+    "train-epochs": "Training rounds. 10 is enough for a first run on the small sample; use 100 or more on your own data.",
     "train-batch_size": "Images per step, a positive number.",
-    "train-image_size": "Input size in pixels, a multiple of 32.",
+    "train-image_size": "Input size in pixels, a multiple of 32. 320 suits the small sample; use 640 on your own images.",
     "train-cos_lr": "Cosine learning-rate schedule.",
     "train-lrf": "Final learning rate as a fraction of the start.",
     "train-warmup_epochs": "Epochs of learning-rate warm-up.",
@@ -102,7 +102,7 @@ D = {  # one line each; what the field does for you
     "quantization-calibration_seed": "Seed for picking those images.",
     "quantization-parity_frames": "Images used to compare the INT8 and the full model.",
     "quantization-parity_max_abs_error": "Largest allowed difference between the INT8 and the full model. Reported as the MLflow metric `parity_passed`; it does not fail the run.",
-    "registration-registered_model_name": "MLflow model name. Empty uses `object-pose-yolo`.",
+    "registration-registered_model_name": "The end of the registered model's name: the model is `<your app>.<this>` (just `<your app>` when empty). Letters, digits, `-` and `_` only.",
     "registration-promote_to": "Give the registered version this alias: `champion` or `challenger`. Empty gives none.",
     "logging-level": "Log level of the steps.", "logging-log_artifacts": "Upload plots and example images to MLflow.",
 }

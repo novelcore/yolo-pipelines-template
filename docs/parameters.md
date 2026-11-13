@@ -11,14 +11,14 @@ The form also has a `<step>-class` field for each step: the machine it runs on, 
 
 | field | type | default | allowed | what it does |
 |---|---|---|---|---|
-| `experiment-name` | text | `object-pose-v1-yolov8n` |  | Names the MLflow experiment and the folder the weights are saved in. Reuse a name to compare runs. |
+| `experiment-name` | text | `baseline` |  | The end of the MLflow experiment's name and the name of the folder the weights are saved in. The experiment is `<your app>.<this>` (just `<your app>` when empty). Letters, digits, `-` and `_` only. Reuse a name to compare runs. |
 | `experiment-description` | text | empty |  | Free text stored on the MLflow run. |
 
 ## Dataset
 
 | field | type | default | allowed | what it does |
 |---|---|---|---|---|
-| `dataset` | text | `dataset-default@latest` |  | The data the run starts from: `<dataset>@<version>` (`dataset-spacecraft@v1`, `@latest`), or `<owner>/<dataset>@<version>` for a dataset shared with you. You must set this: the default is an empty dataset in a new project. |
+| `dataset` | text | `dataset-default@latest` |  | The data the run starts from: `<dataset>@<version>` (`dataset-spacecraft@v1`, `@latest`), or `<owner>/<dataset>@<version>` for a dataset shared with you. The default is your project's own default dataset, which holds no images at first: a run on it trains on a small sample that `prepare-data` makes (see `docs/datasets.md`). Choose a dataset of your own to train on your images. |
 
 ## Model
 
@@ -39,9 +39,9 @@ The form also has a `<step>-class` field for each step: the machine it runs on, 
 
 | field | type | default | allowed | what it does |
 |---|---|---|---|---|
-| `train-epochs` | int | `100` | > 0 | Training rounds. |
+| `train-epochs` | int | `10` | > 0 | Training rounds. 10 is enough for a first run on the small sample; use 100 or more on your own data. |
 | `train-batch_size` | int | `16` | > 0 | Images per step, a positive number. |
-| `train-image_size` | int | `640` | > 0, multiple of 32 | Input size in pixels, a multiple of 32. |
+| `train-image_size` | int | `320` | > 0, multiple of 32 | Input size in pixels, a multiple of 32. 320 suits the small sample; use 640 on your own images. |
 | `train-cos_lr` | bool | `true` |  | Cosine learning-rate schedule. |
 | `train-lrf` | float | `0.01` | > 0.0, <= 1.0 | Final learning rate as a fraction of the start. |
 | `train-warmup_epochs` | float | `3.0` | >= 0.0 | Epochs of learning-rate warm-up. |
@@ -51,7 +51,7 @@ The form also has a `<step>-class` field for each step: the machine it runs on, 
 | `train-nbs` | int | `64` | > 0 | Nominal batch size used to scale gradients. |
 | `train-freeze` | int or empty | empty | >= 0 | Freeze the first N backbone layers. Empty trains everything. |
 | `train-amp` | bool | `true` |  | Automatic mixed precision. |
-| `train-close_mosaic` | int | `10` | >= 0 | Switch the mosaic augmentation off for the last N epochs. |
+| `train-close_mosaic` | int | `3` | >= 0 | Switch the mosaic augmentation off for the last N epochs. |
 | `train-seed` | int | `0` | >= 0 | Training random seed. |
 | `train-deterministic` | bool | `true` |  | Deterministic GPU mode. |
 | `train-loss-pose` | float | `12.0` | > 0.0 | Weight of the keypoint loss. |
@@ -101,7 +101,7 @@ The form also has a `<step>-class` field for each step: the machine it runs on, 
 | field | type | default | allowed | what it does |
 |---|---|---|---|---|
 | `quantization-mode` | text | `none` | one of none, ptq, qat | `none` (default) skips both INT8 steps; `ptq` quantizes the trained model; `qat` fine-tunes for INT8 first, then exports. |
-| `quantization-image_size` | int | `640` | > 0 | Must equal `train-image_size`. |
+| `quantization-image_size` | int | `320` | > 0 | Must equal `train-image_size`. |
 | `quantization-calibration_frames` | int | `512` | >= 100, <= 10000 | Training images used to calibrate the INT8 model; 100 to 10000, checked before training when `quantization-mode` is `ptq` or `qat`. |
 | `quantization-calibration_seed` | int | `42` |  | Seed for picking those images. |
 | `quantization-parity_frames` | int | `100` | >= 1 | Images used to compare the INT8 and the full model. |
@@ -111,7 +111,7 @@ The form also has a `<step>-class` field for each step: the machine it runs on, 
 
 | field | type | default | allowed | what it does |
 |---|---|---|---|---|
-| `registration-registered_model_name` | text | empty |  | MLflow model name. Empty uses `object-pose-yolo`. |
+| `registration-registered_model_name` | text | `pose` |  | The end of the registered model's name: the model is `<your app>.<this>` (just `<your app>` when empty). Letters, digits, `-` and `_` only. |
 | `registration-promote_to` | text | empty | empty, champion or challenger | Give the registered version this alias: `champion` or `challenger`. Empty gives none. |
 
 ## Logging

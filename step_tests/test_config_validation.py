@@ -30,7 +30,7 @@ def _lake(monkeypatch, lake):
 def test_existing_pretrained_weights_pass(monkeypatch):
     _, svc = _service()
     lake = _lake(monkeypatch, _Lake(("outputs-yolo", "main", "checkpoints/exp/run/best.pt")))
-    svc.run({"model": {"pretrained_weights": "outputs-yolo@main/checkpoints/exp/run/best.pt"}})
+    svc.run({"model": {"pretrained_weights": "outputs-yolo@main/checkpoints/exp/run/best.pt"}}, "yolo", "yolo")
     assert lake.asked == [("outputs-yolo", "main", "checkpoints/exp/run/best.pt")]
 
 
@@ -38,7 +38,7 @@ def test_missing_pretrained_weights_fail(monkeypatch):
     mod, svc = _service()
     _lake(monkeypatch, _Lake())
     with pytest.raises(mod.ConfigValidationError, match="pretrained weights not found: repo@main/w.pt"):
-        svc.run({"model": {"pretrained_weights": "repo@main/w.pt"}})
+        svc.run({"model": {"pretrained_weights": "repo@main/w.pt"}}, "yolo", "yolo")
 
 
 @pytest.mark.parametrize("value", [
@@ -51,19 +51,19 @@ def test_missing_pretrained_weights_fail(monkeypatch):
 def test_pretrained_weights_must_be_empty_or_a_reference(value):
     mod, svc = _service()
     with pytest.raises(mod.ConfigValidationError, match=r"<repository>@<version>/<path>, for example outputs-myapp@main/"):
-        svc.run({"model": {"pretrained_weights": value}})
+        svc.run({"model": {"pretrained_weights": value}}, "yolo", "yolo")
 
 
 def test_nothing_to_look_up_needs_no_lake(monkeypatch):
     _, svc = _service()
     _lake(monkeypatch, None)  # connecting would fail: nothing asks
-    svc.run({"model": {"pretrained_weights": None}})
-    svc.run({"model": {"pretrained_weights": ""}})
+    svc.run({"model": {"pretrained_weights": None}}, "yolo", "yolo")
+    svc.run({"model": {"pretrained_weights": ""}}, "yolo", "yolo")
 
 
 def test_it_checks_neither_the_dataset_nor_mlflow():
     _, svc = _service()
-    svc.run({"dataset": "not a dataset", "model": {}})  # no error, no lookup
+    svc.run({"dataset": "not a dataset", "model": {}}, "yolo", "yolo")  # no error, no lookup
     text = (ROOT / "steps/config_validation/app/services/config_validation.py").read_text().lower()
     assert "mlflow" not in text and "environ" not in text
 

@@ -3,8 +3,15 @@ from kaos_lib import mlflow as tracking
 from kaos_lib import step
 from kaos_lib.outputs import run_prefix
 
+from app import names
 from app.manager import Manager
 from app.models.registration import RegistrationParams
+
+
+def weights_reference(repo, commit, path):
+    """`<repository>@<version>/<path>`: the reference a model's weights are given by on the run form
+    (`model-pretrained_weights`), here with the commit that holds the file as the version."""
+    return f"{repo}@{commit}/{path}"
 
 
 def _write(upstream, name):
@@ -19,9 +26,9 @@ def main() -> None:
     prepared = step.upstream("prepare-data")
     quantized = step.upstream("model-quantization", optional=True)  # None when quantization-mode is none
 
-    def uri(name, kind, file):  # a file of this run's results, pinned to the commit that holds it
+    def uri(name, kind, file):  # a file of this run's results, by the commit that holds it
         write = _write(train if kind == "checkpoints" else quantized, name)
-        return f"s3://{write.repo}/{write.commit}/{run_prefix(ctx.experiment, ctx.run, kind)}{file}"
+        return weights_reference(write.repo, write.commit, f"{run_prefix(ctx.experiment, ctx.run, kind)}{file}")
 
     exported = {label: uri("checkpoints", "checkpoints", file) for label, file in train.values["exported_models"].items()}
     if quantized:
@@ -32,13 +39,13 @@ def main() -> None:
 
     result = Manager().run(RegistrationParams(
         mlflow_run_id=train.values["mlflow_run_id"],
-        experiment_name=ctx.experiment,
+        experiment_name=names.experiment(ctx.app, ctx.experiment),
         run_name=ctx.run,
         outputs_repo=checkpoints.repo,
         outputs_commit=checkpoints.commit,
         outputs_path=run_prefix(ctx.experiment, ctx.run, "checkpoints"),
         checkpoint=train.values["best_checkpoint"],
-        registered_model_name=reg.get("registered_model_name") or "object-pose-yolo",
+        registered_model_name=names.registered_model(ctx.app, reg.get("registered_model_name")),
         promote_to=reg.get("promote_to") or None,
         dataset_version=f"{source.repo}@{source.ref}",  # the dataset the run started from, before prepare-data
         dataset_commit=source.commit,

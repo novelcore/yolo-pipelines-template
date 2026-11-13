@@ -2,6 +2,7 @@
 from kaos_lib import mlflow as tracking
 from kaos_lib import step
 
+from app import names
 from app.manager import Manager
 
 
@@ -22,7 +23,7 @@ def main() -> None:
 
     result = Manager(ctx.params["logging"]["level"]).run(
         model_variant=model["variant"],
-        experiment_name=ctx.experiment,
+        experiment_name=names.experiment(ctx.app, ctx.experiment),
         run_name=ctx.run,
         dataset_dir=str(step.input("prepared")),
         output_dir=str(runs),

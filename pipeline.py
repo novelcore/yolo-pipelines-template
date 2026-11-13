@@ -23,7 +23,7 @@ HERE = Path(__file__).parent
 
 with pipeline("ml-pipeline") as p:
     # A gate: it decides whether the run goes on and handles no data.
-    validate = step("config-validation", kind="control", reads=["model", "quantization"])
+    validate = step("config-validation", kind="control", reads=["experiment", "model", "quantization", "registration"])
     prepare = step("prepare-data", kind="transform", needs=[validate], reads=["data"], inputs=["dataset"],
                    produces=[dataset("prepared")])
     # walltime: the default time limit of the step, here 12h. The person who starts a run sets the limit on the run
