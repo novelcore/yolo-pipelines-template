@@ -2,6 +2,7 @@
 from kaos_lib import mlflow as tracking
 from kaos_lib import step
 
+from app import names
 from app.manager import Manager
 
 
@@ -25,7 +26,7 @@ def main() -> None:
         dataset_dir=str(step.input("prepared")),
         output_dir=str(runs),
         export_dir=str(step.output("quantization")),
-        experiment_name=ctx.experiment,
+        experiment_name=names.experiment(ctx.app, ctx.experiment),
         fp32_checkpoint_path=checkpoint,
         tflite_path=tflite,
         qat_run_id=qat_run_id,

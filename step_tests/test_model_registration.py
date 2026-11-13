@@ -129,15 +129,15 @@ def run(entry, tmp_path, train=None, quant=None, settings=None, name="model-regi
 def test_registers_best_from_the_logged_model_and_last_from_its_pinned_path(entry, mlf, lake, tmp_path):
     out = run(entry, tmp_path)
     assert [(n, u) for n, u in mlf.registered] == [
-        ("object-pose-yolo", "models:/m-1"),
-        ("object-pose-yolo", f"s3://outputs-yolo/{COMMIT}/checkpoints/exp/{RUN}/last.pt")]
+        ("yolo.pose", "models:/m-1"),
+        ("yolo.pose", f"s3://outputs-yolo/{COMMIT}/checkpoints/exp/{RUN}/last.pt")]
     assert out["values"]["best_version"] == 1 and out["values"]["last_version"] == 2
 
 
 def test_the_logged_model_names_where_the_results_are_and_carries_the_val_metrics(entry, mlf, lake, tmp_path):
     run(entry, tmp_path)
     model = mlf.logged_models["m-1"]
-    assert model["name"] == "exp-best" and model["run"] == "mlflow-1"
+    assert model["name"] == "yolo.exp-best" and model["run"] == "mlflow-1"
     assert model["tags"] == {"kaos.outputs_repo": "outputs-yolo", "kaos.outputs_commit": COMMIT,
                              "kaos.outputs_path": f"checkpoints/exp/{RUN}/", "kaos.workflow": RUN,
                              "kaos.dataset_ref": "dataset-cats@v2"}
@@ -154,20 +154,20 @@ def test_a_run_that_has_its_logged_model_already_reuses_it(entry, mlf, lake, tmp
 
 def test_the_commit_is_tagged_in_lakefs_and_the_tag_is_recorded_on_the_version(entry, mlf, lake, tmp_path):
     run(entry, tmp_path)
-    assert lake.tags == {("outputs-yolo", "model-object-pose-yolo-v1"): COMMIT}  # the best version
-    assert mlf.version_tags[("object-pose-yolo", 1)]["kaos.lakefs_tag"] == "model-object-pose-yolo-v1"
-    assert mlf.version_tags[("object-pose-yolo", 1)]["kaos.outputs_commit"] == COMMIT
+    assert lake.tags == {("outputs-yolo", "model-yolo-pose-v1"): COMMIT}  # the best version
+    assert mlf.version_tags[("yolo.pose", 1)]["kaos.lakefs_tag"] == "model-yolo-pose-v1"
+    assert mlf.version_tags[("yolo.pose", 1)]["kaos.outputs_commit"] == COMMIT
 
 
 def test_a_tag_that_points_elsewhere_is_never_moved(entry, mlf, lake, tmp_path):
-    lake.tags[("outputs-yolo", "model-object-pose-yolo-v1")] = "e" * 40
+    lake.tags[("outputs-yolo", "model-yolo-pose-v1")] = "e" * 40
     with pytest.raises(Exception, match="refusing to move it"):
         run(entry, tmp_path)
 
 
 def test_the_versions_say_where_the_data_came_from_and_which_kaos_lib_trained_them(entry, mlf, lake, tmp_path):
     run(entry, tmp_path, settings=composed_settings(data={"sample_size": "50", "seed": 1}))
-    tags = mlf.version_tags[("object-pose-yolo", 1)]
+    tags = mlf.version_tags[("yolo.pose", 1)]
     assert tags["dataset_version"] == "dataset-cats@v2" and tags["dataset_commit"] == "a" * 40
     assert tags["prepared_dataset"] == f"dataset-yolo-prepared@{'b' * 40}" and tags["dataset_sample_size"] == "50"
     assert tags["training_run_id"] == "mlflow-1" and tags["best_mAP50"] == "0.5"
@@ -182,15 +182,15 @@ def test_a_model_trained_to_last_pt_registers_last_only_once(entry, mlf, lake, t
 def test_exports_and_the_int8_model_are_recorded_with_the_commit_that_holds_them(entry, mlf, lake, tmp_path):
     quant = {"values": {"tflite": "model_int8.tflite", "mlflow_run_id": "mlflow-2"}, "commit": QUANT_COMMIT}
     run(entry, tmp_path, train={"exported_models": {"onnx_fp16": "best.onnx"}}, quant=quant)
-    tags = mlf.version_tags[("object-pose-yolo", 1)]
-    assert tags["export_onnx_fp16"] == f"s3://outputs-yolo/{COMMIT}/checkpoints/exp/{RUN}/best.onnx"
-    assert tags["export_int8_tflite"] == f"s3://outputs-yolo/{QUANT_COMMIT}/quantization/exp/{RUN}/model_int8.tflite"
+    tags = mlf.version_tags[("yolo.pose", 1)]
+    assert tags["export_onnx_fp16"] == f"outputs-yolo@{COMMIT}/checkpoints/exp/{RUN}/best.onnx"
+    assert tags["export_int8_tflite"] == f"outputs-yolo@{QUANT_COMMIT}/quantization/exp/{RUN}/model_int8.tflite"
 
 
 def test_the_alias_asked_for_is_given_to_the_best_version(entry, mlf, lake, tmp_path):
     settings = composed_settings(registration={"registered_model_name": "mine", "promote_to": "champion"})
     out = run(entry, tmp_path, settings=settings)
-    assert mlf.aliases == {("mine", "champion"): 1} and out["values"]["promoted_to"] == "champion"
+    assert mlf.aliases == {("yolo.mine", "champion"): 1} and out["values"]["promoted_to"] == "champion"
 
 
 def test_an_mlflow_that_cannot_log_the_model_fails_the_step_and_says_so(entry, modules, mlf, lake, tmp_path, monkeypatch):
@@ -199,3 +199,37 @@ def test_an_mlflow_that_cannot_log_the_model_fails_the_step_and_says_so(entry, m
     with pytest.raises(Exception, match="MLflow call failed after 3 attempts: mlflow 3 only"):
         run(entry, tmp_path)
     assert mlf.registered == []
+
+
+def test_an_empty_model_setting_registers_the_model_under_the_app_name_alone(entry, mlf, lake, tmp_path):
+    run(entry, tmp_path, settings=composed_settings(registration={"registered_model_name": "", "promote_to": ""}))
+    assert {name for name, _ in mlf.registered} == {"yolo"}
+
+
+@pytest.mark.parametrize("bad", ["my model", "a.b", "../x", "x/y", "-lead", "é"])
+def test_a_model_setting_the_rule_refuses_ends_the_step_before_mlflow_is_touched(entry, mlf, lake, tmp_path, bad):
+    with pytest.raises(ValueError, match="registration.registered_model_name"):
+        run(entry, tmp_path, settings=composed_settings(registration={"registered_model_name": bad, "promote_to": ""}))
+    assert mlf.registered == [] and mlf.logged_models == {}
+
+
+def test_the_export_tags_are_references_that_pretrained_weights_reads_back(entry, mlf, lake, tmp_path):
+    """`export_<label>` holds <repository>@<version>/<path>: pasted into `model-pretrained_weights`, training downloads that file."""
+    quant = {"values": {"tflite": "model_int8.tflite", "mlflow_run_id": "mlflow-2"}, "commit": QUANT_COMMIT}
+    run(entry, tmp_path, train={"exported_models": {"onnx_fp16": "best.onnx"}}, quant=quant)
+    tags = {k: v for k, v in mlf.version_tags[("yolo.pose", 1)].items() if k.startswith("export_")}
+    assert sorted(tags) == ["export_int8_tflite", "export_onnx_fp16"]
+    with step_app("model_training"):
+        training = importlib.import_module("app.services.model_training")
+    with step_app("config_validation"):
+        validation = importlib.import_module("app.services.config_validation")
+    for value in tags.values():
+        assert "s3://" not in value
+        assert training._WEIGHTS_REF_RE.match(value).groups() == validation._WEIGHTS_RE.match(value).groups()
+    assert training._WEIGHTS_REF_RE.match(tags["export_onnx_fp16"]).groups() == \
+        ("outputs-yolo", COMMIT, f"checkpoints/exp/{RUN}/best.onnx")
+
+
+def test_the_source_of_the_registered_model_is_still_the_address_the_registry_needs(entry, mlf, lake, tmp_path):
+    run(entry, tmp_path)
+    assert [u for _, u in mlf.registered][1].startswith("s3://outputs-yolo/")

@@ -6,7 +6,7 @@ from app.manager import Manager
 
 def main() -> None:
     ctx = step.start()
-    Manager().run(ctx.params)
+    Manager().run(ctx.params, ctx.app, ctx.experiment)
     step.result(checked=True)
 
 

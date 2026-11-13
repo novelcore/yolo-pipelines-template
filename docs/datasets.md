@@ -43,6 +43,18 @@ for each keypoint. All coordinates are between 0 and 1.
 This pipeline trains pose, so `kpt_shape` and `flip_idx` are required for it to work, even though the check below does not
 insist on them.
 
+## A sample to start with
+
+A new project has no labelled images, so a run that keeps the form's defaults trains on a small sample the pipeline makes
+itself: 16 training and 4 validation pictures of 160 pixels, each a flat colour with one lighter rectangle. The label of a
+picture is exact: the box is the rectangle and the four keypoints are its corners. The sample is written as the prepared
+dataset of that run (with a `README.md` that says what it is), so the run is green from the first step to the last. It
+only proves that the pipeline works; a model trained on it is not a useful one.
+
+The sample is used only when the run's `dataset` is your project's default dataset and nothing in it is a YOLO dataset (no
+`data.yaml`, no `images/`, no `labels/`). To train on your own images, make a dataset below and choose it on the run form.
+To look at the sample files, run `python steps/prepare_data/app/sample.py ./sample` in your clone.
+
 ## Create, check and push it
 
 A new dataset has no layout unless you name one. The `yolo` layout starts the repository with the files above and checks

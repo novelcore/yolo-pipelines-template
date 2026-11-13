@@ -46,8 +46,9 @@ class RegistrationParams(BaseModel):
     exported_models: Optional[dict[str, str]] = Field(
         default=None,
         description=(
-            "Map of export labels to the s3:// URI (repository, commit and path) of the file, "
-            "e.g. {'engine_fp16': 's3://outputs-app/<commit>/checkpoints/exp/run/best.engine'}."
+            "Map of export labels to the file's reference <repository>@<commit>/<path>, the form "
+            "model.pretrained_weights takes, "
+            "e.g. {'engine_fp16': 'outputs-app@<commit>/checkpoints/exp/run/best.engine'}."
         ),
     )
 

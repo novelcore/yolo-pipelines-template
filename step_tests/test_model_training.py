@@ -34,15 +34,16 @@ def test_the_entry_hands_the_prepared_dataset_and_its_own_output_to_the_trainer(
 
     monkeypatch.setattr(entry, "Manager", Trainer)
     monkeypatch.setattr(entry.tracking, "mlflow", lambda *a, **k: None)  # signing in is kaos-lib's
-    with testing.running(tmp_path / "run", kind="train", name="model-training", experiment="object-pose-v1-yolov8n",
+    with testing.running(tmp_path / "run", kind="train", name="model-training", app="spacecraft", experiment="baseline",
                          params=composed_settings(),
                          inputs={"prepared": prepared}, produces=[("model", "checkpoints")]) as run:
         entry.main()
     data = Path(seen["dataset_dir"])
     assert (data / "data.yaml").is_file(), "training finds data.yaml through step.input('prepared')"
     assert len(list((data / "images" / "train").iterdir())) == 6
-    assert seen["experiment_name"] == "object-pose-v1-yolov8n" and seen["run_name"] == "test-run"
-    assert seen["epochs"] == 100 and seen["batch_size"] == 16 and seen["level"] == "INFO"
+    assert seen["experiment_name"] == "spacecraft.baseline", "the project's MLflow takes <app>.<name>"
+    assert seen["run_name"] == "test-run"
+    assert seen["epochs"] == 10 and seen["batch_size"] == 16 and seen["level"] == "INFO"
     assert run.result["values"] == {"best_checkpoint": "best.pt", "mlflow_run_id": "mlflow-1"}
     assert (run.output("checkpoints") / "best.pt").is_file()
 

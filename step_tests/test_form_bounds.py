@@ -45,23 +45,23 @@ def test_mirrored_bounds_equal_the_models():
 def test_a_bad_calibration_frames_fails_before_training(mode, frames):
     mod, svc = _service()
     with pytest.raises(mod.ConfigValidationError, match="calibration_frames"):
-        svc.run({"dataset": "dataset-cats@v1", "quantization": {"mode": mode, "calibration_frames": frames}})
+        svc.run({"dataset": "dataset-cats@v1", "quantization": {"mode": mode, "calibration_frames": frames}}, "yolo", "yolo")
 
 
 @pytest.mark.parametrize("frames", [100, 512, 10000, "512"])
 def test_good_calibration_frames_pass(frames):
     _, svc = _service()
-    svc.run({"dataset": "dataset-cats@v1", "quantization": {"mode": "ptq", "calibration_frames": frames}})
+    svc.run({"dataset": "dataset-cats@v1", "quantization": {"mode": "ptq", "calibration_frames": frames}}, "yolo", "yolo")
 
 
 def test_the_value_is_ignored_when_no_int8_step_runs():
     _, svc = _service()
-    svc.run({"dataset": "dataset-cats@v1", "quantization": {"mode": "none", "calibration_frames": 5}})
+    svc.run({"dataset": "dataset-cats@v1", "quantization": {"mode": "none", "calibration_frames": 5}}, "yolo", "yolo")
 
 
 def test_the_default_form_values_pass():
     _, svc = _service()
-    svc.run({"dataset": "dataset-cats@v1", "quantization": {"mode": "qat", "calibration_frames": 512}})
+    svc.run({"dataset": "dataset-cats@v1", "quantization": {"mode": "qat", "calibration_frames": 512}}, "yolo", "yolo")
 
 
 def test_training_rejects_auto_batch_and_the_form_does_not_promise_it():

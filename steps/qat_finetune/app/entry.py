@@ -2,6 +2,7 @@
 from kaos_lib import mlflow as tracking
 from kaos_lib import step
 
+from app import names
 from app.manager import Manager
 
 
@@ -19,7 +20,7 @@ def main() -> None:
         dataset_dir=str(step.input("prepared")),
         output_dir=str(runs),
         export_dir=str(step.output("qat")),
-        experiment_name=ctx.experiment,
+        experiment_name=names.experiment(ctx.app, ctx.experiment),
         image_size=int(q.get("image_size", 640)),
         qat_epochs=int(qat.get("epochs", 10)),
         qat_lr=float(qat.get("lr", 1e-4)),

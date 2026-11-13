@@ -1,3 +1,3 @@
 experiment:
-  name: "object-pose-v1-yolov8n" # MLflow experiment name, and the name of the folder your results are saved in
+  name: "baseline" # the end of the experiment name: the experiment is <your app>.<this>, empty = just <your app>; also the name of the folder your results are saved in. Letters, digits, - and _ only
   description: "" # optional free text stored in the MLflow run
