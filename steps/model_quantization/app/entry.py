@@ -27,7 +27,7 @@ def main() -> None:
         output_dir=str(runs),
         export_dir=str(step.output("quantization")),
         experiment_name=names.experiment(ctx.app, ctx.experiment),
-        fp32_checkpoint_path=checkpoint,
+        fp32_checkpoint_path=str(checkpoint),
         tflite_path=tflite,
         qat_run_id=qat_run_id,
         image_size=int(q.get("image_size", 640)),
