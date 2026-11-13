@@ -21,6 +21,7 @@ from typing import Any, Optional
 
 import mlflow
 import torch
+import yaml
 from mlflow.tracking import MlflowClient
 from ultralytics import YOLO
 
@@ -69,7 +70,7 @@ class QuantizationService:
         assert params.fp32_checkpoint_path is not None
 
         local_ckpt = self._check_checkpoint(params.fp32_checkpoint_path)
-        data_yaml = self._find_data_yaml(params.dataset_dir)
+        data_yaml = self._find_data_yaml(params.dataset_dir, params.output_dir)
 
         with mlflow.start_run(
             tags={"source_run_id": params.source_mlflow_run_id}
@@ -242,18 +243,30 @@ class QuantizationService:
             )
         return path
 
-    def _find_data_yaml(self, dataset_dir: str) -> str:
-        """Locate the YOLO data YAML in the dataset directory.
+    def _find_data_yaml(self, dataset_dir: str, work_dir: str) -> str:
+        """Locate the YOLO data YAML in the dataset directory and return a copy that points at it.
 
         Searches for common filenames: data.yaml, dataset.yaml, config.yaml.
         Raises QuantizationError if none found.
+
+        A dataset's ``path`` is whatever its author wrote (often the folder it was made in), not
+        where this step has the dataset. Ultralytics reads the calibration and validation images
+        from ``path``, so the copy, written to ``work_dir``, has ``path`` set to ``dataset_dir``,
+        the way model-training does. The dataset's own file is never changed.
         """
         candidates = ["data.yaml", "dataset.yaml", "config.yaml"]
         for name in candidates:
             candidate = os.path.join(dataset_dir, name)
             if os.path.isfile(candidate):
                 self._logger.info("Found dataset YAML: %s", candidate)
-                return candidate
+                with open(candidate) as fh:
+                    content = yaml.safe_load(fh) or {}
+                content["path"] = str(Path(dataset_dir).resolve())
+                Path(work_dir).mkdir(parents=True, exist_ok=True)
+                local = os.path.join(work_dir, "data.yaml")
+                with open(local, "w") as fh:
+                    yaml.safe_dump(content, fh, sort_keys=False)
+                return local
         raise QuantizationError(
             f"No YOLO data YAML found in {dataset_dir!r}. " f"Searched: {candidates}"
         )
