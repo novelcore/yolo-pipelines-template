@@ -34,3 +34,10 @@ def registered_model(app: str, name: str) -> str:
     """The registered model of a run: `<app>.<name>`, or `<app>` when `registration.registered_model_name` is empty."""
     name = str(name or "").strip()
     return app if not name else f"{app}.{_suffix('registration.registered_model_name', name)}"
+
+
+def logged_model(experiment_name: str) -> str:
+    """The name of a run's best.pt in the experiment's Models tab: the experiment's name with its dot as a hyphen, then
+    `-best`. MLflow refuses a dot in a logged model's name (it allows one in an experiment's or a registered model's).
+    The model belongs to the app through its experiment, so its own name is free of the `<app>.` rule."""
+    return f"{experiment_name.replace('.', '-')}-best"

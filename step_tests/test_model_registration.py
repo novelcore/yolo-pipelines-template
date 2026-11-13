@@ -137,7 +137,7 @@ def test_registers_best_from_the_logged_model_and_last_from_its_pinned_path(entr
 def test_the_logged_model_names_where_the_results_are_and_carries_the_val_metrics(entry, mlf, lake, tmp_path):
     run(entry, tmp_path)
     model = mlf.logged_models["m-1"]
-    assert model["name"] == "yolo.exp-best" and model["run"] == "mlflow-1"
+    assert model["name"] == "yolo-exp-best" and model["run"] == "mlflow-1"
     assert model["tags"] == {"kaos.outputs_repo": "outputs-yolo", "kaos.outputs_commit": COMMIT,
                              "kaos.outputs_path": f"checkpoints/exp/{RUN}/", "kaos.workflow": RUN,
                              "kaos.dataset_ref": "dataset-cats@v2"}

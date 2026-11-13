@@ -38,11 +38,6 @@ def kaos_lib_version() -> str:
     return package_version("kaos-lib")
 
 
-def logged_model_name(experiment: str) -> str:
-    """``<experiment>-best``: the name of a run's best.pt in the experiment's Models tab."""
-    return f"{experiment}-best"
-
-
 _logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------

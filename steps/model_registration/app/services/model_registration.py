@@ -9,6 +9,7 @@ from typing import Any, Optional
 import mlflow
 from mlflow.tracking import MlflowClient
 
+from app import names
 from app.models.registration import RegistrationParams, RegistrationResult
 
 
@@ -131,12 +132,12 @@ class ModelRegistrationService:
     def _log_model(self, client: MlflowClient, params: RegistrationParams) -> str:
         """Show best.pt in the experiment's Models tab and return ``models:/<id>`` to register from.
 
-        An MLflow 3 logged model ``<experiment>-best`` whose weights stay in lakeFS
+        An MLflow 3 logged model ``<app>-<name>-best`` (app/names.py) whose weights stay in lakeFS
         (``mlflow.create_external_model``), with the training run as its source, the training
         settings as params, the ``kaos.*`` lakeFS tags and the final val metrics. The run gets
         ``kaos.logged_model_id``. A retried step reuses the model this run already has.
         """
-        name = f"{params.experiment_name}-best"
+        name = names.logged_model(params.experiment_name)
         tags = {
             "kaos.outputs_repo": params.outputs_repo,
             "kaos.outputs_commit": params.outputs_commit,

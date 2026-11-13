@@ -82,3 +82,51 @@ def test_config_validation_passes_the_form_defaults(tmp_path):
                          params=settings) as run:
         entry.main()
     assert run.result["values"] == {"checked": True}
+
+
+# ---------------------------------------------------------------- MLflow's own rules (its validators, not copies)
+
+def test_every_name_the_template_makes_passes_mlflows_own_validators(names):
+    """An app name with hyphens and digits, as real apps have (yolo-777c0431). MLflow allows a dot in an experiment's and
+    a registered model's name, not in a logged model's."""
+    from mlflow.utils.validation import _validate_experiment_name, _validate_logged_model_name, _validate_model_name
+    from conftest import composed_settings
+    s = composed_settings()
+    for app in ("yolo-777c0431", "a1", "x" * 20):
+        for setting in (s["experiment"]["name"], "e2e-777c0431-gcp", app, "run_2"):
+            experiment = names.experiment(app, setting)
+            _validate_experiment_name(experiment)
+            _validate_logged_model_name(names.logged_model(experiment))
+            assert experiment == app or experiment.startswith(app + ".")
+        for setting in (s["registration"]["registered_model_name"], "", "v2"):
+            _validate_model_name(names.registered_model(app, setting))
+    assert "." not in names.logged_model("yolo-777c0431.e2e-777c0431-gcp")
+
+
+def test_the_logged_model_name_is_the_one_registration_creates(tmp_path):
+    """Through the real registration step, with MLflow's validator applied to the name it passes to MLflow."""
+    import importlib
+    from mlflow.utils.validation import _validate_logged_model_name
+    from kaos_lib import testing
+    from conftest import composed_settings, step_app
+    import test_model_registration as reg
+    with step_app("model_registration"):
+        entry = importlib.import_module("app.entry")
+        entry.tracking.mlflow = lambda *a, **k: None
+        svc = importlib.import_module("app.services.model_registration")
+        seen = []
+        import mlflow
+        fake = reg.FakeMlflow()
+        orig = fake.create_external_model
+        fake.create_external_model = lambda name, **k: (_validate_logged_model_name(name), seen.append(name), orig(name, **k))[2]
+        mp = pytest.MonkeyPatch()
+        mp.setattr(mlflow, "create_external_model", fake.create_external_model, raising=False)
+        mp.setattr(mlflow, "register_model", fake.register_model, raising=False)
+        mp.setattr(svc, "MlflowClient", lambda: fake)
+        from kaos_lib.lakefs import LakeFS
+        mp.setattr(LakeFS, "connect", classmethod(lambda cls, *a, **k: reg.FakeLake()))
+        try:
+            reg.run(entry, tmp_path)
+        finally:
+            mp.undo()
+    assert seen == ["yolo-exp-best"]
