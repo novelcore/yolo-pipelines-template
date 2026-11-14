@@ -11,6 +11,10 @@ the reasons a job waits are explained in the guide: [HPC (Slurm)](https://storag
   run ([Long jobs](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/long-jobs.html)).
 - **`prepare-data` stays on the platform's own machines**, as every step that produces a dataset does
   ([HPC](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/hpc.html#what-differs-on-hpc-slurm)).
+- **Training reads `prepared` from a copy on the site.** `prepare-data` makes the dataset `prepared` on the platform's own
+  machines. Before the training job is sent to the queue, the platform copies that exact version to your project's storage
+  on the site, and the next run that reads the same version reuses it
+  ([what is copied, and when](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/data-reads.html#a-dataset-a-step-made-read-on-hpc-slurm)).
 - **The INT8 steps** have their own `<step>-class` fields. Leave them on the platform's machines unless you need otherwise.
 - **`qat-finetune` and `model-training` keep checkpoints.** `model-quantization` and `prepare-data` keep nothing and run
   again from the start ([What the pipeline does](the-pipeline.md#when-a-step-is-run-again)).
