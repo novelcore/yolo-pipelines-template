@@ -103,7 +103,7 @@ D = {  # one line each; what the field does for you
     "quantization-parity_frames": "Images used to compare the INT8 and the full model.",
     "quantization-parity_max_abs_error": "Largest allowed difference between the INT8 and the full model. Reported as the MLflow metric `parity_passed`; it does not fail the run.",
     "registration-registered_model_name": "The end of the registered model's name: the model is `<your app>.<this>` (just `<your app>` when empty). Letters, digits, `-` and `_` only.",
-    "registration-promote_to": "Give the registered version this alias: `champion` or `challenger`. Empty gives none.",
+    "registration-promote_to": "The person starting the run sets this to give the registered version the alias `champion` or `challenger` when the run ends. Empty gives none. This is a model alias; moving a dataset's `latest` is the separate `promote-<dataset>` choice.",
     "logging-level": "Log level of the steps.", "logging-log_artifacts": "Upload plots and example images to MLflow.",
 }
 for _f in AUG.model_fields:
@@ -183,7 +183,7 @@ def build():
          "Type, default and options come from the pipeline's `config/` folder; bounds come from the "
          "checks the steps run on the values. A field is a path with dashes: `train.batch_size` is `train-batch_size`. "
          "Fields set by a dropdown change when you pick another option, so their default is that of the option shown.", "",
-         "The form also has a `<step>-class` field for each step: the machine it runs on, described in "
+         "The run form also has a `<step>-class` field for each step: the machine it runs on, described in "
          "[Run on HPC (Slurm)](slurm.md).", "",
          "> **Checked before training.** With `quantization-mode` = `ptq` or `qat`, the first step (`config-validation`) checks that "
          "`quantization-calibration_frames` is from 100 to 10000, so a wrong value fails in seconds.", ""]

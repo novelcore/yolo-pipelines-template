@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Dependency install — poetry NEVER touches the runtime python.
-# History (kubecore-operator#1008 thread): installing poetry into system
+# History: installing poetry into system
 # site-packages let poetry's own requests/charset-normalizer stack collide
 # with the locked versions — orphaned compiled extensions survived every
 # repair attempt and resurfaced on cold (cache-less) builds as
@@ -59,7 +59,7 @@ import tensorflow, tf_keras, onnx, onnx2tf, onnxslim, onnxruntime, sng4onnx, onn
 from ultralytics import YOLO; \
 print('tensorflow', tensorflow.__version__, '| export toolchain import OK')"
 
-# kaos-lib, the platform library (datasets, run outputs; formerly the kubecore package), from
+# kaos-lib, the platform library (datasets, run outputs), from
 # github.com/kaos-io/kaos-lib. The PLATFORM picks it: the CI passes --build-arg
 # KAOS_LIB_PACKAGE=<requirement> on every build, inside the range in .kaos/compat.yaml. The value is the whole pip requirement (name, extras, version or
 # URL); this default is only for a build on your computer. Installed last, so a new version

@@ -1,6 +1,6 @@
 # Run on HPC (Slurm)
 
-Training can run on a Slurm site when your project is connected to one. Where a step runs, the time limit, the queue and
+Training can run on an HPC (Slurm) site when your project is connected to one. Where a step runs, the time limit, the queue and
 the reasons a job waits are explained in the guide: [HPC (Slurm)](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/hpc.html). This page holds what is specific to yolo.
 
 - **Pick the class for training only.** On the run form, set `model-training-class` to one of the Slurm classes and submit.
