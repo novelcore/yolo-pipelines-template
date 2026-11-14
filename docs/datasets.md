@@ -71,6 +71,18 @@ kaosctl dataset push ./dataset-spacecraft dataset-spacecraft -m "first 200 label
 `push` opens a pull request into the dataset; merge it ([Run it](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/run-it.html#put-a-few-files-in-a-dataset)), then
 release a version with `kaosctl dataset release dataset-spacecraft`. Several classes: `--classes a,b,c`, the first is id 0.
 
+## Add or change images
+
+The steps are in the guide: [Add or change data](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/add-or-change-data.html). For this pipeline:
+
+- Pull the dataset into a new folder, add or change images and their label files, and run
+  `kaosctl layout validate ./dataset-spacecraft --layout yolo`.
+- `push` makes the dataset equal to the folder. An image or a label file you delete from the folder is removed from the dataset.
+  Keep each image and its `.txt` file together.
+- Merge the pull request, then release a version if a run should read these files by a fixed name
+  ([Release a dataset version](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/release-a-version.html)); pick it as the `dataset` on the run form.
+- A run that has started keeps the version it started with.
+
 ## The dataset the pipeline writes
 
 The first step that touches your data, `prepare-data`, writes it again as the dataset `dataset-<your app>-prepared`
