@@ -1,5 +1,5 @@
-"""model-training sizes its DataLoader workers by the cores this step may use (kubecore-operator
-PRD-HPC-1609): on a shared Slurm node that is its slot, not the whole node os.cpu_count() sees."""
+"""model-training sizes its DataLoader workers by the cores this step may use:
+on a shared HPC (Slurm) node that is its slot, not the whole node os.cpu_count() sees."""
 from conftest import import_in
 
 

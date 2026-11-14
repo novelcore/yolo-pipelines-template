@@ -31,7 +31,7 @@ What describes this pipeline, in `docs/`; edit it as the pipeline changes:
 | [`docs/the-pipeline.md`](docs/the-pipeline.md) | the six steps, what each reads and writes, and what is kept when a step is run again |
 | [`docs/parameters.md`](docs/parameters.md) | every field of the run form with its default and bounds. Generated from `config/` by `python scripts/gen-parameters.py`; a test fails when it is out of date |
 | [`docs/datasets.md`](docs/datasets.md) | the folder shape the pipeline reads, and the dataset it writes |
-| [`docs/slurm.md`](docs/slurm.md) | what to know about the training step on a Slurm (HPC) site |
+| [`docs/slurm.md`](docs/slurm.md) | what to know about the training step on an HPC (Slurm) site |
 
 ## Run it on your machine
 

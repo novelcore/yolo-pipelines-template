@@ -789,7 +789,7 @@ class TrainingService:
     def _cap_workers(workers: int) -> int:
         """DataLoader workers within this step's cores, one left for the training process.
 
-        On a shared Slurm node (kubecore-operator PRD-HPC-1609) the step owns one slot's cores,
+        On a shared HPC (Slurm) node the step owns one slot's cores,
         but ``os.cpu_count()``, which yolo sizes by, still counts every core of the node.
         kaos-lib's ``runtime.usable_cpus()`` is the slot's cores, else the CPU binding. 0 (single-process
         loading) stays 0.

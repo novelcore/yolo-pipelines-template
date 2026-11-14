@@ -27,7 +27,7 @@ with pipeline("ml-pipeline") as p:
     prepare = step("prepare-data", kind="transform", needs=[validate], reads=["data"], inputs=["dataset"],
                    produces=[dataset("prepared")])
     # walltime: the default time limit of the step, here 12h. The person who starts a run sets the limit on the run
-    # form (`model-training-walltime`); this value is what the form starts with. Nothing else to declare for long trainings: the
+    # form (`model-training-walltime`); this value is what the run form starts with. Nothing else to declare for long trainings: the
     # platform runs a step lost with its machine again and continues it from the checkpoints Ultralytics writes.
     train = step("model-training", kind="train", gpu=True, needs=[prepare], walltime="12h",
                  reads=["experiment", "model", "train", "image_processing", "logging"],

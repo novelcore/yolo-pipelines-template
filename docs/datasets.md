@@ -45,7 +45,7 @@ insist on them.
 
 ## A sample to start with
 
-A new project has no labelled images, so a run that keeps the form's defaults trains on a small sample the pipeline makes
+A new project has no labelled images, so a run that keeps the run form's defaults trains on a small sample the pipeline makes
 itself: 16 training and 4 validation pictures of 160 pixels, each a flat colour with one lighter rectangle. The label of a
 picture is exact: the box is the rectangle and the four keypoints are its corners. The sample is written as the prepared
 dataset of that run (with a `README.md` that says what it is), so the run is green from the first step to the last. It

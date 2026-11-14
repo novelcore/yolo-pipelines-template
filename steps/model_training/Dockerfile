@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Dependency install — poetry NEVER touches the runtime python.
-# History (kubecore-operator#1008 thread): installing poetry into system
+# History: installing poetry into system
 # site-packages let poetry's own requests/charset-normalizer stack collide
 # with the locked versions — orphaned compiled extensions survived every
 # repair attempt and resurfaced on cold (cache-less) builds as
@@ -32,7 +32,7 @@ RUN /opt/poetry/bin/poetry export --only=main -f requirements.txt --output /tmp/
  && rm -rf /opt/poetry /tmp/requirements.txt \
  && python -c "from charset_normalizer import md; import requests"
 
-# kaos-lib, the platform library (datasets, run outputs; formerly the kubecore package), from
+# kaos-lib, the platform library (datasets, run outputs), from
 # github.com/kaos-io/kaos-lib. The platform's CI passes KAOS_LIB_PACKAGE, the WHOLE pip requirement (the
 # platform registry's wheel); the default is this template's pin. Only app/ is copied into the image.
 # Default for a local build: kaos-lib 0.5.0. The platform's CI overrides it with --build-arg KAOS_LIB_PACKAGE.
