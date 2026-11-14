@@ -27,12 +27,14 @@ with pipeline("ml-pipeline") as p:
     prepare = step("prepare-data", kind="transform", needs=[validate], reads=["data"], inputs=["dataset"],
                    produces=[dataset("prepared")])
     # walltime: the default time limit of the step, here 12h. The person who starts a run sets the limit on the run
-    # form (`model-training-walltime`); this value is what the run form starts with. Nothing else to declare for long trainings: the
-    # platform runs a step lost with its machine again and continues it from the checkpoints Ultralytics writes.
-    train = step("model-training", kind="train", gpu=True, needs=[prepare], walltime="12h",
+    # form (`model-training-walltime`); this value is what the run form starts with.
+    # resumable=True: a training is stopped and started again (a lost machine, the time limit), so it continues from
+    # the checkpoints Ultralytics writes. On HPC (Slurm) a limit above 11 h 30 is refused without it.
+    train = step("model-training", kind="train", gpu=True, needs=[prepare], walltime="12h", resumable=True,
                  reads=["experiment", "model", "train", "image_processing", "logging"],
                  produces=[model("checkpoints")])
-    qat = step("qat-finetune", kind="train", gpu=True, needs=[prepare, train],
+    # The fine-tune saves its state at the end of each epoch and continues from it (app/services/qat_resume.py).
+    qat = step("qat-finetune", kind="train", gpu=True, needs=[prepare, train], resumable=True,
                reads=["train", "quantization"],
                when="quantization-mode == qat",
                produces=[model("qat")])
