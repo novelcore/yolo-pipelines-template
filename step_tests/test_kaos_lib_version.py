@@ -3,7 +3,6 @@
 The platform picks the version: CI passes --build-arg KAOS_LIB_PACKAGE=<spec> to every step image that declares the
 ARG, only inside the range in .kaos/compat.yaml.
 """
-import re
 from importlib.metadata import version
 
 import pytest
@@ -12,22 +11,21 @@ from conftest import ROOT
 from packaging.specifiers import SpecifierSet
 
 STEPS = sorted(p.parent.name for p in (ROOT / "steps").glob("*/Dockerfile"))
-# The ARG holds the whole requirement: name[extras] then ==X.Y.Z or " @ <url>".
-SPEC_RE = re.compile(r'^ARG KAOS_LIB_PACKAGE="([A-Za-z0-9._-]+(?:\[[A-Za-z0-9,._-]+\])?(?: ?==\S+| @ https://\S+))"$', re.M)
+# The image has no default: the platform's build, `kaosctl step run` and `kaosctl dev` pass the requirement.
+FAIL = "pass --build-arg KAOS_LIB_PACKAGE, or use kaosctl step run / kaosctl dev, which take your platform's choice"
+EMPTY_ARG = 'ARG KAOS_LIB_PACKAGE=""'
 
 
 @pytest.mark.parametrize("step", STEPS)
 def test_every_step_takes_the_platform_spec(step):
     text = (ROOT / "steps" / step / "Dockerfile").read_text()
-    assert SPEC_RE.search(text), "ARG KAOS_LIB_PACKAGE with a ==X.Y.Z or @ <url> default"
-    assert 'RUN pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"' in text
-    assert SPEC_RE.search(text).group(1).startswith("kaos-lib[zitadel] @ "), "the default names the package and its extras"
+    assert EMPTY_ARG in text.splitlines(), "ARG KAOS_LIB_PACKAGE has no default"
+    install = 'RUN pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"'
+    assert install in text
+    guard = text.index("RUN test -n \"${KAOS_LIB_PACKAGE}\"")
+    assert guard < text.index(install), "the check comes before the install"
+    assert FAIL in text[guard:text.index(install)], "an empty value must fail with a clear message"
     assert "--params" not in text, "a step image runs `python -m app.entry` with no arguments"
-
-
-def test_every_step_installs_the_same_default():
-    specs = {SPEC_RE.search((ROOT / "steps" / s / "Dockerfile").read_text()).group(1) for s in STEPS}
-    assert len(specs) == 1, specs
 
 
 def test_quantization_installs_the_package_after_the_export_toolchain():

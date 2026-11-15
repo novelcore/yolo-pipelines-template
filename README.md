@@ -35,16 +35,16 @@ What describes this pipeline, in `docs/`; edit it as the pipeline changes:
 
 ## Run it on your machine
 
-Install kaos-lib at the version the step images use, then run the step tests, which run the steps the way the platform does:
+Install `kaosctl` with pip from your platform's package index. Your platform admin, or the console of your platform, gives you the index and the version to install. To move to a newer version later, run `kaosctl upgrade`. Then run the step tests, which run the steps the way the platform does:
 
 ```bash
-pip install "$(sed -n 's/^ARG KAOS_LIB_PACKAGE="\(.*\)"$/\1/p' steps/*/Dockerfile | head -1)" pytest pillow pydantic psutil "mlflow>=3,<4" && python -m pytest
+pip install pytest pillow pydantic psutil "mlflow>=3,<4" && python -m pytest
 ```
 
-To run one step by hand, use [`kaosctl step run`](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/try-it-locally.html#run-steps-the-way-the-platform-does).
+To run one step by hand, use `kaosctl step run` (guide page: try-it-locally).
 
 ## The guide
 
-[Run it](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/run-it.html) explains every idea this pipeline uses, one
-page at a time. [A real pipeline](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/a-real-pipeline.html) reads this
+The guide page run-it explains every idea this pipeline uses, one
+page at a time. The guide page a-real-pipeline reads this
 pipeline's `pipeline.py` with what the first ten pages teach.

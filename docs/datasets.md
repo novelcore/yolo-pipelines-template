@@ -1,8 +1,8 @@
 # Datasets
 
 The pipeline reads one dataset and writes one. Datasets, versions and the form field that picks one are explained in the
-guide: [Read data](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/read-data.html) and [Produce a dataset](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/produce-a-dataset.html). The commands are in its
-[Reference](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/reference.html#commands).
+guide: Read data (guide page: read-data) and Produce a dataset (guide page: produce-a-dataset). The commands are in its
+Reference (guide page: reference).
 
 ## The folder shape the pipeline reads
 
@@ -68,19 +68,19 @@ kaosctl dataset push ./dataset-spacecraft dataset-spacecraft -m "first 200 label
 ```
 
 `validate` lists every problem at once and exits with code 2, for example `images/val/a.jpg has no labels/val/a.txt`.
-`push` opens a pull request into the dataset; merge it ([Run it](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/run-it.html#put-a-few-files-in-a-dataset)), then
+`push` opens a pull request into the dataset; merge it (guide page: run-it), then
 release a version with `kaosctl dataset release dataset-spacecraft`. Several classes: `--classes a,b,c`, the first is id 0.
 
 ## Add or change images
 
-The steps are in the guide: [Add or change data](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/add-or-change-data.html). For this pipeline:
+The steps are in the guide: Add or change data (guide page: add-or-change-data). For this pipeline:
 
 - Pull the dataset into a new folder, add or change images and their label files, and run
   `kaosctl layout validate ./dataset-spacecraft --layout yolo`.
 - `push` makes the dataset equal to the folder. An image or a label file you delete from the folder is removed from the dataset.
   Keep each image and its `.txt` file together.
 - Merge the pull request, then release a version if a run should read these files by a fixed name
-  ([Release a dataset version](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/release-a-version.html)); pick it as the `dataset` on the run form.
+  (guide page: release-a-version); pick it as the `dataset` on the run form.
 - A run that has started keeps the version it started with.
 
 ## The dataset the pipeline writes
@@ -90,4 +90,4 @@ The first step that touches your data, `prepare-data`, writes it again as the da
 when you set `data-sample_size` ([What the pipeline does](the-pipeline.md#prepare-data-the-first-step-writes-a-dataset)).
 You can read it and pick a version, never push to it. Training reads exactly the version of the run that wrote it. To train a
 later run on a prepared version, pick `dataset-<your app>-prepared@<version>` as the `dataset`. Which version the name `latest`
-points to is explained in [Move `latest`](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/flow-datasets.html#move-latest).
+points to is explained in Move `latest` (guide page: flow-datasets).

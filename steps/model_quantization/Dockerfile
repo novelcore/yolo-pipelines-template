@@ -62,10 +62,11 @@ print('tensorflow', tensorflow.__version__, '| export toolchain import OK')"
 # kaos-lib, the platform library (datasets, run outputs), from
 # github.com/kaos-io/kaos-lib. The PLATFORM picks it: the CI passes --build-arg
 # KAOS_LIB_PACKAGE=<requirement> on every build, inside the range in .kaos/compat.yaml. The value is the whole pip requirement (name, extras, version or
-# URL); this default is only for a build on your computer. Installed last, so a new version
+# URL); there is no default: a build on your computer passes it, or use `kaosctl step run` / `kaosctl dev`. Installed last, so a new version
 # reuses the cached TensorFlow layers above.
-# Default for a local build: kaos-lib 0.5.0. The platform's CI overrides it with --build-arg KAOS_LIB_PACKAGE.
-ARG KAOS_LIB_PACKAGE="kaos-lib[zitadel] @ https://europe-west1-python.pkg.dev/kaos-dev-511509/kaos-lib-rc/kaos-lib/kaos_lib-0.5.0rc1-py3-none-any.whl#sha256=8c4977c0a49c0b8fa749d46f2c40735bc7c25786ff3c6f71bfaa56b87940b989"
+# No default: a local build passes --build-arg KAOS_LIB_PACKAGE, or use `kaosctl step run` / `kaosctl dev`.
+ARG KAOS_LIB_PACKAGE=""
+RUN test -n "${KAOS_LIB_PACKAGE}" || { echo "pass --build-arg KAOS_LIB_PACKAGE, or use kaosctl step run / kaosctl dev, which take your platform's choice" >&2; exit 1; }
 RUN pip install --no-cache-dir "${KAOS_LIB_PACKAGE}"
 
 ENTRYPOINT ["python", "-m", "app.entry"]

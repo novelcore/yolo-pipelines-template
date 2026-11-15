@@ -1,5 +1,6 @@
 """prepare-data: the run's dataset, or a reproducible subset of it, as the dataset `prepared` (PRD kaos#1911 X-5)."""
 import shutil
+import sys
 
 import pytest
 import yaml
@@ -107,8 +108,8 @@ def test_kaosctl_step_run_prepares_the_dataset_and_training_finds_it(tmp_path, d
     for name in ("prepare_data", "model_training"):  # a copy: `kaosctl step run` makes a Python environment in the step's folder
         shutil.copytree(ROOT / "steps" / name, app / "steps" / name, ignore=shutil.ignore_patterns("__pycache__", ".venv"))
     (app / "pipeline.py").write_text((ROOT / "pipeline.py").read_text())
-    code = cli.main(["step", "run", "prepare-data", str(app), "--params-file", str(params), "--input",
-                     f"dataset={dataset}"])
+    code = cli.main(["step", "run", "prepare-data", str(app), "--params-file", str(params), "--python", sys.executable,
+                     "--input", f"dataset={dataset}"])
     assert code == 0
     prepared = app / ".kaos" / "local" / "staged" / "prepared"
     assert len(images(prepared, "train")) == 2 and (prepared / "data.yaml").is_file()
