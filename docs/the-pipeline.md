@@ -17,7 +17,7 @@ prepares the data, trains a model and registers it. That is the simple path.
 ## `prepare-data`: the first step writes a dataset
 
 `prepare-data` is the step that writes the dataset every later step reads
-([Produce a dataset](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/produce-a-dataset.html) explains how a step does that).
+(Produce a dataset (guide page: produce-a-dataset) explains how a step does that).
 
 - **Without `data-sample_size`** (the default) it keeps every file of your dataset, unchanged.
 - **With `data-sample_size` = `50`** it keeps 50 images of each split (`train`, `val`, `test`) and their labels, to try a run
@@ -38,7 +38,7 @@ prepares the data, trains a model and registers it. That is the simple path.
 ## When a step is run again
 
 A step whose machine is lost, or whose time limit is reached, is run again and continues from its checkpoint
-([Long jobs](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/long-jobs.html)). What each step of this pipeline keeps:
+(guide page: long-jobs). What each step of this pipeline keeps:
 
 | step | kept | when it is run again |
 |---|---|---|
@@ -53,7 +53,7 @@ A step whose machine is lost, or whose time limit is reached, is run again and c
 
 - **Weights and exports:** the files of the run, in the folder `checkpoints/<experiment>/<run>/` (`best.pt`,
   `last.pt`). The INT8 model is in `quantization/<experiment>/<run>/`, and, for `qat`, the model `qat-finetune` made is in
-  `qat/<experiment>/<run>/`. [See your results](https://storage.googleapis.com/kaos-dev-511509-kaos-lib/docs/see-your-results.html#the-files-of-a-run) shows how to download them.
+  `qat/<experiment>/<run>/`. See your results (guide page: see-your-results) shows how to download them.
 - **The prepared data:** the dataset `dataset-<your app>-prepared` ([Datasets](datasets.md)).
 - **Metrics, parameters, plots:** the project's MLflow, in the experiment `<your app>.<experiment-name>`, or `<your app>`
   when `experiment-name` is empty. The project's MLflow accepts an experiment or a registered model only under a name that

@@ -1,12 +1,10 @@
 # step_tests/ - tests of the step code
 
 The steps import **kaos-lib** (`kaos_lib`), the platform library from
-[kaos-io/kaos-lib](https://github.com/kaos-io/kaos-lib). Install the version the step images pin
-(`KAOS_LIB_PACKAGE` in the step Dockerfiles), then run:
+[kaos-io/kaos-lib](https://github.com/kaos-io/kaos-lib). Install `kaosctl` with pip from your platform's package index. Your platform admin, or the console of your platform, gives you the index and the version to install. To move to a newer version later, run `kaosctl upgrade`. Then run:
 
 ```bash
-pip install "$(sed -n 's/^ARG KAOS_LIB_PACKAGE="\(.*\)"$/\1/p' steps/*/Dockerfile | head -1)" \
-    pytest pillow pydantic psutil "mlflow>=3,<4"
+pip install pytest pillow pydantic psutil "mlflow>=3,<4"
 python -m pytest
 ```
 
