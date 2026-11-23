@@ -15,7 +15,7 @@ python = ">=3.12,<=3.14"
 pydantic = "^2.11.5"
 ultralytics = ">=8.2"
 mlflow = ">=3.0,<4"
-# MLflow auth: the `zitadel` request-auth provider ships with kaos-lib[mlflow], the package the Dockerfile installs.
+# MLflow auth: the `zitadel` request-auth provider ships with kaos-lib, the package the Dockerfile installs (the MLflow client is one of its dependencies).
 numpy = ">=1.24"
 pillow = ">=10.0"
 ai-edge-litert = ">=1.0"
