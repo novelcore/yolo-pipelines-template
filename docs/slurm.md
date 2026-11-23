@@ -1,11 +1,12 @@
 # Run on HPC (Slurm)
 
-Training can run on an HPC (Slurm) site when your project is connected to one. Where a step runs, the time limit, the queue and
+Training can run on an HPC (Slurm) site when your project is connected to one. Where a step runs, the queue and
 the reasons a job waits are explained in the guide: HPC (Slurm) (guide page: hpc). This page holds what is specific to yolo.
 
 - **Pick the class for training only.** On the run form, set `model-training-class` to one of the Slurm classes and submit.
   The other steps stay where they are.
-- **The time limit starts at 11 hours.** `walltime="11h"` on `model-training` in `pipeline.py` is the default of the run-form field `model-training-walltime`. Whoever starts a run can write another value there for that run; change `walltime=` in `pipeline.py` to change the default for every run. **Today a limit above 11 hours 30 minutes is refused on an HPC (Slurm) class unless the step declares `resumable=`, so keep that field at `11h` or less for a run on HPC; the default is chosen to fit** (guide page: contract).
+- **There is no time to set.** The platform sets the time of every job. A training longer than one job on the site is
+  stopped shortly before the job's end, after a last save, and continued in the next job (guide page: long-jobs).
 - **Training continues after an interruption.** It writes `last.pt` and `best.pt` into the checkpoint folder, so a job that
   loses its node, or one that reaches its limit when a checkpoint copy exists, is continued from the last epoch with the same total number of epochs and in the same MLflow
   run (guide page: long-jobs).
