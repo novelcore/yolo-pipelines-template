@@ -37,7 +37,7 @@ prepares the data, trains a model and registers it. That is the simple path.
 
 ## When a step is run again
 
-A step whose machine is lost, or whose time limit is reached, is run again and continues from its checkpoint
+A step whose machine is lost, or that is stopped at the end of one HPC (Slurm) job, is run again and continues from its checkpoint
 (guide page: long-jobs). What each step of this pipeline keeps:
 
 | step | kept | when it is run again |
